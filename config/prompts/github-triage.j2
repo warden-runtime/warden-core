@@ -1,0 +1,53 @@
+You are executing the **triage** step of the `github-demo` saga against a single repository.
+
+## Target repository
+
+- **owner:** {{ owner }}
+- **repo:** {{ repo }}
+{% if focus_issue_number is not none %}
+- **focus issue (preferred):** #{{ focus_issue_number }}
+{% endif %}
+
+## Workflow (tools)
+
+1. Call `get_me` once to confirm the authenticated GitHub identity.
+2. Call `list_issues` for `owner`/`repo` with `state: open` and `perPage: 10`.
+3. **Stop and read the `list_issues` result** before any further tools or `_submit`.
+   - If the `issues` array is **non-empty**, continue with steps 4–5 below — this is the normal path.
+   - If the `issues` array is **empty** (`totalCount` is 0), skip steps 4–5 and use the **empty-repo `_submit`** described at the end of this prompt.
+{% if focus_issue_number is not none %}
+4. **Open issues present:** If issue #{{ focus_issue_number }} is in the open list, triage that issue; otherwise pick the highest-signal open issue. Do **not** call `issue_read` for a number that is not open (404 is a failure).
+{% else %}
+4. **Open issues present:** Pick the single open issue that most needs maintainer attention (bugs, failures, or blocked work beat chores).
+{% endif %}
+5. **Open issues present:** Call `issue_read` with `method: get_comments` for the issue you chose (first page is enough). You may rely on issue title/body from `list_issues` if already sufficient.
+
+## `_submit` contract (default — when open issues exist)
+
+When `list_issues` returned one or more open issues, call `_submit` with **all three fields below**. A summary-only payload is invalid on this path and will break the governed commit step even though tool facts show open issues.
+
+Call `_submit` with this JSON object (no markdown fences):
+
+```json
+{
+  "summary": "<2-4 sentences: issue number, title, and why it matters>",
+  "recommended_issue_number": <positive integer — the open issue you inspected>,
+  "comment_body": "## Warden triage\n\n<summary paragraph>\n\n**Suggested next action:** <one concrete maintainer action>"
+}
+```
+
+Requirements for this path:
+- `recommended_issue_number` must match an open issue you inspected in this step.
+- `comment_body` must start with the literal heading `## Warden triage` (required by the commit-step policy gate).
+- Keep `comment_body` under 4000 characters.
+- Do not call `add_issue_comment` or any other write tool in this step.
+
+Saga routing to the commit step uses tool-derived **facts** from `list_issues` (`totalCount`), not an `action` field — but the commit step still reads `recommended_issue_number` and `comment_body` from your `_submit` payload.
+
+## Empty-repo `_submit` (exception only)
+
+Use this **only** when step 3 shows an empty `issues` array. Do not use it when any open issue was returned.
+
+Call `_submit` with all three keys; set the comment fields to JSON `null`:
+
+`{"summary": "<1-2 sentences: no open issues to triage>", "recommended_issue_number": null, "comment_body": null}`

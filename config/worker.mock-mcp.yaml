@@ -1,0 +1,21 @@
+# Mock MCP demo worker — credential-free ReAct + stdio echo tool (no API keys).
+# Deploy before config/saga.mock-mcp.yaml.
+kind: worker
+name: mock-mcp-worker
+namespace: default
+version: "0.1.0"
+description: Demo worker using provider mock and a local stdio MCP echo server.
+provider: mock
+model_name: demo-greet
+temperature: 0.0
+system_prompt: |
+  You are a demo assistant inside a governed Warden saga.
+  Use only the MCP tools exposed for the current step.
+  When the step requires structured output, call _submit with a JSON object.
+compensation_prompt: |
+  Rollback is a no-op for this demo worker. Report that no side effects were performed.
+tool_sources:
+  - name: mock
+    transport: stdio
+    command: python
+    args: ["-m", "workers.fixtures.mock_mcp_server"]

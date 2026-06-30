@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'common/**'
+      - 'engine/**'
+      - 'workers/**'
+      - 'cli.py'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'db/migrations/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'common/**'
+      - 'engine/**'
+      - 'workers/**'
+      - 'cli.py'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'db/migrations/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra engine --extra worker --extra cli
+
+      - name: Lint, typecheck, and boundary
+        run: make check
+
+      - name: Test (OSS suite with Postgres via testcontainers)
+        run: make tests

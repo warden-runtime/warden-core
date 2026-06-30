@@ -1,0 +1,69 @@
+name: Bug report
+description: Something is broken in the kernel, CLI, worker, or docs
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For **security vulnerabilities**, email [security@warden-runtime.org](mailto:security@warden-runtime.org) or use a [private security advisory](https://github.com/warden-runtime/warden-core/security/advisories/new) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect vs what you saw?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands, manifest snippets, or demo page you followed
+      placeholder: |
+        1. make up
+        2. warden deploy ...
+        3. warden saga start ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: e.g. 0.1.0 or abc1234
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Engine / API
+        - Worker / MCP
+        - CLI
+        - Manifests / policy / compensation
+        - Documentation / website
+        - Compose / local deploy
+        - Enterprise plugin
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error output
+      description: Paste relevant engine/worker logs or CLI `--json` output
+      render: shell
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of conduct
+      options:
+        - label: I agree to follow the project's Code of Conduct
+          required: true

@@ -1,0 +1,12 @@
+# Cyclomatic complexity grade C blocks intentionally deferred (FSM hot path, LangChain adapter).
+# One block name per line; matched against xenon error output.
+handle_hitl_approved
+trigger_compensation
+process_saga_event
+handle_step_completed
+trigger_step
+_apply_step_failure_lifecycle
+_create_saga_and_steps
+run_step
+run_commit
+LangChainAdapter

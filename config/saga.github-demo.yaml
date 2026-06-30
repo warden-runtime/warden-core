@@ -1,0 +1,60 @@
+# GitHub MCP demo saga — read-only triage then governed issue comment (HITL).
+# Requires: config/worker.github-demo.yaml, config/policies/github-issue-comment.yaml,
+# PROMPTS_ROOT=./config/prompts, POLICIES_ROOT=./config/policies, SCHEMAS_ROOT=./config/schemas,
+# COMPENSATIONS_ROOT=./config/compensations,
+# GITHUB_PERSONAL_ACCESS_TOKEN.
+kind: saga
+name: github-demo
+namespace: default
+version: "0.1.0"
+description: Triage open issues (reason + GitHub MCP); post a governed comment when there is work, or complete cleanly when the repo has no open issues.
+steps:
+  - id: triage
+    name: Triage open issues
+    kind: reason
+    worker: github-demo-worker
+    worker_version: "0.1.0"
+    prompt: github-triage.j2
+    with:
+      owner:
+        from: $.input.owner
+      repo:
+        from: $.input.repo
+      focus_issue_number:
+        from: $.input.issue_number
+    tools:
+      allow:
+        - name: get_me
+        - name: list_issues
+        - name: issue_read
+    output_schema: github-triage-output.json
+    facts:
+      - tool: list_issues
+        into: triage_metrics
+        fields:
+          total_count: "$.totalCount"
+    timeout_seconds: 600
+    max_turns: 15
+
+  - id: post-comment
+    name: Post triage comment
+    kind: commit
+    worker: github-demo-worker
+    worker_version: "0.1.0"
+    when:
+      cel: "has(steps.triage.facts.triage_metrics) && steps.triage.facts.triage_metrics.total_count > 0"
+    policy: github-issue-comment.yaml
+    hitl: true
+    with:
+      owner:
+        from: $.input.owner
+      repo:
+        from: $.input.repo
+      issue_number:
+        from: $.steps.triage.output.data.recommended_issue_number
+      body:
+        from: $.steps.triage.output.data.comment_body
+    tools:
+      allow:
+        - name: add_issue_comment
+    timeout_seconds: 300

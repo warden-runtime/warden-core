@@ -1,0 +1,65 @@
+.DS_Store
+.idea
+*.log
+tmp/
+
+*.py[cod]
+*.egg
+build
+htmlcov
+
+db/engine_data/*
+db/engine_data/
+*sqlite*
+
+**/__pycache__/
+*.pyc
+
+# --- Testing & Linting ---
+.pytest_cache/
+.pip-audit-cache/
+.semgrep-cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# --- Environment & Secrets ---
+.env
+.env.local
+*.env.local
+
+# --- Local / internal (not for public tree) ---
+# Concat review bundles from scripts/concat_docs.sh
+/*_full.md
+/warden-core-full.md
+/base-prompt.md
+/base_audit_prompt.md
+/technical-writer-prompt.md
+/rewriter.md
+/RECOVERY_PLAN.md
+example_docs-review.yaml
+warden-walkthrough/
+
+# --- Python packaging ---
+.venv/
+venv/
+*.egg-info/
+dist/
+*.sqlite
+*.db
+
+sandbox
+
+# --- Cursor (local IDE config) ---
+.cursor/
+.cursorrules
+
+# --- Docusaurus (website/)
+website/node_modules/
+website/.docusaurus/
+website/build/
+
+# Generated OpenAPI reference MDX (run `make docs-api`)
+docs/api/

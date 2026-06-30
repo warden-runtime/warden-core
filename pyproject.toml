@@ -1,0 +1,143 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "warden"
+version = "0.1.0"
+description = "Governance framework for agentic AI workflows (sagas, workers, MCP)."
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "The Warden Authors" }]
+dependencies = [
+    "pydantic>=2.12",
+    "pydantic-settings>=2.12",
+    "tortoise-orm>=0.25",
+    "asyncpg>=0.31",
+    "watchfiles>=1.1",
+    "opentelemetry-api>=1.39",
+    "opentelemetry-sdk>=1.39",
+    "opentelemetry-exporter-otlp>=1.39",
+    "opentelemetry-instrumentation>=0.60b1",
+    "opentelemetry-instrumentation-logging>=0.60b1",
+    "jsonschema>=4.26",
+]
+
+[project.optional-dependencies]
+engine = [
+    "fastapi>=0.136",
+    "python-multipart>=0.0.29",
+    "uvicorn[standard]>=0.40",
+    "opentelemetry-instrumentation-fastapi>=0.60b1",
+    "jsonpath-ng>=1.8",
+    "pyyaml>=6.0",
+    "cel-python>=0.5.0",
+]
+worker = [
+    "jinja2>=3.1",
+    "httpx>=0.28",
+    "langchain>=1.2",
+    "langchain-openai>=1.2",
+    "langchain-core>=1.4",
+    "jsonpath-ng>=1.8",
+    "mcp>=1.26",
+    "opentelemetry-instrumentation-httpx>=0.60b1",
+]
+cli = [
+    "typer>=0.21",
+    "httpx>=0.28",
+]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3",
+    "pytest-mock>=3.15",
+    "testcontainers[postgres]>=4.9",
+    "coverage>=7.13",
+    "factory_boy>=3.3",
+    "faker>=38.2",
+    "httpx2>=2.0",
+    "ruff>=0.8",
+    "radon>=6.0",
+    "xenon>=0.9",
+    "pip-audit>=2.7",
+    "semgrep>=1.60",
+    "pyright>=1.1",
+]
+
+[project.scripts]
+warden = "cli:main"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["common*", "engine*", "workers*"]
+
+[tool.setuptools]
+py-modules = ["cli"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = [
+    "common",
+    "engine",
+    "workers",
+    "cli.py",
+    "tests",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ASYNC",  # flake8-async (blocking calls in async handlers)
+    "PLE",    # pylint errors
+    "G",      # flake8-logging-format (lazy % formatting, logger.exception)
+    "TCH",    # flake8-type-checking (TYPE_CHECKING-only imports)
+    "S",      # flake8-bandit (security; replaces standalone bandit)
+]
+ignore = [
+    "E501",  # line length handled by formatter
+    "S104",  # engine binds 0.0.0.0 in containers by default (configurable)
+    "S608",  # audited: enum/constant SQL fragment in raw queries
+    "S701",  # audited: non-HTML Jinja prompts (workers/utils.py)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: engine+worker+DB wiring tests (mock adapter; no network)",
+    "postgres: requires PostgreSQL (Docker testcontainers or WARDEN_TEST_POSTGRES_URL)",
+    "schema_migration: manages Postgres schema directly; skips table truncate",
+]
+filterwarnings = [
+    "ignore:Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater:UserWarning",
+]
+
+[tool.coverage.run]
+source = ["common", "engine", "workers"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "def __repr__"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+include = ["common", "engine", "workers", "cli.py"]
+exclude = ["**/tests"]
+typeCheckingMode = "standard"
+reportIncompatibleVariableOverride = false
+reportMissingTypeStubs = false
+reportPrivateImportUsage = false
+

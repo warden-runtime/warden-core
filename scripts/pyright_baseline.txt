@@ -1,0 +1,1 @@
+# Pyright baseline fingerprints (file:rule). One line per error; duplicates allowed.

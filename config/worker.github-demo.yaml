@@ -1,0 +1,34 @@
+# GitHub MCP demo worker — Compose worker spawns github-mcp-server via Docker socket (stdio).
+# Deploy before config/saga.github-demo.yaml.
+kind: worker
+name: github-demo-worker
+namespace: default
+version: "0.1.0"
+description: Read-only GitHub introspection and governed issue comments via official github-mcp-server.
+# LLM: openai needs OPENAI_API_KEY; for Ollama use provider: local + WARDEN_LOCAL_LLM_BASE_URL (no API key).
+provider: openai
+model_name: gpt-4o-mini
+temperature: 0.0
+system_prompt: |
+  You are a GitHub triage assistant operating inside a governed Warden saga.
+  Use only the MCP tools exposed for the current step. Never invent repository data.
+  When the step requires structured output, call _submit with a JSON object matching the prompt.
+  For write steps you do not run; the engine schedules deterministic commit tooling separately.
+compensation_prompt: |
+  Rollback is a no-op for this demo worker. Report that no GitHub write was performed.
+tool_sources:
+  - name: github
+    transport: stdio
+    # MCP stdio only forwards a minimal default env; inherit PAT for docker run -e below.
+    env_inherit:
+      - GITHUB_PERSONAL_ACCESS_TOKEN
+    command: docker
+    args:
+      - run
+      - -i
+      - --rm
+      - -e
+      - GITHUB_PERSONAL_ACCESS_TOKEN
+      - -e
+      - GITHUB_TOOLSETS=context,repos,issues
+      - ghcr.io/github/github-mcp-server

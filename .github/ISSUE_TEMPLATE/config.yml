@@ -1,0 +1,14 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://warden-runtime.org/docs/introduction
+    about: Read the engineering manual (concepts, demos, guides)
+  - name: General contact
+    url: mailto:authors@warden-runtime.org
+    about: Questions, feedback, and licensing (not security or conduct reports)
+  - name: Security advisory
+    url: https://github.com/warden-runtime/warden-core/security/advisories/new
+    about: Report a vulnerability privately (or email security@warden-runtime.org)
+  - name: Code of conduct
+    url: mailto:conduct@warden-runtime.org
+    about: Report harassment or community standards violations privately

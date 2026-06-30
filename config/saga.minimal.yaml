@@ -1,0 +1,19 @@
+# Minimal one-step saga for local CLI/API smoke tests.
+# Requires: warden deploy -f config/worker.minimal.yaml (same namespace + worker name).
+kind: saga
+name: minimal-saga
+namespace: default
+version: 0.0.1
+description: One reason step; for deploy / list / start experiments only.
+steps:
+  - id: step1
+    name: step1
+    kind: reason
+    agent-adapter: simple
+    worker: minimal-worker
+    worker_version: "1.0.0"
+    with: {}
+    prompt: noop.j2
+    tools:
+      allow: []
+    timeout_seconds: 300

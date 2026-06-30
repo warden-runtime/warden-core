@@ -1,0 +1,610 @@
+/**
+ * Warden brand theme — Infima overrides.
+ * Palette: mathematically scaled blues + obsidian surfaces (documented in this file).
+ */
+
+:root {
+  /* --- Warden brand tokens --- */
+  --warden-blue: #0084c4;
+  --warden-blue-light: #38b6ff;
+  --warden-blue-dark: #006294;
+  --warden-blue-deep: #004366;
+  --warden-yellow: #ffd500;
+  --warden-surface: #0b0f19;
+  --warden-surface-canvas: #161d2f;
+  /* Light docs surfaces — mirror dark hierarchy (flush sidebar, elevated TOC) */
+  --warden-surface-light-page: #ffffff;
+  --warden-surface-light-sidebar: #f4f7fb;
+  --warden-surface-light-elevated: #ffffff;
+  --warden-surface-light-border: #e2e8f0;
+
+  /* --- Infima light mode --- */
+  --ifm-color-primary: var(--warden-blue);
+  --ifm-color-primary-dark: #0077b0;
+  --ifm-color-primary-darker: #0070a6;
+  --ifm-color-primary-darkest: #005d8a;
+  --ifm-color-primary-light: #1aa2e6;
+  --ifm-color-primary-lighter: #2bb0f5;
+  --ifm-color-primary-lightest: #5cc2f7;
+
+  --ifm-link-color: var(--warden-blue);
+  --ifm-link-hover-color: var(--warden-blue-dark);
+  --ifm-background-color: var(--warden-surface-light-page);
+  --ifm-background-surface-color: var(--warden-surface-light-sidebar);
+  --ifm-navbar-background-color: var(--warden-surface-light-elevated);
+  --ifm-footer-background-color: var(--warden-surface-canvas);
+  --ifm-font-color-base: #334155;
+  --ifm-heading-color: var(--warden-surface);
+  --ifm-code-font-size: 95%;
+  --ifm-menu-color-active: var(--warden-blue);
+  --ifm-menu-color-background-active: rgba(0, 132, 196, 0.08);
+  --ifm-code-background: rgba(0, 132, 196, 0.06);
+  --ifm-code-border-color: rgba(0, 132, 196, 0.14);
+  --docusaurus-highlighted-code-line-bg: rgba(0, 132, 196, 0.08);
+
+  /* Docs article — readable line length (does not affect homepage) */
+  --warden-doc-max-width: 50rem;
+
+  /* Mermaid — light (box labels: near-black on light surfaces) */
+  --warden-mermaid-node-bg: #f8fafc;
+  --warden-mermaid-node-border: #cbd5e1;
+  --warden-mermaid-node-text: #0b0f19;
+  --warden-mermaid-edge: #94a3b8;
+  --warden-mermaid-edge-label: #64748b;
+  --warden-mermaid-cluster-bg: rgba(0, 132, 196, 0.04);
+  --warden-mermaid-alert-fill: rgba(220, 38, 38, 0.08);
+  --warden-mermaid-alert-stroke: #dc2626;
+  --warden-mermaid-success-fill: rgba(0, 132, 196, 0.08);
+  --warden-mermaid-pause-fill: rgba(255, 213, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  /* --- Infima dark mode (bright primary on obsidian canvas) --- */
+  --ifm-color-primary: var(--warden-blue-light);
+  --ifm-color-primary-dark: #18a4f2;
+  --ifm-color-primary-darker: #089bec;
+  --ifm-color-primary-darkest: #0081c9;
+  --ifm-color-primary-light: #58c2ff;
+  --ifm-color-primary-lighter: #68c8ff;
+  --ifm-color-primary-lightest: #98dcff;
+
+  --ifm-link-color: var(--warden-blue-light);
+  --ifm-link-hover-color: #58c2ff;
+  --ifm-background-color: var(--warden-surface);
+  --ifm-background-surface-color: var(--warden-surface-canvas);
+  --ifm-navbar-background-color: var(--warden-surface-canvas);
+  --ifm-footer-background-color: var(--warden-surface-canvas);
+  --ifm-font-color-base: #e2e8f0;
+  --ifm-heading-color: #ffffff;
+  --docusaurus-highlighted-code-line-bg: rgba(56, 182, 255, 0.08);
+
+  /* Sidebar active item + inline code tokens */
+  --ifm-menu-color-active: var(--warden-blue-light);
+  --ifm-menu-color-background-active: rgba(56, 182, 255, 0.1);
+  --ifm-code-background: rgba(56, 182, 255, 0.1);
+  --ifm-code-border-color: rgba(56, 182, 255, 0.15);
+
+  /* Mermaid — dark (box labels: white on obsidian surfaces) */
+  --warden-mermaid-node-bg: var(--warden-surface-canvas);
+  --warden-mermaid-node-border: rgba(56, 182, 255, 0.28);
+  --warden-mermaid-node-text: #ffffff;
+  --warden-mermaid-edge: rgba(56, 182, 255, 0.38);
+  --warden-mermaid-edge-label: #94a3b8;
+  --warden-mermaid-cluster-bg: rgba(56, 182, 255, 0.06);
+  --warden-mermaid-alert-fill: rgba(255, 86, 86, 0.1);
+  --warden-mermaid-alert-stroke: #ff5656;
+  --warden-mermaid-success-fill: rgba(0, 132, 196, 0.1);
+  --warden-mermaid-pause-fill: rgba(255, 213, 0, 0.1);
+}
+
+/* Docs article column — slightly narrower than default full-bleed main area */
+.theme-doc-markdown {
+  max-width: var(--warden-doc-max-width);
+  margin-inline: auto;
+}
+
+.theme-doc-markdown :is(table, pre) {
+  max-width: 100%;
+}
+
+/* Mermaid — layout + Warden brand overrides (docs only) */
+.theme-doc-markdown .docusaurus-mermaid-container {
+  display: flex;
+  justify-content: center;
+  margin-block: 1.5rem;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container > svg {
+  height: auto;
+  max-width: 100%;
+  font-family: var(--ifm-font-family-base);
+}
+
+/* Node surfaces — flowchart (.node) + state diagram (.stateGroup) */
+.theme-doc-markdown .docusaurus-mermaid-container :is(
+    .node rect,
+    .node circle,
+    .node ellipse,
+    .node path,
+    .node polygon,
+    .stateGroup > rect,
+    .stateLabel .box
+  ) {
+  fill: var(--warden-mermaid-node-bg) !important;
+  stroke: var(--warden-mermaid-node-border) !important;
+  stroke-width: 1.5px !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container :is(.node rect, .stateGroup > rect) {
+  rx: 6px;
+  ry: 6px;
+}
+
+/* Box labels — flowchart nodes, cluster titles, endpoint circles (not edge arrows) */
+.theme-doc-markdown .docusaurus-mermaid-container :is(
+    .node .label,
+    .node .nodeLabel,
+    .nodeLabel,
+    .node text,
+    .node text > tspan,
+    .label,
+    .state-title,
+    .state-description,
+    .cluster-label,
+    .cluster .label
+  ) {
+  fill: var(--warden-mermaid-node-text) !important;
+  font-weight: 500;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container .stateLabel text {
+  fill: var(--warden-mermaid-edge-label) !important;
+  font-weight: 400;
+}
+
+/* Edges — flowchart (.edgePath) + state diagram (.transition) */
+.theme-doc-markdown .docusaurus-mermaid-container :is(
+    .edgePath .path,
+    .flowchart-link,
+    .transition
+  ) {
+  stroke: var(--warden-mermaid-edge) !important;
+  stroke-width: 1.5px !important;
+  fill: none !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container .marker {
+  fill: var(--warden-mermaid-edge) !important;
+  stroke: none !important;
+}
+
+/* Flowchart endpoint circles (Start / Goal) */
+.theme-doc-markdown .docusaurus-mermaid-container .node.endpoint circle {
+  fill: transparent !important;
+  stroke: var(--warden-blue) !important;
+  stroke-width: 2px !important;
+}
+
+[data-theme='dark'] .theme-doc-markdown .docusaurus-mermaid-container .node.endpoint circle {
+  stroke: var(--warden-blue-light) !important;
+}
+
+/* Alert / failure nodes */
+.theme-doc-markdown .docusaurus-mermaid-container .node.alertState :is(rect, polygon) {
+  fill: var(--warden-mermaid-alert-fill) !important;
+  stroke: var(--warden-mermaid-alert-stroke) !important;
+}
+
+/* Atomicity trigger (fault entry) */
+.theme-doc-markdown .docusaurus-mermaid-container .node.trigger :is(rect, polygon) {
+  fill: transparent !important;
+  stroke: var(--warden-blue) !important;
+  stroke-width: 2px !important;
+}
+
+[data-theme='dark'] .theme-doc-markdown .docusaurus-mermaid-container .node.trigger :is(rect, polygon) {
+  stroke: var(--warden-blue-light) !important;
+}
+
+/* Clean unwind outcome */
+.theme-doc-markdown .docusaurus-mermaid-container .node.successState :is(rect, polygon) {
+  fill: var(--warden-mermaid-success-fill) !important;
+  stroke: var(--warden-blue) !important;
+  stroke-width: 1.5px !important;
+}
+
+[data-theme='dark'] .theme-doc-markdown .docusaurus-mermaid-container .node.successState :is(rect, polygon) {
+  stroke: var(--warden-blue-light) !important;
+}
+
+/* HITL pause */
+.theme-doc-markdown .docusaurus-mermaid-container .node.pause :is(rect, polygon) {
+  fill: var(--warden-mermaid-pause-fill) !important;
+  stroke: var(--warden-yellow) !important;
+  stroke-width: 1.5px !important;
+}
+
+/* Edge labels — wipe default grey background boxes */
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel,
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel rect,
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel blockquote,
+.theme-doc-markdown .docusaurus-mermaid-container .edge-label-extents rect,
+.theme-doc-markdown .docusaurus-mermaid-container .labelBkg,
+.theme-doc-markdown .docusaurus-mermaid-container div.label foreignObject rect {
+  fill: transparent !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  stroke: none !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel foreignObject,
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel foreignObject > div,
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel span,
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel div {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel,
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel .label,
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel text,
+.theme-doc-markdown .docusaurus-mermaid-container .edgeLabel span {
+  fill: var(--warden-blue) !important;
+  color: var(--warden-blue) !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.025em;
+}
+
+[data-theme='dark'] .theme-doc-markdown .docusaurus-mermaid-container .edgeLabel,
+[data-theme='dark'] .theme-doc-markdown .docusaurus-mermaid-container .edgeLabel .label,
+[data-theme='dark'] .theme-doc-markdown .docusaurus-mermaid-container .edgeLabel text,
+[data-theme='dark'] .theme-doc-markdown .docusaurus-mermaid-container .edgeLabel span {
+  fill: var(--warden-blue-light) !important;
+  color: var(--warden-blue-light) !important;
+}
+
+/* Subgraph / composite wrappers */
+.theme-doc-markdown .docusaurus-mermaid-container .cluster rect {
+  fill: var(--warden-mermaid-cluster-bg) !important;
+  stroke: var(--warden-mermaid-node-border) !important;
+  stroke-width: 1px !important;
+  stroke-dasharray: 4 4;
+  rx: 8px;
+  ry: 8px;
+}
+
+/* Sequence diagrams — scoped via stable Mermaid 11 markers (messageLine0, actor-top).
+   Do not use [class*=…] wildcards; class suffixes are not a public API.
+   Actor labels live on text.actor > tspan (Mermaid injected CSS); message labels too. */
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text {
+  font-family: var(--ifm-font-family-base) !important;
+  font-size: 0.9rem !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text tspan {
+  fill: var(--warden-mermaid-node-text) !important;
+}
+
+.theme-doc-markdown
+  .docusaurus-mermaid-container
+  svg:has(.messageLine0)
+  :is(text.actor, text.actor-box)
+  > tspan {
+  font-weight: 500;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.messageText,
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.messageText > tspan {
+  fill: var(--warden-blue) !important;
+  font-size: 0.8rem !important;
+  font-weight: 500;
+}
+
+[data-theme='dark']
+  .theme-doc-markdown
+  .docusaurus-mermaid-container
+  svg:has(.messageLine0)
+  :is(text.messageText, text.messageText > tspan) {
+  fill: var(--warden-blue-light) !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.labelText,
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.labelText > tspan,
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.loopText,
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.loopText > tspan,
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.noteText,
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.noteText > tspan {
+  fill: var(--warden-mermaid-node-text) !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) rect.actor {
+  fill: var(--warden-mermaid-node-bg) !important;
+  stroke: var(--warden-mermaid-node-border) !important;
+  stroke-width: 1.5px !important;
+  rx: 6px;
+  ry: 6px;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) line.actor-line {
+  stroke: var(--warden-mermaid-edge) !important;
+  stroke-width: 1.5px !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) :is(line.messageLine0, line.messageLine1) {
+  stroke: var(--warden-mermaid-edge) !important;
+  stroke-width: 1.5px !important;
+  fill: none !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) line.loopLine {
+  stroke: var(--warden-mermaid-node-border) !important;
+  stroke-width: 1.5px !important;
+  fill: none !important;
+}
+
+.theme-doc-markdown
+  .docusaurus-mermaid-container
+  svg:has(.messageLine0)
+  :is(rect.activation0, rect.activation1, rect.activation2) {
+  fill: var(--warden-mermaid-success-fill) !important;
+  stroke: var(--warden-blue) !important;
+  stroke-width: 1px !important;
+}
+
+[data-theme='dark']
+  .theme-doc-markdown
+  .docusaurus-mermaid-container
+  svg:has(.messageLine0)
+  :is(rect.activation0, rect.activation1, rect.activation2) {
+  stroke: var(--warden-blue-light) !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) [id$='-sequencenumber'] {
+  fill: var(--warden-blue) !important;
+}
+
+[data-theme='dark']
+  .theme-doc-markdown
+  .docusaurus-mermaid-container
+  svg:has(.messageLine0)
+  [id$='-sequencenumber'] {
+  fill: var(--warden-blue-light) !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) text.sequenceNumber {
+  fill: var(--warden-surface) !important;
+  font-weight: 700;
+  font-size: 11px !important;
+}
+
+[data-theme='dark']
+  .theme-doc-markdown
+  .docusaurus-mermaid-container
+  svg:has(.messageLine0)
+  text.sequenceNumber {
+  fill: #ffffff !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) :is(.note, .note rect) {
+  fill: var(--warden-mermaid-pause-fill) !important;
+  stroke: var(--warden-yellow) !important;
+  stroke-width: 1.5px !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) .labelBox {
+  fill: var(--warden-mermaid-cluster-bg) !important;
+  stroke: var(--warden-mermaid-node-border) !important;
+  stroke-width: 1px !important;
+}
+
+.theme-doc-markdown .docusaurus-mermaid-container svg:has(.messageLine0) :is(marker path, #arrowhead path) {
+  fill: var(--warden-mermaid-edge) !important;
+  stroke: var(--warden-mermaid-edge) !important;
+}
+
+/* Docs layout — flush sidebar, elevated TOC (light + dark) */
+.theme-doc-sidebar-container {
+  background-color: var(--ifm-background-surface-color);
+}
+
+.theme-doc-toc-desktop {
+  background-color: var(--warden-surface-light-elevated);
+  border: 1px solid var(--warden-surface-light-border);
+  border-radius: var(--ifm-global-radius);
+}
+
+[data-theme='dark'] .theme-doc-sidebar-container {
+  background-color: var(--warden-surface);
+}
+
+[data-theme='dark'] .theme-doc-toc-desktop {
+  background-color: var(--warden-surface-canvas);
+  border-color: transparent;
+}
+
+.navbar {
+  border-bottom: 1px solid var(--warden-surface-light-border);
+  box-shadow: none;
+}
+
+[data-theme='dark'] .navbar {
+  border-bottom-color: rgba(56, 182, 255, 0.12);
+}
+
+/* Inline backticks only — preserve Prism colors inside fenced blocks */
+:not(pre) > code {
+  color: var(--warden-blue-dark);
+}
+
+[data-theme='dark'] :not(pre) > code {
+  color: var(--warden-blue-light);
+}
+
+/*
+ * Admonitions in docs — brand tints (light + dark).
+ */
+.theme-doc-markdown .alert--info {
+  --ifm-alert-background-color: rgba(0, 132, 196, 0.08);
+  --ifm-alert-background-color-highlight: rgba(0, 132, 196, 0.14);
+  --ifm-alert-border-color: rgba(0, 132, 196, 0.35);
+  --ifm-alert-foreground-color: #004366;
+}
+
+.theme-doc-markdown .alert--warning {
+  --ifm-alert-background-color: rgba(255, 213, 0, 0.14);
+  --ifm-alert-background-color-highlight: rgba(255, 213, 0, 0.22);
+  --ifm-alert-border-color: rgba(204, 170, 0, 0.45);
+  --ifm-alert-foreground-color: #3d3400;
+}
+
+.theme-doc-markdown .alert--note,
+.theme-doc-markdown .alert--secondary {
+  --ifm-alert-background-color: rgba(100, 116, 139, 0.08);
+  --ifm-alert-background-color-highlight: rgba(100, 116, 139, 0.12);
+  --ifm-alert-border-color: rgba(100, 116, 139, 0.22);
+  --ifm-alert-foreground-color: #334155;
+}
+
+.theme-doc-markdown .alert--tip {
+  --ifm-alert-background-color: rgba(0, 132, 196, 0.08);
+  --ifm-alert-background-color-highlight: rgba(0, 132, 196, 0.14);
+  --ifm-alert-border-color: rgba(0, 132, 196, 0.3);
+  --ifm-alert-foreground-color: #004366;
+}
+
+.theme-doc-markdown .alert--danger {
+  --ifm-alert-background-color: rgba(220, 38, 38, 0.08);
+  --ifm-alert-background-color-highlight: rgba(220, 38, 38, 0.14);
+  --ifm-alert-border-color: rgba(220, 38, 38, 0.35);
+  --ifm-alert-foreground-color: #7f1d1d;
+}
+
+.theme-doc-markdown .alert :not(pre) > code {
+  background-color: var(--ifm-alert-background-color-highlight);
+  border-color: var(--ifm-alert-border-color);
+  color: var(--ifm-alert-foreground-color);
+}
+
+[data-theme='dark'] .theme-doc-markdown .alert--info {
+  --ifm-alert-background-color: rgba(56, 182, 255, 0.14);
+  --ifm-alert-background-color-highlight: rgba(56, 182, 255, 0.22);
+  --ifm-alert-border-color: rgba(56, 182, 255, 0.45);
+  --ifm-alert-foreground-color: #eef6fc;
+}
+
+[data-theme='dark'] .theme-doc-markdown .alert--warning {
+  --ifm-alert-background-color: rgba(255, 213, 0, 0.14);
+  --ifm-alert-background-color-highlight: rgba(255, 213, 0, 0.22);
+  --ifm-alert-border-color: rgba(255, 213, 0, 0.45);
+  --ifm-alert-foreground-color: #fff8e6;
+}
+
+/* Warden yellow — high-visibility callouts (e.g. enterprise availability) */
+.theme-doc-markdown .alert--warden-accent {
+  --ifm-alert-background-color: rgba(255, 213, 0, 0.16);
+  --ifm-alert-background-color-highlight: rgba(255, 213, 0, 0.28);
+  --ifm-alert-border-color: rgba(204, 170, 0, 0.55);
+  --ifm-alert-foreground-color: #2a2400;
+}
+
+[data-theme='dark'] .theme-doc-markdown .alert--warden-accent {
+  --ifm-alert-background-color: rgba(255, 213, 0, 0.22);
+  --ifm-alert-background-color-highlight: rgba(255, 213, 0, 0.32);
+  --ifm-alert-border-color: rgba(255, 213, 0, 0.62);
+  --ifm-alert-foreground-color: #fff8e6;
+}
+
+[data-theme='dark'] .theme-doc-markdown .alert--note,
+[data-theme='dark'] .theme-doc-markdown .alert--secondary {
+  --ifm-alert-background-color: rgba(226, 232, 240, 0.08);
+  --ifm-alert-background-color-highlight: rgba(226, 232, 240, 0.14);
+  --ifm-alert-border-color: rgba(226, 232, 240, 0.22);
+  --ifm-alert-foreground-color: #e2e8f0;
+}
+
+[data-theme='dark'] .theme-doc-markdown .alert--tip {
+  --ifm-alert-background-color: rgba(0, 132, 196, 0.14);
+  --ifm-alert-background-color-highlight: rgba(0, 132, 196, 0.22);
+  --ifm-alert-border-color: rgba(88, 194, 255, 0.4);
+  --ifm-alert-foreground-color: #eef6fc;
+}
+
+[data-theme='dark'] .theme-doc-markdown .alert--danger {
+  --ifm-alert-background-color: rgba(255, 86, 86, 0.14);
+  --ifm-alert-background-color-highlight: rgba(255, 86, 86, 0.22);
+  --ifm-alert-border-color: rgba(255, 120, 120, 0.45);
+  --ifm-alert-foreground-color: #ffe8e8;
+}
+
+[data-theme='dark'] .theme-doc-markdown .alert :not(pre) > code {
+  background-color: var(--ifm-alert-background-color-highlight);
+  border-color: var(--ifm-alert-border-color);
+  color: var(--ifm-alert-foreground-color);
+}
+
+/* Admonition links — do not inherit alert foreground (stays brand blue) */
+.theme-doc-markdown .alert a {
+  color: var(--ifm-link-color);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--ifm-link-color) 40%, transparent);
+}
+
+.theme-doc-markdown .alert a:hover {
+  color: var(--ifm-link-hover-color);
+  text-decoration-color: var(--ifm-link-hover-color);
+}
+
+/* Homepage hero — 135° brand gradient (OG/social card uses same stops) */
+.hero--warden {
+  background: linear-gradient(
+    135deg,
+    var(--warden-blue-dark) 0%,
+    var(--warden-blue) 45%,
+    var(--warden-blue-deep) 100%
+  );
+  color: #ffffff;
+}
+
+.hero--warden .hero__title {
+  color: #ffffff;
+}
+
+.hero--warden .hero__subtitle {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Yellow CTA */
+.button--warden-accent {
+  --ifm-button-background-color: var(--warden-yellow);
+  --ifm-button-border-color: var(--warden-yellow);
+  --ifm-button-color: #0b0f19;
+}
+
+.button--warden-accent:hover {
+  --ifm-button-background-color: #ffe033;
+  --ifm-button-border-color: #ffe033;
+  --ifm-button-color: #0b0f19;
+}
+
+.navbar__logo img {
+  height: 2.25rem;
+}
+
+/* Navbar GitHub icon (className: header-github-link in docusaurus.config.ts) */
+.header-github-link::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%230B0F19' d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E")
+    no-repeat;
+}
+
+html[data-theme='dark'] .header-github-link::before {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23FFFFFF' d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E");
+}
+
+.header-github-link:hover {
+  opacity: 0.72;
+}

@@ -1,0 +1,10 @@
+# Tests use fake secrets and trigger credential/logging rules without runtime risk.
+tests/
+
+.venv/
+.pip-audit-cache/
+.semgrep-cache/
+db/
+website/
+sandbox/
+htmlcov/

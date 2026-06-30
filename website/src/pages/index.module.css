@@ -1,0 +1,107 @@
+.heroBanner {
+  padding: 5rem 0 4.5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 3rem 1.5rem 2.5rem;
+  }
+}
+
+.heroLead {
+  max-width: 42rem;
+  margin: 0 auto 2rem;
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Shared primary + secondary button row (hero and bottom CTA) */
+.ctaActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.buttonGhost {
+  --ifm-button-background-color: transparent;
+  --ifm-button-border-color: rgba(255, 255, 255, 0.85);
+  --ifm-button-color: #ffffff;
+}
+
+.buttonGhost:hover {
+  --ifm-button-background-color: rgba(255, 255, 255, 0.12);
+  --ifm-button-border-color: #ffffff;
+  --ifm-button-color: #ffffff;
+}
+
+.trustBar {
+  padding: 0.875rem 1.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  letter-spacing: 0.02em;
+  color: var(--ifm-font-color-secondary);
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+  background: var(--ifm-background-surface-color);
+}
+
+.valueProps {
+  padding: 4rem 0;
+}
+
+@media screen and (max-width: 996px) {
+  .valueProps :global(.row) {
+    row-gap: 2.5rem;
+  }
+}
+
+.valueAnchor {
+  display: block;
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ifm-color-primary);
+  margin-bottom: 1rem;
+}
+
+.valueTitle {
+  margin-bottom: 0.75rem;
+}
+
+.valueDescription {
+  margin: 0;
+  color: var(--ifm-font-color-secondary);
+  line-height: 1.6;
+}
+
+.bottomCta {
+  padding: 4.5rem 0 5rem;
+  text-align: center;
+  border-top: 1px solid rgba(56, 182, 255, 0.22);
+  background: var(--warden-surface-canvas);
+}
+
+.ctaContainer {
+  max-width: 40rem;
+  margin: 0 auto;
+}
+
+.ctaTitle {
+  margin: 0 0 1rem;
+  color: #ffffff;
+  font-size: 1.75rem;
+  line-height: 1.25;
+}
+
+.ctaSubtitle {
+  margin: 0 auto 2rem;
+  max-width: 36rem;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: rgba(226, 232, 240, 0.88);
+}

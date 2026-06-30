@@ -1,0 +1,7 @@
+# Semgrep security pass for the Warden open-core kernel.
+# Registry packs are pulled in via Makefile; this file holds repo-specific notes.
+#
+# Audited suppressions (mirror Ruff S701 / pyproject.toml):
+#   workers/utils.py — Jinja for LLM prompt templates, not HTML rendering.
+
+rules: []

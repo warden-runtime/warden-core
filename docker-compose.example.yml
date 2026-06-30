@@ -1,0 +1,125 @@
+# Minimal Warden stack — copy to docker-compose.yml and fill in.
+#
+# Requires a .env beside this file (see .env.example). At minimum:
+#   POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+#   OPENAI_API_KEY when worker manifests use provider: openai
+#   WARDEN_LOCAL_LLM_BASE_URL when using provider: local (no API key required)
+#
+# Before first up: build images from the repo root:
+#   docker compose -f docker-compose.yml build
+#
+# Apply schema once migrate completes, then engine and worker start.
+#
+# Customize:
+#   - ./config/* volume paths → your prompts, policies, schemas
+#   - published ports
+#   - add secrets via env_file or your orchestrator's secret store
+#
+# The repo's default docker-compose.yml (used by `make up`) is a richer local-dev
+# stack (hot reload, Jaeger, Adminer, demo MCP socket). This file is the bare OSS layout.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432" # host CLI / migrations; change or remove in production
+    volumes:
+      - warden_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 5
+    networks:
+      - warden
+
+  migrate:
+    build:
+      context: .
+      dockerfile: engine/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PATH: /app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      PYTHONPATH: /app
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ./db:/app/db:ro
+      - ./scripts:/app/scripts:ro
+      - ./common:/app/common
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    command: ["/app/.venv/bin/python", "/app/scripts/run_migrations.py"]
+    networks:
+      - warden
+
+  engine:
+    build:
+      context: .
+      dockerfile: engine/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PATH: /app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      PYTHONPATH: /app
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PROMPTS_ROOT: /app/prompts
+      POLICIES_ROOT: /app/policies
+      SCHEMAS_ROOT: /app/schemas
+      COMPENSATIONS_ROOT: /app/compensations
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config/prompts:/app/prompts:ro
+      - ./config/policies:/app/policies:ro
+      - ./config/schemas:/app/schemas:ro
+      - ./config/compensations:/app/compensations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: ["/app/.venv/bin/python", "-m", "engine.main"]
+    networks:
+      - warden
+
+  worker:
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PATH: /app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      PYTHONPATH: /app
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PROMPTS_ROOT: /app/prompts
+    volumes:
+      - ./config/prompts:/app/prompts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      engine:
+        condition: service_started
+    command: ["/app/.venv/bin/python", "-m", "workers.main"]
+    networks:
+      - warden
+    # Reach Ollama/vLLM on the host when WARDEN_LOCAL_LLM_BASE_URL uses host.docker.internal (Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  warden:
+
+volumes:
+  warden_pg_data:

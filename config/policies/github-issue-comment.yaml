@@ -1,0 +1,4 @@
+name: github-issue-comment
+version: "1"
+# Excerpted in docs/getting-started/demo-github-mcp.md — keep in sync when editing.
+cel: "phase == 'before_commit' && step.kind == 'commit' && step.id == 'post-comment' && worker.name == 'github-demo-worker' && tool.name == 'add_issue_comment' && arguments.owner == input.owner && arguments.repo == input.repo && arguments.issue_number > 0 && size(arguments.body) > 0 && size(arguments.body) <= 8000 && arguments.body.contains('## Warden triage')"

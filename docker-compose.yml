@@ -1,0 +1,206 @@
+# Warden local stack (implementation detail — operators use the Makefile: `make help`)
+#
+# Env loading:
+# - Docker Compose loads .env from this directory for variable substitution in this file
+#   (e.g. ${POSTGRES_USER}). So POSTGRES_* and other vars used below must be in .env.
+# - Each service also gets env_file: .env injected into the container; we then override
+#   or add only what's needed (e.g. DB_URL is built here so one source of truth).
+#
+# DB: Single source of truth is POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD in .env.
+# DB_URL is constructed here for app services. If your password contains : or @, use
+# URL-encoding in POSTGRES_PASSWORD or set DB_URL explicitly in .env and do not rely
+# on the constructed value (we could add a "if DB_URL set in .env use it" pattern if needed).
+#
+# Do not set PATH= in .env for engine/worker: env_file would override the image
+# PATH and break /app/.venv (pydantic missing, watchfiles not found). Compose sets PATH
+# explicitly for those services.
+#
+# PROMPTS_ROOT: engine/worker set PROMPTS_ROOT=/app/prompts below (overrides .env). Do not
+# point .env PROMPTS_ROOT at a host path for Compose — that path is wrong inside containers.
+# Leave PROMPTS_ROOT unset in .env for Docker, or use ./config/prompts only for host CLI tools.
+#
+# Worker Docker socket: stdio MCP demos (e.g. github-mcp-server) spawn `docker run` against
+# the host daemon via /var/run/docker.sock. Set GITHUB_PERSONAL_ACCESS_TOKEN in .env when needed.
+
+services:
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DEFAULT_USER: ${POSTGRES_USER}
+      ADMINER_DEFAULT_DB: ${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - warden
+
+  postgres:
+    image: postgres:16
+    restart: always
+    volumes:
+      - engine_db_data:/var/lib/postgresql/data
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 5
+    networks:
+      - warden
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - warden
+
+  # One-shot: applies db/migrations before engine/worker start (Compose waits for success).
+  migrate:
+    build:
+      context: .
+      dockerfile: engine/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PATH: /app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      PYTHONPATH: /app
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ./common:/app/common
+      - ./db:/app/db:ro
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    command:
+      - /app/.venv/bin/python
+      - /app/scripts/run_migrations.py
+    networks:
+      - warden
+
+  engine:
+    build:
+      context: .
+      dockerfile: engine/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PATH: /app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      PYTHONPATH: /app
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      LOGGING_LEVEL: INFO
+      OTEL_SERVICE_NAME: engine
+      OTLP_ENDPOINT: http://jaeger:4317
+      OTLP_INSECURE: "true"
+      OTEL_TRACES_EXPORTER: otlp_proto_grpc
+      PROMPTS_ROOT: /app/prompts
+      POLICIES_ROOT: /app/policies
+      SCHEMAS_ROOT: /app/schemas
+      COMPENSATIONS_ROOT: /app/compensations
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./common:/app/common
+      - ./engine:/app/engine
+      - ./config/prompts:/app/prompts:ro
+      - ./config/policies:/app/policies:ro
+      - ./config/schemas:/app/schemas:ro
+      - ./config/compensations:/app/compensations:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/app/.venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Dev: watchfiles restarts on file changes; use venv python explicitly (see PATH note at top).
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - watchfiles
+      - --filter
+      - python
+      - /app/.venv/bin/python -m engine.main
+      - .
+    networks:
+      - warden
+
+  worker:
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PATH: /app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      PYTHONPATH: /app
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OTEL_SERVICE_NAME: worker
+      OTLP_ENDPOINT: http://jaeger:4317
+      OTLP_INSECURE: "true"
+      OTEL_TRACES_EXPORTER: otlp_proto_grpc
+      PROMPTS_ROOT: /app/prompts
+    # Mount source only (not full repo root): a bind mount of `.:/app` would hide the
+    # image's `/app/.venv` from `uv sync` in the Dockerfile; the worker would then
+    # depend on a host venv and often exit immediately if `.venv` is missing or stale.
+    volumes:
+      - ./common:/app/common
+      - ./workers:/app/workers
+      - ./config/prompts:/app/prompts:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      engine:
+        condition: service_healthy
+    # Dev: watchfiles restarts the worker on file changes.
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - watchfiles
+      - --filter
+      - python
+      - /app/.venv/bin/python -m workers.main
+      - .
+    networks:
+      - warden
+    # Reach Ollama/vLLM on the host when WARDEN_LOCAL_LLM_BASE_URL uses host.docker.internal (Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  warden:
+    name: warden
+
+volumes:
+  engine_db_data:

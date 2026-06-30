@@ -1,0 +1,2230 @@
+{
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "Response for GET /v1/health.",
+        "properties": {
+          "status": {
+            "default": "ok",
+            "description": "Liveness: API process is up",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "HumanApproveRequest": {
+        "description": "Optional body for human approval.",
+        "properties": {
+          "output": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional output override for reason-step approve-with-edit.",
+            "title": "Output"
+          }
+        },
+        "title": "HumanApproveRequest",
+        "type": "object"
+      },
+      "HumanDecisionRequest": {
+        "description": "Body for a HITL decision.",
+        "properties": {
+          "decision": {
+            "description": "Human decision for this step.",
+            "enum": [
+              "APPROVE",
+              "REJECT"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "error_details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional structured rejection reason.",
+            "title": "Error Details"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional output override when approving a reason step.",
+            "title": "Output"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "HumanDecisionRequest",
+        "type": "object"
+      },
+      "HumanRejectRequest": {
+        "description": "Optional body for human rejection.",
+        "properties": {
+          "error_details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional structured rejection reason.",
+            "title": "Error Details"
+          }
+        },
+        "title": "HumanRejectRequest",
+        "type": "object"
+      },
+      "HumanRetryRequest": {
+        "description": "Optional body for manual HITL retry.",
+        "properties": {
+          "guidance": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operator note for this retry run, passed to the worker as _hitl_retry.guidance (overrides the step manifest hitl_retry_guidance for this attempt).",
+            "title": "Guidance"
+          },
+          "retry_token": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional idempotency token for this HTTP request; omit to generate a new token on each call.",
+            "title": "Retry Token"
+          }
+        },
+        "title": "HumanRetryRequest",
+        "type": "object"
+      },
+      "ManifestDeployResponse": {
+        "description": "Response body for POST /v1/manifests (200 OK).",
+        "properties": {
+          "message": {
+            "description": "Success message from registry",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ManifestDeployResponse",
+        "type": "object"
+      },
+      "OperatorRecoveryRequest": {
+        "description": "Body for operator retry-step / retry-compensation.",
+        "properties": {
+          "allow_destructive": {
+            "default": false,
+            "description": "Required with force on commit steps (duplicate side-effect risk).",
+            "title": "Allow Destructive",
+            "type": "boolean"
+          },
+          "force": {
+            "default": false,
+            "description": "Release a non-stale worker claim (reason steps; commit requires allow_destructive).",
+            "title": "Force",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional operator note for audit hooks.",
+            "title": "Reason"
+          },
+          "recovery_token": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional client-supplied token (8\u2013128 chars). When provided, duplicate recovery requests with the same token and parameters return the original 202 response without re-enqueueing work.",
+            "title": "Recovery Token"
+          }
+        },
+        "title": "OperatorRecoveryRequest",
+        "type": "object"
+      },
+      "PendingReviewStepItem": {
+        "description": "One HITL-held step awaiting human approval/rejection.",
+        "properties": {
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "order_index": {
+            "title": "Order Index",
+            "type": "integer"
+          },
+          "review_payload": {
+            "additionalProperties": true,
+            "title": "Review Payload",
+            "type": "object"
+          },
+          "review_subject": {
+            "title": "Review Subject",
+            "type": "string"
+          },
+          "saga_trace_id": {
+            "title": "Saga Trace Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "step_kind": {
+            "enum": [
+              "reason",
+              "commit"
+            ],
+            "title": "Step Kind",
+            "type": "string"
+          },
+          "step_name": {
+            "title": "Step Name",
+            "type": "string"
+          },
+          "step_span_id": {
+            "title": "Step Span Id",
+            "type": "string"
+          },
+          "worker": {
+            "title": "Worker",
+            "type": "string"
+          },
+          "worker_version": {
+            "title": "Worker Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "saga_trace_id",
+          "step_span_id",
+          "step_id",
+          "step_name",
+          "step_kind",
+          "order_index",
+          "worker",
+          "worker_version",
+          "review_subject",
+          "review_payload",
+          "started_at"
+        ],
+        "title": "PendingReviewStepItem",
+        "type": "object"
+      },
+      "PendingReviewStepListResponse": {
+        "description": "Response for GET /v1/sagas/pending-review.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PendingReviewStepItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset"
+        ],
+        "title": "PendingReviewStepListResponse",
+        "type": "object"
+      },
+      "SagaDefinitionItem": {
+        "description": "One row in GET /v1/definitions/sagas.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Saga definition UUID",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "namespace",
+          "name",
+          "version",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SagaDefinitionItem",
+        "type": "object"
+      },
+      "SagaDefinitionListResponse": {
+        "description": "Response for GET /v1/definitions/sagas.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SagaDefinitionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset"
+        ],
+        "title": "SagaDefinitionListResponse",
+        "type": "object"
+      },
+      "SagaInstanceItem": {
+        "description": "One row in GET /v1/sagas (instance list).",
+        "properties": {
+          "definition_id": {
+            "title": "Definition Id",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "start_idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Idempotency Key"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trace_id",
+          "namespace",
+          "definition_id",
+          "status",
+          "started_at"
+        ],
+        "title": "SagaInstanceItem",
+        "type": "object"
+      },
+      "SagaInstanceListResponse": {
+        "description": "Response for GET /v1/sagas.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SagaInstanceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset"
+        ],
+        "title": "SagaInstanceListResponse",
+        "type": "object"
+      },
+      "SagaStepInstanceDetail": {
+        "description": "One saga step instance with execution payloads (GET .../steps/{step_span_id}).",
+        "properties": {
+          "compensates_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compensates Span Id"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "error_details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structured failure metadata (code, message, tool) when the step errors.",
+            "title": "Error Details"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "order_index": {
+            "title": "Order Index",
+            "type": "integer"
+          },
+          "output_payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worker output on complete/fail; business data often under output.data.",
+            "title": "Output Payload"
+          },
+          "prompt_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prompt template filename for reason steps.",
+            "title": "Prompt Ref"
+          },
+          "resolved_arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluated step inputs after JSONPath resolution.",
+            "title": "Resolved Arguments"
+          },
+          "saga_trace_id": {
+            "title": "Saga Trace Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "step_kind": {
+            "title": "Step Kind",
+            "type": "string"
+          },
+          "step_name": {
+            "title": "Step Name",
+            "type": "string"
+          },
+          "step_span_id": {
+            "title": "Step Span Id",
+            "type": "string"
+          },
+          "timing": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Merged worker/engine execution timing buckets (milliseconds).",
+            "title": "Timing"
+          },
+          "worker": {
+            "title": "Worker",
+            "type": "string"
+          },
+          "worker_version": {
+            "title": "Worker Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_span_id",
+          "saga_trace_id",
+          "namespace",
+          "step_id",
+          "step_name",
+          "step_kind",
+          "order_index",
+          "status",
+          "worker",
+          "worker_version",
+          "started_at"
+        ],
+        "title": "SagaStepInstanceDetail",
+        "type": "object"
+      },
+      "SagaStepInstanceItem": {
+        "description": "One row in GET /v1/sagas/steps.",
+        "properties": {
+          "compensates_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compensates Span Id"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "error_details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structured failure metadata (code, message, tool) when the step errors.",
+            "title": "Error Details"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "order_index": {
+            "title": "Order Index",
+            "type": "integer"
+          },
+          "saga_trace_id": {
+            "title": "Saga Trace Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "step_kind": {
+            "title": "Step Kind",
+            "type": "string"
+          },
+          "step_name": {
+            "title": "Step Name",
+            "type": "string"
+          },
+          "step_span_id": {
+            "title": "Step Span Id",
+            "type": "string"
+          },
+          "timing": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Merged worker/engine execution timing buckets (milliseconds).",
+            "title": "Timing"
+          },
+          "worker": {
+            "title": "Worker",
+            "type": "string"
+          },
+          "worker_version": {
+            "title": "Worker Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_span_id",
+          "saga_trace_id",
+          "namespace",
+          "step_id",
+          "step_name",
+          "step_kind",
+          "order_index",
+          "status",
+          "worker",
+          "worker_version",
+          "started_at"
+        ],
+        "title": "SagaStepInstanceItem",
+        "type": "object"
+      },
+      "SagaStepInstanceListResponse": {
+        "description": "Response for GET /v1/sagas/steps.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SagaStepInstanceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset"
+        ],
+        "title": "SagaStepInstanceListResponse",
+        "type": "object"
+      },
+      "StartSagaRequest": {
+        "description": "Request body for POST /v1/sagas/start.",
+        "properties": {
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Client idempotency key; when set, returns existing saga trace_id if one was already started with this key in this namespace.",
+            "title": "Idempotency Key"
+          },
+          "input": {
+            "additionalProperties": true,
+            "description": "Initial saga context input",
+            "title": "Input",
+            "type": "object"
+          },
+          "name": {
+            "description": "Saga definition name",
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "default": "default",
+            "description": "Saga definition namespace",
+            "title": "Namespace",
+            "type": "string"
+          },
+          "version": {
+            "description": "Saga definition version",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "StartSagaRequest",
+        "type": "object"
+      },
+      "StartSagaResponse": {
+        "description": "Response body for POST /v1/sagas/start (202 Accepted).",
+        "properties": {
+          "trace_id": {
+            "description": "Created saga instance trace_id (32-char hex)",
+            "title": "Trace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trace_id"
+        ],
+        "title": "StartSagaResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkerDefinitionItem": {
+        "description": "One row in GET /v1/definitions/workers.",
+        "properties": {
+          "adapter": {
+            "title": "Adapter",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Worker definition UUID",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "namespace",
+          "name",
+          "version",
+          "adapter",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkerDefinitionItem",
+        "type": "object"
+      },
+      "WorkerDefinitionListResponse": {
+        "description": "Response for GET /v1/definitions/workers.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerDefinitionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset"
+        ],
+        "title": "WorkerDefinitionListResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Control-plane HTTP API for deploying manifests, starting sagas, HITL review, and operator recovery. OSS surface under /v1.",
+    "title": "API Reference",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/definitions/sagas": {
+      "get": {
+        "description": "List registered saga definitions, newest updates first.",
+        "operationId": "get_definitions_sagas_v1_definitions_sagas_get",
+        "parameters": [
+          {
+            "description": "Filter by namespace; omit for all.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by namespace; omit for all.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "Exact saga definition name.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact saga definition name.",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "Filter by active flag.",
+            "in": "query",
+            "name": "is_active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by active flag.",
+              "title": "Is Active"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaDefinitionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Definitions Sagas",
+        "tags": [
+          "definitions"
+        ]
+      }
+    },
+    "/v1/definitions/sagas/{definition_id}": {
+      "get": {
+        "description": "Return one saga definition by primary key UUID (for start-saga resolution).",
+        "operationId": "get_definitions_saga_by_id_v1_definitions_sagas__definition_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition_id",
+            "required": true,
+            "schema": {
+              "title": "Definition Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaDefinitionItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Definitions Saga By Id",
+        "tags": [
+          "definitions"
+        ]
+      }
+    },
+    "/v1/definitions/workers": {
+      "get": {
+        "description": "List registered worker definitions, newest updates first.",
+        "operationId": "get_definitions_workers_v1_definitions_workers_get",
+        "parameters": [
+          {
+            "description": "Filter by namespace; omit for all.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by namespace; omit for all.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "Exact worker definition name.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact worker definition name.",
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDefinitionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Definitions Workers",
+        "tags": [
+          "definitions"
+        ]
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "description": "Return 200 when the API process is serving (after lifespan when using full app).",
+        "operationId": "get_health_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/v1/manifests": {
+      "post": {
+        "description": "Register a worker or saga manifest. Accepts YAML or JSON body.\n\nBody must define a mapping with `kind` (worker | saga) and kind-specific\nfields. Same schema as the file-based manifests used by the CLI.\n\nReturns:\n    ManifestDeployResponse with a success message.\n\nRaises:\n    HTTPException: 400 on invalid body, unknown kind, or (saga) missing workers.",
+        "operationId": "post_manifests_v1_manifests_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestDeployResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "Manifest validation failed (invalid YAML/JSON, unknown kind, missing worker references, schema errors)."
+          }
+        },
+        "summary": "Post Manifests",
+        "tags": [
+          "manifests"
+        ]
+      }
+    },
+    "/v1/sagas": {
+      "get": {
+        "description": "List saga instances, newest started_at first.",
+        "operationId": "get_sagas_v1_sagas_get",
+        "parameters": [
+          {
+            "description": "Filter by namespace; omit for all.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by namespace; omit for all.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "Filter to a single saga instance trace_id.",
+            "in": "query",
+            "name": "trace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single saga instance trace_id.",
+              "title": "Trace Id"
+            }
+          },
+          {
+            "description": "Repeat for multiple values, e.g. status=RUNNING&status=PENDING.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Repeat for multiple values, e.g. status=RUNNING&status=PENDING.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "When true, filter to non-terminal in-flight statuses (mutually exclusive with status).",
+            "in": "query",
+            "name": "in_flight",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When true, filter to non-terminal in-flight statuses (mutually exclusive with status).",
+              "title": "In Flight"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaInstanceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sagas",
+        "tags": [
+          "sagas"
+        ]
+      }
+    },
+    "/v1/sagas/pending-review": {
+      "get": {
+        "description": "List HITL-held steps awaiting human approval/rejection.",
+        "operationId": "pending_review_steps_v1_sagas_pending_review_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Namespace"
+            }
+          },
+          {
+            "in": "query",
+            "name": "trace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trace Id"
+            }
+          },
+          {
+            "description": "Optional step kind: reason or commit.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional step kind: reason or commit.",
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingReviewStepListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pending Review Steps",
+        "tags": [
+          "hitl"
+        ]
+      }
+    },
+    "/v1/sagas/start": {
+      "post": {
+        "description": "Start a saga from a registered definition; returns 202 with trace_id.\n\nCreates saga and step instances in a transaction and emits SAGA_STARTED.\n\nArgs:\n    body: Namespace, name, version, and input for the saga.\n\nReturns:\n    StartSagaResponse with trace_id.\n\nRaises:\n    HTTPException: 404 if definition not found; 400 on other ValueError.",
+        "operationId": "post_sagas_start_v1_sagas_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartSagaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSagaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Sagas Start",
+        "tags": [
+          "sagas"
+        ]
+      }
+    },
+    "/v1/sagas/steps": {
+      "get": {
+        "description": "List step instances for one saga, ordered by order_index.",
+        "operationId": "get_saga_steps_v1_sagas_steps_get",
+        "parameters": [
+          {
+            "description": "Saga instance trace_id (32-char hex).",
+            "in": "query",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "description": "Saga instance trace_id (32-char hex).",
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional namespace guard; must match the saga row.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional namespace guard; must match the saga row.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "Repeat for multiple step statuses.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Repeat for multiple step statuses.",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaStepInstanceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Saga Steps",
+        "tags": [
+          "sagas"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}": {
+      "get": {
+        "description": "Return one step instance with resolved inputs and output payloads.",
+        "operationId": "get_saga_step_detail_v1_sagas__trace_id__steps__step_span_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional namespace guard; must match the saga row.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional namespace guard; must match the saga row.",
+              "title": "Namespace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaStepInstanceDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Saga Step Detail",
+        "tags": [
+          "sagas"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}/approve": {
+      "post": {
+        "description": "Approve a HITL-held step and enqueue HUMAN_APPROVED for the engine.",
+        "operationId": "approve_step_v1_sagas__trace_id__steps__step_span_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HumanApproveRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Approve Step V1 Sagas  Trace Id  Steps  Step Span Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Step",
+        "tags": [
+          "hitl"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}/decision": {
+      "post": {
+        "description": "Submit one idempotent human decision for a HITL-held step.",
+        "operationId": "decide_step_v1_sagas__trace_id__steps__step_span_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HumanDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Decide Step V1 Sagas  Trace Id  Steps  Step Span Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Step",
+        "tags": [
+          "hitl"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}/reject": {
+      "post": {
+        "description": "Reject a HITL-held step and enqueue HUMAN_REJECTED for the engine.",
+        "operationId": "reject_step_v1_sagas__trace_id__steps__step_span_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HumanRejectRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Reject Step V1 Sagas  Trace Id  Steps  Step Span Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Step",
+        "tags": [
+          "hitl"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}/retry": {
+      "post": {
+        "description": "Re-run a HITL-held step; preserves upstream saga context (state-preserved retry).",
+        "operationId": "retry_step_v1_sagas__trace_id__steps__step_span_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HumanRetryRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Retry Step V1 Sagas  Trace Id  Steps  Step Span Id  Retry Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Step",
+        "tags": [
+          "hitl"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}/retry-compensation": {
+      "post": {
+        "description": "Retry a failed or stuck compensation step.",
+        "operationId": "operator_retry_compensation_v1_sagas__trace_id__steps__step_span_id__retry_compensation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OperatorRecoveryRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Operator Retry Compensation V1 Sagas  Trace Id  Steps  Step Span Id  Retry Compensation Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operator Retry Compensation",
+        "tags": [
+          "recovery"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}/retry-step": {
+      "post": {
+        "description": "Retry a stuck forward step (IN_PROGRESS) after automatic recovery is exhausted.",
+        "operationId": "operator_retry_step_v1_sagas__trace_id__steps__step_span_id__retry_step_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OperatorRecoveryRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Operator Retry Step V1 Sagas  Trace Id  Steps  Step Span Id  Retry Step Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operator Retry Step",
+        "tags": [
+          "recovery"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Local engine",
+      "url": "http://127.0.0.1:8000"
+    }
+  ]
+}
