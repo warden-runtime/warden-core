@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Warden is in early development (`0.1.x`). Security fixes land on the default branch (`master`) and are included in the next tagged release when one is cut.
+Warden is in early development (`0.1.x`). Security fixes land on the default branch (`main`) and are included in the next tagged release when one is cut.
 
 | Version | Supported |
 |---------|-----------|

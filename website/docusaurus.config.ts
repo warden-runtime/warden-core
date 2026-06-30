@@ -6,7 +6,7 @@ import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs';
 const GITHUB_ORG = 'warden-runtime';
 const GITHUB_REPO = 'warden-core';
 const GITHUB_URL = `https://github.com/${GITHUB_ORG}/${GITHUB_REPO}`;
-const LICENSE_URL = `${GITHUB_URL}/blob/master/LICENSE`;
+const LICENSE_URL = `${GITHUB_URL}/blob/main/LICENSE`;
 
 const config: Config = {
   title: 'Warden',

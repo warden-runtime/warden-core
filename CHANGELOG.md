@@ -23,5 +23,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Initial public release of the Warden open-core kernel.
 
-[Unreleased]: https://github.com/warden-runtime/warden-core/compare/v0.1.0...master
+[Unreleased]: https://github.com/warden-runtime/warden-core/compare/v0.1.0...main
 [0.1.0]: https://github.com/warden-runtime/warden-core/releases/tag/v0.1.0
