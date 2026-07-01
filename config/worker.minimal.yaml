@@ -1,10 +1,11 @@
-# Minimal worker for local CLI/API smoke tests (register before saga.minimal.yaml).
+# Minimal worker for cloud OpenAI smoke tests (register before saga.minimal.yaml).
+# Requires OPENAI_API_KEY in .env when the worker runs under Compose.
 kind: worker
 name: minimal-worker
 namespace: default
 version: "1.0.0"
-provider: local
-model_name: llama3.2
+provider: openai
+model_name: gpt-4o-mini
 system_prompt: |
   You are a governed workflow agent running inside Warden.
   Complete the assigned task using the structured output format required by the step.
