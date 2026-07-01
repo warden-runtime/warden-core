@@ -19,28 +19,23 @@ Warden persists a durable **saga state machine** in Postgres. Work becomes expli
 
 ## Documentation
 
-The source code is only half the story. Architecture, configuration reference, and guided demos live in the documentation.
+Architecture, configuration reference, and guided demos live on the official site:
 
-**[Published docs →](https://warden-runtime.org)** · **[In-repo manual →](docs/introduction.md)** (for local preview and contributors)
+**[https://warden-runtime.org](https://warden-runtime.org)**
 
 | Start here | |
 |------------|---|
-| [Core concepts](docs/concepts/terminology.md) | Sagas, instances, steps, and durable execution boundaries |
-| [Architecture](docs/advanced/architecture.md) | Engine, worker, outbox loop, plugin registry |
-| [Manifest guides](docs/guides/manifests/overview.md) | Worker/saga YAML, policies, MCP tools |
-
-Preview the site locally:
-
-```bash
-make docs-api   # first time / after engine API changes
-cd website && npm install && npm start   # → http://localhost:3000
-```
+| [Introduction](https://warden-runtime.org/docs/introduction) | What Warden is and how the docs are organized |
+| [Core concepts](https://warden-runtime.org/docs/concepts/terminology) | Sagas, instances, steps, and durable execution boundaries |
+| [Architecture](https://warden-runtime.org/docs/advanced/architecture) | Engine, worker, outbox loop, and plugin registry |
+| [Manifest guides](https://warden-runtime.org/docs/guides/manifests/overview) | Worker and saga YAML, policies, and MCP tools |
+| [First demo](https://warden-runtime.org/docs/getting-started/demo-mock-llm-and-mcp) | Run a complete mock saga locally with no API keys |
 
 ---
 
 ## Quick start
 
-**First getting-started demo:** run a complete mock saga locally with no API keys. Continue to [Observe execution timing](docs/getting-started/demo-observe-execution-timing.md), [Quickstart](docs/getting-started/demo-quickstart.md) (live model), and [GitHub MCP](docs/getting-started/demo-github-mcp.md) (policies and human review).
+**First getting-started demo:** run a complete mock saga locally with no API keys. Continue to [Observe execution timing](https://warden-runtime.org/docs/getting-started/demo-observe-execution-timing), [Quickstart](https://warden-runtime.org/docs/getting-started/demo-quickstart) (live model), and [GitHub MCP](https://warden-runtime.org/docs/getting-started/demo-github-mcp) (policies and human review).
 
 From the repo root (copy [`.env.example`](.env.example) → `.env` first):
 
@@ -58,7 +53,7 @@ warden start saga -n mock-mcp-saga -v 0.1.0 --input '{"name":"Ada"}'
 warden list steps --trace-id <trace_id>
 ```
 
-Full walkthrough: [Demo: Mock LLM and MCP](docs/getting-started/demo-mock-llm-and-mcp.md) → [Observe execution timing](docs/getting-started/demo-observe-execution-timing.md) → [Quickstart](docs/getting-started/demo-quickstart.md) → [GitHub MCP](docs/getting-started/demo-github-mcp.md).
+Full walkthrough: [Demo: Mock LLM and MCP](https://warden-runtime.org/docs/getting-started/demo-mock-llm-and-mcp) → [Observe execution timing](https://warden-runtime.org/docs/getting-started/demo-observe-execution-timing) → [Quickstart](https://warden-runtime.org/docs/getting-started/demo-quickstart) → [GitHub MCP](https://warden-runtime.org/docs/getting-started/demo-github-mcp).
 
 ```bash
 make help        # all operator targets
@@ -96,7 +91,7 @@ The execution loop flows in a continuous, database-backed cycle:
         └─────────── writes: engine-events ────────┘
 ```
 
-Planning capacity and operational limits: [Architecture → Scaling and operational limits](docs/advanced/architecture.md#scaling-and-operational-limits).
+Planning capacity and operational limits: [Architecture → Scaling and operational limits](https://warden-runtime.org/docs/advanced/architecture#scaling-and-operational-limits).
 
 | Path | Role |
 |------|------|
@@ -114,7 +109,7 @@ make tests       # pytest with coverage (Docker for Postgres slice)
 make doctor      # when engine/worker look stuck
 ```
 
-Contributors: [CONTRIBUTING.md](CONTRIBUTING.md) · [Testing guide](docs/advanced/testing.md)
+Contributors: [CONTRIBUTING.md](CONTRIBUTING.md) · [Testing guide](https://warden-runtime.org/docs/advanced/testing)
 
 ---
 
