@@ -2,6 +2,8 @@
 
 **The Postgres-native runtime that keeps AI agents honest.**
 
+> **Early release (`v0.1.0`).** APIs, manifests, and CLI flags may change between releases—pin a tag or commit if you depend on stability. **PyPI** packages and **pre-built container images** (GHCR) are planned; install from this repo via clone, [`uv`](https://docs.astral.sh/uv/), or Docker Compose ([Quick start](#quick-start)).
+
 Warden is an open-core runtime for building resilient, durable, inspectable, and human-governed agent workflows—running entirely inside your own PostgreSQL database.
 
 Building autonomous agents for real work means living with non-determinism. When loops run entirely in ephemeral application memory, they lack a true transaction boundary. If an LLM returns malformed JSON, a third-party API drops mid-sequence, or a worker container crashes, execution state vanishes—you are left with partial side effects and no safe way to resume or recover.
