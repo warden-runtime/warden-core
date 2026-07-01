@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-30
+
 ### Added
 
 - Open-core kernel: saga FSM, transactional outbox, CEL policy gates, compensation, HITL pause/resume, operator recovery
@@ -18,10 +20,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Documentation and website branding for public open-core launch
-
-## [0.1.0] - 2026-06-30
-
-Initial public release of the Warden open-core kernel.
 
 [Unreleased]: https://github.com/warden-runtime/warden-core/compare/v0.1.0...main
 [0.1.0]: https://github.com/warden-runtime/warden-core/releases/tag/v0.1.0
