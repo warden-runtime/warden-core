@@ -19,6 +19,7 @@ from workers.tools import (
     _resolve_stdio_subprocess_env,
     _terminate_stdio_process_if_running,
     build_tools_for_worker,
+    get_warden_tool_input_schema,
 )
 
 
@@ -176,6 +177,57 @@ async def test_convert_mcp_to_langchain_maps_array_and_object_types():
     mock_session.call_tool.assert_called_once_with(
         "complex",
         arguments={"tags": ["a"], "meta": {"k": "v"}},
+    )
+
+
+@pytest.mark.asyncio
+async def test_convert_mcp_to_langchain_attaches_warden_input_schema():
+    """_convert_mcp_to_langchain stashes the MCP inputSchema on the StructuredTool."""
+    input_schema = {
+        "type": "object",
+        "properties": {"message": {"type": "string"}},
+        "required": ["message"],
+    }
+    mcp_tool = McpTool(name="echo", description="Echo", inputSchema=input_schema)
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(return_value=MagicMock(content=[]))
+
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+
+    assert get_warden_tool_input_schema(tool) == input_schema
+
+
+@pytest.mark.asyncio
+async def test_convert_mcp_to_langchain_accepts_stringified_array_args():
+    """Stringified JSON array args pass LangChain validation when coerced in the ReAct loop."""
+    mcp_tool = McpTool(
+        name="sandbox_exec",
+        description="Run commands",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "commands": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["commands"],
+        },
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(return_value=MagicMock(content=[]))
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+
+    from common.utils import coerce_tool_args_from_schema
+
+    schema = get_warden_tool_input_schema(tool)
+    assert schema is not None
+    coerced = coerce_tool_args_from_schema(
+        {"commands": '["echo marshall-smoke-ok"]'},
+        schema,
+    )
+    await tool.ainvoke(coerced)
+
+    mock_session.call_tool.assert_called_once_with(
+        "sandbox_exec",
+        arguments={"commands": ["echo marshall-smoke-ok"]},
     )
 
 

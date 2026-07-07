@@ -20,8 +20,13 @@ from common.error_details import build_step_error_details
 from common.execution_timing import WorkerTimingAccumulator, elapsed_ms
 from common.llm import ChatMessage, ChatModelPort, ChatResponse, ToolCall
 from common.tool_results import clip_tool_text_for_llm, tool_message_limit_from_env
-from common.utils import format_exception_chain, tool_call_args_to_dict
+from common.utils import (
+    coerce_tool_args_from_schema,
+    format_exception_chain,
+    tool_call_args_to_dict,
+)
 from workers.adapters import state_utils
+from workers.tools import get_warden_tool_input_schema
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +157,9 @@ async def _invoke_mcp_tool(
 
     llm_args = tool_call_args_to_dict(tool_call.args)
     resolved = merge_tool_args(llm_args, merge_context) if merge_tool_args is not None else llm_args
+    schema = get_warden_tool_input_schema(selected)
+    if schema:
+        resolved = coerce_tool_args_from_schema(resolved, schema)
     try:
         return str(await selected.ainvoke(resolved))
     except Exception as e:

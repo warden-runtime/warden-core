@@ -60,6 +60,8 @@ Reason steps choose **how** the worker completes the step — separate from the 
 
 Multi-turn ReAct loop. The worker binds MCP tools from `tools.allow` plus a virtual **`_submit`** tool (never list `_submit` in the allowlist). The model calls tools until it invokes `_submit` with a non-empty JSON object. Optional `output_schema` validates that payload; without it, any non-empty JSON shape is accepted.
 
+Before each MCP tool invoke, Warden coerces sloppy tool arguments against the tool's `inputSchema` (stringified JSON arrays/objects, scalar strings to numbers/booleans). This helps local models that emit loosely typed tool calls. See [Configuration → Tool argument coercion](../../getting-started/configuration.md#tool-argument-coercion).
+
 ### `simple`
 
 Single structured LLM completion — no ReAct loop, no virtual `_submit`, no MCP tools. Warden rejects the deploy if you set `agent-adapter: simple` with non-empty `tools.allow`, `resources.allow`, or `facts:`.

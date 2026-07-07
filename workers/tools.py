@@ -51,6 +51,16 @@ _MCP_CALL_TIMEOUT_S = float(os.getenv("WARDEN_MCP_CALL_TIMEOUT_S", "10"))
 _RESOURCE_LIST_MAX_PAGES = int(os.getenv("WARDEN_MCP_RESOURCE_LIST_MAX_PAGES", "5"))
 _RESOURCE_LIST_MAX_ITEMS = int(os.getenv("WARDEN_MCP_RESOURCE_LIST_MAX_ITEMS", "1000"))
 _SSE_HEADER_ENV_RE = re.compile(r"\$\{(?:ENV:)?([A-Z0-9_]+)\}", re.IGNORECASE)
+WARDEN_TOOL_INPUT_SCHEMA_ATTR = "warden_input_schema"
+
+
+def get_warden_tool_input_schema(tool: Any) -> dict[str, Any] | None:
+    """Return the MCP inputSchema stashed on a LangChain StructuredTool, if present."""
+    metadata = getattr(tool, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    schema = metadata.get(WARDEN_TOOL_INPUT_SCHEMA_ATTR)
+    return schema if isinstance(schema, dict) else None
 
 
 def _format_mcp_exc(exc: BaseException) -> str:
@@ -1022,9 +1032,11 @@ def _convert_mcp_to_langchain(
             logger.exception("Error executing %s: %s", mcp_tool.name, e)
             raise
 
-    return StructuredTool.from_function(
+    tool = StructuredTool.from_function(
         coroutine=_execute_tool,
         name=mcp_tool.name,
         description=mcp_tool.description or "",
         args_schema=pydantic_schema,
+        metadata={WARDEN_TOOL_INPUT_SCHEMA_ATTR: input_schema},
     )
+    return tool

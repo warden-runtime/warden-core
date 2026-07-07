@@ -9,11 +9,13 @@ import pytest
 from common.agent_adapter import ExecutionStepError
 from common.llm import ChatMessage, ChatResponse, ToolCall
 from common.utils import tool_call_args_to_dict
+from mcp.types import Tool as McpTool
 from workers.adapters.react_loop import (
     ReactLoopResult,
     parse_compensation_output,
     run_react_loop,
 )
+from workers.tools import _convert_mcp_to_langchain
 
 
 class _ScriptedLLM:
@@ -149,6 +151,57 @@ async def test_mcp_tool_round_trip_then_submit():
     assert result.submit_payload == {"summary": "done"}
     assert result.tool_results == [{"tool": "lookup", "result": '{"ok": true}'}]
     mock_tool.ainvoke.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_react_loop_coerces_stringified_array_args_before_ainvoke():
+    """ReAct loop normalizes sloppy LLM tool args against MCP inputSchema before invoke."""
+    mcp_tool = McpTool(
+        name="sandbox_exec",
+        description="Run commands",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "commands": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["commands"],
+        },
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(
+        return_value=MagicMock(content=[MagicMock(type="text", text="ok")]),
+    )
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="sandbox_exec",
+                        args={"commands": '["ok"]'},
+                        id="1",
+                    )
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[ToolCall(name="_submit", args={"result": {"summary": "done"}}, id="2")]
+            ),
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[tool],
+        allowed_tool_names=["sandbox_exec"],
+        completion_mode="submit",
+        max_turns=10,
+    )
+    assert result.submit_payload == {"summary": "done"}
+    mock_session.call_tool.assert_called_once_with(
+        "sandbox_exec",
+        arguments={"commands": ["ok"]},
+    )
 
 
 @pytest.mark.asyncio
