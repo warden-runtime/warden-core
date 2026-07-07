@@ -54,6 +54,174 @@ def tool_call_arguments_hash(arguments: Any) -> str:
     return hash_canonical_dict(tool_call_args_to_dict(arguments))
 
 
+DEFAULT_TOOL_ARG_COERCION_DEPTH = 2
+
+
+def _coerce_boolean_string(stripped: str) -> bool | str:
+    lower = stripped.lower()
+    if lower in {"true", "1"}:
+        return True
+    if lower in {"false", "0"}:
+        return False
+    return stripped
+
+
+def _coerce_integer_string(stripped: str) -> int | str:
+    if stripped.isdigit() or (stripped.startswith("-") and stripped[1:].isdigit()):
+        return int(stripped)
+    return stripped
+
+
+def _coerce_number_string(stripped: str) -> float | str:
+    try:
+        if stripped.count(".") == 1 and stripped.replace(".", "", 1).replace("-", "", 1).isdigit():
+            return float(stripped)
+    except ValueError:
+        pass
+    if stripped.isdigit() or (stripped.startswith("-") and stripped[1:].isdigit()):
+        return float(stripped)
+    return stripped
+
+
+def _coerce_scalar_string(value: str, json_type: str) -> Any:
+    """Coerce an unambiguous scalar string to integer, number, or boolean."""
+    stripped = value.strip()
+    if json_type == "boolean":
+        return _coerce_boolean_string(stripped)
+    if json_type == "integer":
+        return _coerce_integer_string(stripped)
+    if json_type == "number":
+        return _coerce_number_string(stripped)
+    return value
+
+
+def _parse_json_container_string(value: str, json_type: str) -> Any:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return value
+    if json_type == "array" and isinstance(parsed, list):
+        return parsed
+    if json_type == "object" and isinstance(parsed, dict):
+        return parsed
+    return value
+
+
+def _coerce_array_value(
+    value: list[Any],
+    field_schema: dict[str, Any],
+    *,
+    depth: int,
+    max_depth: int,
+) -> list[Any]:
+    if depth >= max_depth:
+        return value
+    items_schema = field_schema.get("items", {})
+    if not isinstance(items_schema, dict):
+        items_schema = {}
+    return [
+        _coerce_value_for_schema(
+            item,
+            items_schema,
+            depth=depth + 1,
+            max_depth=max_depth,
+        )
+        for item in value
+    ]
+
+
+def _coerce_object_value(
+    value: dict[str, Any],
+    field_schema: dict[str, Any],
+    *,
+    depth: int,
+    max_depth: int,
+) -> dict[str, Any]:
+    nested_properties = field_schema.get("properties", {})
+    if not isinstance(nested_properties, dict) or not nested_properties:
+        return value
+    coerced = dict(value)
+    for prop_name, prop_schema in nested_properties.items():
+        if prop_name not in coerced:
+            continue
+        child_depth = depth + 1
+        if child_depth > max_depth:
+            continue
+        if not isinstance(prop_schema, dict):
+            prop_schema = {}
+        coerced[prop_name] = _coerce_value_for_schema(
+            coerced[prop_name],
+            prop_schema,
+            depth=child_depth,
+            max_depth=max_depth,
+        )
+    return coerced
+
+
+def _coerce_value_for_schema(
+    value: Any,
+    field_schema: dict[str, Any],
+    *,
+    depth: int,
+    max_depth: int,
+) -> Any:
+    """Best-effort coercion of a single value against a JSON Schema field definition."""
+    json_type = field_schema.get("type", "string")
+    if json_type == "string":
+        return value
+
+    if isinstance(value, str):
+        if json_type in {"integer", "number", "boolean"}:
+            return _coerce_scalar_string(value, json_type)
+        if json_type in {"array", "object"}:
+            if depth >= max_depth:
+                return value
+            value = _parse_json_container_string(value, json_type)
+
+    if json_type == "array" and isinstance(value, list):
+        return _coerce_array_value(value, field_schema, depth=depth, max_depth=max_depth)
+
+    if json_type == "object" and isinstance(value, dict):
+        return _coerce_object_value(value, field_schema, depth=depth, max_depth=max_depth)
+
+    return value
+
+
+def coerce_tool_args_from_schema(
+    args: dict[str, Any],
+    input_schema: dict[str, Any],
+    *,
+    max_depth: int = DEFAULT_TOOL_ARG_COERCION_DEPTH,
+) -> dict[str, Any]:
+    """Normalize sloppy LLM tool args against an MCP inputSchema before Pydantic validation.
+
+    Coerces stringified JSON arrays/objects and ambiguous scalar strings when the
+    declared JSON Schema type expects a non-string value. ``string`` fields are
+    never JSON-parsed. Recursion is limited to *max_depth* levels (default 2:
+    top-level fields plus one nested level inside arrays/objects). Best-effort:
+    values that cannot be coerced are left unchanged.
+    """
+    if not isinstance(args, dict):
+        return {}
+    properties = input_schema.get("properties", {}) if isinstance(input_schema, dict) else {}
+    if not isinstance(properties, dict):
+        return dict(args)
+
+    result = dict(args)
+    for field_name, field_schema in properties.items():
+        if field_name not in result:
+            continue
+        if not isinstance(field_schema, dict):
+            field_schema = {}
+        result[field_name] = _coerce_value_for_schema(
+            result[field_name],
+            field_schema,
+            depth=0,
+            max_depth=max_depth,
+        )
+    return result
+
+
 def hash_canonical_dict(data: dict[str, Any]) -> str:
     """Deterministic SHA-256 of a dict using the same JSON rules as audit payload hashing."""
     encoded = json.dumps(

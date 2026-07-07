@@ -234,6 +234,20 @@ ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **to
 | `WORKER_MAX_IN_FLIGHT` | `1` | Max concurrent step commands handled by **one worker process** (outbox consumer semaphore) |
 | `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping |
 
+### Tool argument coercion
+
+On **`react`** reason steps, the worker normalizes sloppy LLM tool arguments against each MCP tool's `inputSchema` **before** LangChain/Pydantic validation. This is always on (no env var) and helps local OpenAI-compatible models (Ollama, vLLM) that often emit stringified JSON where the schema expects typed values — for example `commands: '["echo ok"]'` when the tool declares `commands` as an `array`.
+
+| Behavior | Detail |
+|----------|--------|
+| Depth | Two levels: top-level tool fields, plus one nested level inside arrays and objects |
+| Coercions | Stringified JSON arrays/objects; scalar strings → `integer`, `number`, or `boolean` when unambiguous |
+| `string` fields | Never JSON-parsed (a string value that looks like JSON stays a string) |
+| Best-effort | Values that cannot be coerced are left unchanged; validation may still fail downstream |
+| Limitation | Schemas deeper than two levels are not recursively coerced; deeply nested arg mistakes may still fail |
+
+Governance audit hashes record the **raw** LLM tool args, not the coerced values passed to MCP.
+
 ### Throughput and parallelism
 
 Parallelism happens at the **worker** level, not inside a single saga. The engine still schedules **one forward step at a time** per saga instance—steps in the same workflow do not run concurrently. Throughput across **many** saga instances comes from how many worker commands your fleet can execute at once.
