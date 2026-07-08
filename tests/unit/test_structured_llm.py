@@ -66,6 +66,25 @@ async def test_invoke_structured_output_records_llm_ms():
 
 
 @pytest.mark.asyncio
+async def test_invoke_structured_output_admits_stringified_boolean():
+    schema = {
+        "type": "object",
+        "required": ["feasible", "summary"],
+        "properties": {
+            "feasible": {"type": "boolean"},
+            "summary": {"type": "string"},
+        },
+    }
+    llm = _JsonContentLLM('{"feasible": "false", "summary": "no"}')
+    payload = await invoke_structured_output(
+        llm,
+        [ChatMessage(role="human", content="go")],
+        schema,
+    )
+    assert payload == {"feasible": False, "summary": "no"}
+
+
+@pytest.mark.asyncio
 async def test_invoke_structured_output_fails_on_unparseable_content():
     llm = _JsonContentLLM("not json at all")
     with pytest.raises(ExecutionStepError) as exc_info:

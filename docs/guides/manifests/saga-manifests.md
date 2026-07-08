@@ -60,13 +60,13 @@ Reason steps choose **how** the worker completes the step — separate from the 
 
 Multi-turn ReAct loop. The worker binds MCP tools from `tools.allow` plus a virtual **`_submit`** tool (never list `_submit` in the allowlist). The model calls tools until it invokes `_submit` with a non-empty JSON object. Optional `output_schema` validates that payload; without it, any non-empty JSON shape is accepted.
 
-Before each MCP tool invoke, Warden coerces sloppy tool arguments against the tool's `inputSchema` (stringified JSON arrays/objects, scalar strings to numbers/booleans). This helps local models that emit loosely typed tool calls. See [Configuration → Tool argument coercion](../../getting-started/configuration.md#tool-argument-coercion).
+Warden admits sloppy LLM JSON against MCP tool `inputSchema` values and against `_submit` `output_schema` (stringified arrays/objects, scalar strings to numbers/booleans) before strict validation. See [Configuration → LLM JSON admission](../../getting-started/configuration.md#llm-json-admission).
 
 ### `simple`
 
 Single structured LLM completion — no ReAct loop, no virtual `_submit`, no MCP tools. Warden rejects the deploy if you set `agent-adapter: simple` with non-empty `tools.allow`, `resources.allow`, or `facts:`.
 
-When `output_schema` is omitted, the worker applies a built-in fallback schema requiring a **`summary`** string (`steps.<id>.output.data.summary`). Set `output_schema` when downstream bindings need stable field names.
+When `output_schema` is omitted, the worker applies a built-in fallback schema requiring a **`summary`** string (`steps.<id>.output.data.summary`). Set `output_schema` when downstream bindings need stable field names. Structured payloads also go through [LLM JSON admission](../../getting-started/configuration.md#llm-json-admission) before validation.
 
 ```yaml
 # config/saga.minimal.yaml — live inference smoke test

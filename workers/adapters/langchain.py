@@ -23,7 +23,7 @@ from common.compensation_context import (
 )
 from common.error_details import build_step_error_details
 from common.execution_timing import WorkerTimingAccumulator, elapsed_ms
-from common.governance import validate_against_schema
+from common.governance import admit_and_validate, validate_against_schema
 from common.llm import ChatMessage, ToolProtocol
 from common.models import ProviderSecret, WorkerDefinition
 from common.plugins.context import db_conn_from_injection, execution_scope_from_injection
@@ -122,7 +122,7 @@ def _validate_submit_payload(
         )
     if output_schema:
         try:
-            validate_against_schema(payload, output_schema, "step output (_submit)")
+            return admit_and_validate(payload, output_schema, "step output (_submit)")
         except Exception as e:
             logger.exception("Step output schema validation failed: %s", e)
             raise ExecutionStepError(
@@ -149,7 +149,7 @@ def _validate_structured_payload(
         )
     if output_schema:
         try:
-            validate_against_schema(payload, output_schema, "step output (structured)")
+            return admit_and_validate(payload, output_schema, "step output (structured)")
         except Exception as e:
             logger.exception("Step output schema validation failed: %s", e)
             message = str(e)

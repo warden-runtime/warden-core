@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 from common.agent_adapter import ExecutionStepError
 from common.error_details import build_step_error_details
 from common.execution_timing import WorkerTimingAccumulator, elapsed_ms
-from common.governance import validate_against_schema
+from common.governance import admit_and_validate
 from common.llm import ChatMessage, ChatModelPort, ChatResponse
 from common.utils import create_pydantic_model_from_schema
 from workers.adapters.simple_schema import resolve_effective_schema
@@ -133,11 +133,9 @@ async def invoke_structured_output(
         _raise_empty_structured_result()
 
     try:
-        validate_against_schema(payload, schema, "step output (structured)")
+        return admit_and_validate(payload, schema, "step output (structured)")
     except Exception as exc:
         _raise_schema_validation_failed(exc)
-
-    return payload
 
 
 async def _try_native_structured_output(

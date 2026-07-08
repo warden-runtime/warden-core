@@ -187,19 +187,20 @@ def _coerce_value_for_schema(
     return value
 
 
-def coerce_tool_args_from_schema(
+def coerce_llm_json_from_schema(
     args: dict[str, Any],
     input_schema: dict[str, Any],
     *,
     max_depth: int = DEFAULT_TOOL_ARG_COERCION_DEPTH,
 ) -> dict[str, Any]:
-    """Normalize sloppy LLM tool args against an MCP inputSchema before Pydantic validation.
+    """Admit sloppy LLM JSON against a JSON Schema before strict validation.
 
     Coerces stringified JSON arrays/objects and ambiguous scalar strings when the
     declared JSON Schema type expects a non-string value. ``string`` fields are
     never JSON-parsed. Recursion is limited to *max_depth* levels (default 2:
     top-level fields plus one nested level inside arrays/objects). Best-effort:
-    values that cannot be coerced are left unchanged.
+    values that cannot be coerced are left unchanged. Used for MCP tool args and
+    reason-step ``output_schema`` admission.
     """
     if not isinstance(args, dict):
         return {}
@@ -220,6 +221,10 @@ def coerce_tool_args_from_schema(
             max_depth=max_depth,
         )
     return result
+
+
+coerce_tool_args_from_schema = coerce_llm_json_from_schema
+"""Alias of :func:`coerce_llm_json_from_schema` (MCP / legacy import name)."""
 
 
 def hash_canonical_dict(data: dict[str, Any]) -> str:
