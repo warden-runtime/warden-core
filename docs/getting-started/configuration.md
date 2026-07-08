@@ -234,19 +234,26 @@ ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **to
 | `WORKER_MAX_IN_FLIGHT` | `1` | Max concurrent step commands handled by **one worker process** (outbox consumer semaphore) |
 | `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping |
 
-### Tool argument coercion
+### LLM JSON admission
 
-On **`react`** reason steps, the worker normalizes sloppy LLM tool arguments against each MCP tool's `inputSchema` **before** LangChain/Pydantic validation. This is always on (no env var) and helps local OpenAI-compatible models (Ollama, vLLM) that often emit stringified JSON where the schema expects typed values — for example `commands: '["echo ok"]'` when the tool declares `commands` as an `array`.
+Before strict JSON Schema validation, the worker **admits** sloppy LLM-authored JSON against the declared schema. This is always on (no env var) and helps local OpenAI-compatible models (Ollama, vLLM) that often emit stringified JSON where the schema expects typed values — for example `commands: '["echo ok"]'` when a tool declares `commands` as an `array`, or `feasible: "false"` when `output_schema` requires a boolean.
+
+Applies to:
+
+- MCP tool arguments (against each tool's `inputSchema`) on **`react`** steps
+- Reason-step **`output_schema`** for `_submit` payloads (**`react`**) and structured completion (**`simple`**)
+
+Does **not** apply to commit-step tool `output.data` (MCP/server JSON) or non-LLM governance tool inputs.
 
 | Behavior | Detail |
 |----------|--------|
-| Depth | Two levels: top-level tool fields, plus one nested level inside arrays and objects |
+| Depth | Two levels: top-level fields, plus one nested level inside arrays and objects |
 | Coercions | Stringified JSON arrays/objects; scalar strings → `integer`, `number`, or `boolean` when unambiguous |
 | `string` fields | Never JSON-parsed (a string value that looks like JSON stays a string) |
 | Best-effort | Values that cannot be coerced are left unchanged; validation may still fail downstream |
-| Limitation | Schemas deeper than two levels are not recursively coerced; deeply nested arg mistakes may still fail |
+| Limitation | Schemas deeper than two levels are not recursively coerced; deeply nested mistakes may still fail |
 
-Governance audit hashes record the **raw** LLM tool args, not the coerced values passed to MCP.
+Governance audit hashes for MCP tool calls record the **raw** LLM tool args, not the admitted values passed to MCP. Admitted reason-step payloads are what land in saga `output.data`.
 
 ### Throughput and parallelism
 

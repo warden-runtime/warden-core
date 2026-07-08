@@ -12,7 +12,11 @@ from common.compensation_context import (
     merge_compensation_tool_arguments,
 )
 from common.llm import ChatResponse, ToolCall
-from workers.adapters.langchain import LangChainAdapter
+from workers.adapters.langchain import (
+    LangChainAdapter,
+    _validate_structured_payload,
+    _validate_submit_payload,
+)
 
 
 class _ScriptedLLM:
@@ -348,6 +352,47 @@ async def test_run_step_raises_when_output_schema_validation_fails(mocker):
         "validation" in str(exc_info.value.error_details or {}).lower()
         or "output_schema" in str(exc_info.value).lower()
     )
+
+
+def test_validate_submit_payload_admits_stringified_boolean_and_array():
+    schema = {
+        "type": "object",
+        "required": ["feasible", "tags"],
+        "properties": {
+            "feasible": {"type": "boolean"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    admitted = _validate_submit_payload(
+        {"feasible": "false", "tags": '["a"]'},
+        output_schema=schema,
+    )
+    assert admitted == {"feasible": False, "tags": ["a"]}
+
+
+def test_validate_structured_payload_admits_stringified_boolean():
+    schema = {
+        "type": "object",
+        "required": ["feasible"],
+        "properties": {"feasible": {"type": "boolean"}},
+    }
+    admitted = _validate_structured_payload(
+        {"feasible": "true"},
+        output_schema=schema,
+    )
+    assert admitted == {"feasible": True}
+
+
+def test_validate_submit_payload_still_fails_on_wrong_shape():
+    schema = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+    }
+    with pytest.raises(ExecutionStepError) as exc_info:
+        _validate_submit_payload({"wrong": "shape"}, output_schema=schema)
+    details = exc_info.value.error_details or {}
+    assert details.get("validation") == "output_schema"
 
 
 @pytest.mark.asyncio

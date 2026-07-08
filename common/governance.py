@@ -15,6 +15,7 @@ from tortoise.backends.base.client import BaseDBAsyncClient
 
 from common.plugins.context import ExecutionScope
 from common.plugins.registry import get_registry
+from common.utils import coerce_llm_json_from_schema
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,22 @@ def validate_against_schema(data: Any, schema: dict[str, Any], label: str) -> No
     except jsonschema.ValidationError as e:
         logger.exception("%s validation failed: %s", label, e)
         raise
+
+
+def admit_and_validate(
+    data: dict[str, Any],
+    schema: dict[str, Any],
+    label: str,
+) -> dict[str, Any]:
+    """Admit LLM-authored JSON against *schema*, then strict-validate.
+
+    Best-effort coercion of present fields (stringified arrays/objects, scalar
+    strings) then :func:`validate_against_schema`. Returns the admitted dict for
+    durable saga / tool use. Does not invent missing keys.
+    """
+    admitted = coerce_llm_json_from_schema(data, schema)
+    validate_against_schema(admitted, schema, label)
+    return admitted
 
 
 def _validate_execution_output(
