@@ -12,6 +12,7 @@ from common.utils import tool_call_args_to_dict
 from mcp.types import Tool as McpTool
 from workers.adapters.react_loop import (
     ReactLoopResult,
+    _collect_last_tool_errors,
     parse_compensation_output,
     run_react_loop,
 )
@@ -77,6 +78,65 @@ async def test_submit_mode_raises_when_no_submit():
     assert details.get("code") == "no_submit_call"
     assert details.get("reason") == "model_text_exit"
     assert details.get("message")
+    assert '{"summary": "nope"}' in str(details.get("last_assistant_content") or "")
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_model_text_exit_ignores_plain_text_tool_success():
+    mock_tool = MagicMock()
+    mock_tool.name = "sandbox_write"
+    mock_tool.ainvoke = AsyncMock(return_value="Successfully wrote file to /tmp/foo")
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(tool_calls=[ToolCall(name="sandbox_write", args={}, id="1")]),
+            ChatResponse(content="I completed the sandbox work but forgot _submit."),
+        ]
+    )
+    with pytest.raises(ExecutionStepError) as exc_info:
+        await run_react_loop(
+            llm=llm,
+            initial_messages=[ChatMessage(role="human", content="go")],
+            mcp_tools=[mock_tool],
+            allowed_tool_names=["sandbox_write"],
+            completion_mode="submit",
+            max_turns=5,
+        )
+    details = exc_info.value.error_details or {}
+    assert details.get("reason") == "model_text_exit"
+    assert not details.get("last_tool_errors")
+    assert "forgot _submit" in str(details.get("last_assistant_content") or "")
+
+
+def test_collect_last_tool_errors_skips_plain_text_success():
+    tool_results = [
+        {"tool": "sandbox_write", "result": "Successfully wrote file to /tmp/foo"},
+        {"tool": "lookup", "result": "MCP error: connection refused"},
+    ]
+    errors = _collect_last_tool_errors(tool_results)
+    assert len(errors) == 1
+    assert errors[0]["tool"] == "lookup"
+    assert "MCP error: connection refused" in errors[0]["preview"]
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_tool_failure_raises_before_no_submit():
+    mock_tool = MagicMock()
+    mock_tool.name = "sandbox_write"
+    mock_tool.ainvoke = AsyncMock(return_value="MCP error: connection refused")
+
+    llm = _ScriptedLLM([ChatResponse(tool_calls=[ToolCall(name="sandbox_write", args={}, id="1")])])
+    with pytest.raises(ExecutionStepError) as exc_info:
+        await run_react_loop(
+            llm=llm,
+            initial_messages=[ChatMessage(role="human", content="go")],
+            mcp_tools=[mock_tool],
+            allowed_tool_names=["sandbox_write"],
+            completion_mode="submit",
+            max_turns=5,
+        )
+    details = exc_info.value.error_details or {}
+    assert details.get("code") == "TOOL_OUTPUT_ERROR"
 
 
 @pytest.mark.asyncio

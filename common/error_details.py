@@ -27,6 +27,19 @@ def _append_preview(brief: str, preview: Any, *, preview_len: int) -> str:
     return f"{brief} ({str(preview)[:preview_len]})"
 
 
+def _brief_from_last_assistant_content(
+    error_details: dict[str, Any],
+    *,
+    preview_len: int,
+) -> str | None:
+    if _error_brief_code(error_details) != "no_submit_call":
+        return None
+    content = error_details.get("last_assistant_content")
+    if not content:
+        return None
+    return _append_preview(_error_brief_code(error_details), content, preview_len=preview_len)
+
+
 def _brief_from_tool_errors(error_details: dict[str, Any], *, preview_len: int) -> str | None:
     tool_errors = error_details.get("last_tool_errors")
     if not isinstance(tool_errors, list) or not tool_errors:
@@ -69,6 +82,9 @@ def format_step_error_brief(
     """One-line failure summary for CLI list --errors and show step."""
     if not error_details:
         return ""
+    from_assistant = _brief_from_last_assistant_content(error_details, preview_len=preview_len)
+    if from_assistant is not None:
+        return from_assistant
     from_tools = _brief_from_tool_errors(error_details, preview_len=preview_len)
     if from_tools is not None:
         return from_tools

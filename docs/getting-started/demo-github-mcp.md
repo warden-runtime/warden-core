@@ -239,7 +239,7 @@ To remove comments after a live run, delete them in the GitHub issue UI. Warden 
 | `OUTPUT_SCHEMA_VALIDATION_FAILED` | Triage `_submit` must include `summary`, `recommended_issue_number`, and `comment_body`; use JSON `null` for the latter two when the repo has no open issues |
 | `FACT_EXTRACTION_FAILED` | Tool output was not JSON or JSONPath missed — wrong repo often surfaces as `tool_result_preview` with `failed to list issues: …`; use `warden list steps --trace-id … --errors` |
 | `TOOL_RESULT_TRUNCATED` | Defensive: tool JSON was cut at the historical 8000-char record limit (should not occur after worker fix); narrow MCP query params |
-| `no_submit_call` | ReAct step exhausted turns without `_submit` — check `last_tool_errors` in `warden show step … --json` for MCP messages |
+| `no_submit_call` | ReAct step exhausted turns without `_submit` — on text-only exit (`model_text_exit`), check `last_assistant_content` in `warden show step … --json`; use `last_tool_errors` only for real MCP failure output |
 | `TOOL_INVOKE_FAILED` (tool arg validation) | Model sent wrong types for MCP tool args — Warden admits common Ollama stringification ([Configuration → LLM JSON admission](configuration.md#llm-json-admission)); persistent failures may need a stronger model or shallower tool schemas |
 | `issue_read` 404 | Don't pass `issue_number` for a closed or missing issue |
 | `POLICY_COMMIT_DENIED` | Commit `body` must contain `## Warden triage`; `owner`/`repo` must match start input |

@@ -30,6 +30,17 @@ def test_format_step_error_brief_prefers_last_tool_errors() -> None:
     assert brief.startswith("no_submit_call (failed to list issues")
 
 
+def test_format_step_error_brief_prefers_last_assistant_content_for_no_submit() -> None:
+    details = {
+        "code": "no_submit_call",
+        "message": "no submit",
+        "reason": "model_text_exit",
+        "last_assistant_content": "I finished the work without calling _submit.",
+    }
+    brief = format_step_error_brief(details)
+    assert brief.startswith("no_submit_call (I finished the work")
+
+
 def test_format_step_error_brief_simple_lane_structured_output_failed() -> None:
     details = {
         "code": "structured_output_failed",
