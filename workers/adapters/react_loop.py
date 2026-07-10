@@ -268,16 +268,6 @@ async def _process_tool_calls(
     return None
 
 
-def _tool_result_looks_problematic(raw: str) -> bool:
-    if state_utils.tool_output_indicates_failure(raw):
-        return True
-    try:
-        json.loads(raw)
-    except json.JSONDecodeError:
-        return True
-    return False
-
-
 def _collect_last_tool_errors(tool_results: list[dict[str, Any]]) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
     for entry in tool_results:
@@ -287,7 +277,7 @@ def _collect_last_tool_errors(tool_results: list[dict[str, Any]]) -> list[dict[s
         raw = entry.get("result")
         if not isinstance(tool, str) or not isinstance(raw, str):
             continue
-        if not _tool_result_looks_problematic(raw):
+        if not state_utils.tool_output_indicates_failure(raw):
             continue
         errors.append({"tool": tool, "preview": raw[:_TOOL_ERROR_PREVIEW_LEN]})
     return errors[-_MAX_LAST_TOOL_ERRORS:]
@@ -299,6 +289,7 @@ def _raise_no_submit(
     turns_used: int,
     max_turns: int,
     tool_results: list[dict[str, Any]],
+    assistant_content: str | None = None,
 ) -> NoReturn:
     message = "Agent did not call _submit with a result. Step output must be submitted via _submit."
     extra: dict[str, Any] = {
@@ -307,6 +298,10 @@ def _raise_no_submit(
         "max_turns": max_turns,
         "error": "no_submit_call",
     }
+    if reason == "model_text_exit" and isinstance(assistant_content, str):
+        stripped = assistant_content.strip()
+        if stripped:
+            extra["last_assistant_content"] = stripped[:_TOOL_ERROR_PREVIEW_LEN]
     last_tool_errors = _collect_last_tool_errors(tool_results)
     if last_tool_errors:
         extra["last_tool_errors"] = last_tool_errors
@@ -385,6 +380,7 @@ async def _react_loop_turn(
             turns_used=turns_used,
             max_turns=max_turns,
             tool_results=tool_results,
+            assistant_content=response.content,
         )
 
     _log_transcript(messages, log_preview_len=log_preview_len)

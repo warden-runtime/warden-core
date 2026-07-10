@@ -111,7 +111,8 @@ Optional context fields on `error_details` (CLI `warden list steps --errors` / `
 
 | Field | When present |
 |-------|----------------|
-| `reason`, `turns_used`, `last_tool_errors` | `no_submit_call` after ReAct exhaustion or text-only exit |
+| `reason`, `turns_used`, `last_assistant_content` | `no_submit_call` when the model exited with prose instead of `_submit` (`reason: model_text_exit`) |
+| `reason`, `turns_used`, `last_tool_errors` | `no_submit_call` when tool output matched MCP failure heuristics (e.g. `MCP error: …`) |
 | `tool_result_preview` | `FACT_EXTRACTION_FAILED` / `TOOL_RESULT_TRUNCATED` when tool text explains the failure |
 | `truncation_limit` | `TOOL_RESULT_TRUNCATED` when JSON was cut at the worker record limit |
 | `response_preview` | `structured_output_failed` on `simple` steps |

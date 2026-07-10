@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Coerce sloppy LLM tool arguments against MCP `inputSchema` before ReAct validation (common Ollama/vLLM stringified array/object fields)
 - Admit LLM JSON against reason-step `output_schema` before validation (`_submit` and `simple` structured output)
 - LLM JSON admission no longer crashes on nullable union `type` arrays; coerce string `"null"` / `"none"` to JSON `null` when the schema allows it
+- `no_submit_call` no longer lists successful plain-text MCP tool output in `last_tool_errors`; expose final assistant text as `last_assistant_content` on `model_text_exit`
 
 ## [0.1.0] - 2026-06-30
 
