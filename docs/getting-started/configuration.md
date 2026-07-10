@@ -249,6 +249,7 @@ Does **not** apply to commit-step tool `output.data` (MCP/server JSON) or non-LL
 |----------|--------|
 | Depth | Two levels: top-level fields, plus one nested level inside arrays and objects |
 | Coercions | Stringified JSON arrays/objects; scalar strings → `integer`, `number`, or `boolean` when unambiguous |
+| Nullable unions | Union `type` arrays (e.g. `["string", "null"]`) supported; string `"null"` / `"none"` (case-insensitive, trimmed) coerces to JSON `null` when the schema allows it |
 | `string` fields | Never JSON-parsed (a string value that looks like JSON stays a string) |
 | Best-effort | Values that cannot be coerced are left unchanged; validation may still fail downstream |
 | Limitation | Schemas deeper than two levels are not recursively coerced; deeply nested mistakes may still fail |

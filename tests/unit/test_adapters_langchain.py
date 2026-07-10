@@ -370,6 +370,23 @@ def test_validate_submit_payload_admits_stringified_boolean_and_array():
     assert admitted == {"feasible": False, "tags": ["a"]}
 
 
+def test_validate_submit_payload_admits_nullable_union_types():
+    schema = {
+        "type": "object",
+        "required": ["feasible", "clone_url"],
+        "properties": {
+            "feasible": {"type": "boolean"},
+            "clone_url": {"type": ["string", "null"]},
+            "abandon_reason": {"type": ["string", "null"]},
+        },
+    }
+    admitted = _validate_submit_payload(
+        {"feasible": "true", "clone_url": "null", "abandon_reason": "None"},
+        output_schema=schema,
+    )
+    assert admitted == {"feasible": True, "clone_url": None, "abandon_reason": None}
+
+
 def test_validate_structured_payload_admits_stringified_boolean():
     schema = {
         "type": "object",

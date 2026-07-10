@@ -158,6 +158,56 @@ def _coerce_object_value(
     return coerced
 
 
+_COERCE_NULL_UNCHANGED = object()
+_JSON_TYPE_PRIORITY = ("boolean", "integer", "number", "array", "object", "string")
+
+
+def _schema_type_names(field_schema: dict[str, Any]) -> frozenset[str]:
+    raw_type = field_schema.get("type", "string")
+    if isinstance(raw_type, str):
+        return frozenset({raw_type})
+    if isinstance(raw_type, list):
+        names = {item for item in raw_type if isinstance(item, str)}
+        return frozenset(names) if names else frozenset({"string"})
+    return frozenset({"string"})
+
+
+def _schema_allows_null(type_names: frozenset[str]) -> bool:
+    return "null" in type_names
+
+
+def _primary_json_type(type_names: frozenset[str]) -> str:
+    non_null = type_names - {"null"}
+    for json_type in _JSON_TYPE_PRIORITY:
+        if json_type in non_null:
+            return json_type
+    return "string"
+
+
+def _try_coerce_null_string(value: Any, *, allows_null: bool) -> Any:
+    if not allows_null or not isinstance(value, str):
+        return _COERCE_NULL_UNCHANGED
+    if value.strip().lower() in ("null", "none"):
+        return None
+    return _COERCE_NULL_UNCHANGED
+
+
+def _coerce_string_for_primary_type(
+    value: str,
+    primary: str,
+    *,
+    depth: int,
+    max_depth: int,
+) -> Any:
+    if primary in ("integer", "number", "boolean"):
+        return _coerce_scalar_string(value, primary)
+    if primary in ("array", "object"):
+        if depth >= max_depth:
+            return value
+        return _parse_json_container_string(value, primary)
+    return value
+
+
 def _coerce_value_for_schema(
     value: Any,
     field_schema: dict[str, Any],
@@ -166,22 +216,27 @@ def _coerce_value_for_schema(
     max_depth: int,
 ) -> Any:
     """Best-effort coercion of a single value against a JSON Schema field definition."""
-    json_type = field_schema.get("type", "string")
-    if json_type == "string":
+    type_names = _schema_type_names(field_schema)
+    coerced_null = _try_coerce_null_string(value, allows_null=_schema_allows_null(type_names))
+    if coerced_null is not _COERCE_NULL_UNCHANGED:
+        return coerced_null
+
+    primary = _primary_json_type(type_names)
+    if primary == "string":
         return value
 
     if isinstance(value, str):
-        if json_type in {"integer", "number", "boolean"}:
-            return _coerce_scalar_string(value, json_type)
-        if json_type in {"array", "object"}:
-            if depth >= max_depth:
-                return value
-            value = _parse_json_container_string(value, json_type)
+        value = _coerce_string_for_primary_type(
+            value,
+            primary,
+            depth=depth,
+            max_depth=max_depth,
+        )
 
-    if json_type == "array" and isinstance(value, list):
+    if primary == "array" and isinstance(value, list):
         return _coerce_array_value(value, field_schema, depth=depth, max_depth=max_depth)
 
-    if json_type == "object" and isinstance(value, dict):
+    if primary == "object" and isinstance(value, dict):
         return _coerce_object_value(value, field_schema, depth=depth, max_depth=max_depth)
 
     return value
