@@ -35,6 +35,24 @@ make tests
 uv run pytest tests -q
 ```
 
+**Optional live LLM checks** — skipped unless you opt in (does not run under plain `make tests` when `WARDEN_LIVE_LLM` is unset). Uses real provider APIs and costs tokens:
+
+```bash
+# Anthropic
+WARDEN_LIVE_LLM=1 ANTHROPIC_API_KEY=sk-ant-... \
+  uv run --extra worker --extra dev pytest tests/live/test_anthropic_live.py -q -s
+
+# OpenAI
+WARDEN_LIVE_LLM=1 OPENAI_API_KEY=sk-... \
+  uv run --extra worker --extra dev pytest tests/live/test_openai_live.py -q -s
+
+# Both (each file still skips if its own key is missing)
+WARDEN_LIVE_LLM=1 ANTHROPIC_API_KEY=sk-ant-... OPENAI_API_KEY=sk-... \
+  uv run --extra worker --extra dev pytest tests/live -q -s
+```
+
+Optional model overrides: `WARDEN_ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`), `WARDEN_OPENAI_MODEL` (default `gpt-4o-mini`).
+
 **While iterating** — narrow to the area you are changing:
 
 ```bash

@@ -56,10 +56,27 @@ async def test_ainvoke_returns_tool_calls(adapter, mock_llm):
     ]
     response = await adapter.ainvoke(messages)
     assert isinstance(response, ChatResponse)
+    assert response.content is None
     assert len(response.tool_calls) == 1
     assert response.tool_calls[0].name == "get_weather"
     assert response.tool_calls[0].args == {"city": "Paris"}
     assert response.tool_calls[0].id == "call_1"
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_flattens_list_content_blocks(adapter, mock_llm):
+    """OpenAI-compatible list content blocks are flattened (e.g. local servers)."""
+    mock_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(
+            content=[
+                {"type": "text", "text": '{"summary": "ok"}'},
+                {"type": "text", "text": " more"},
+            ],
+            tool_calls=[],
+        ),
+    )
+    response = await adapter.ainvoke([ChatMessage(role="human", content="Go")])
+    assert response.content == '{"summary": "ok"}\n more'
 
 
 @pytest.mark.asyncio

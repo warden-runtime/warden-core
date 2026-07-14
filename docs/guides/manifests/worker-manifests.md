@@ -31,15 +31,16 @@ system_prompt: |
 
 ## Providers
 
-Warden currently supports three inference providers:
+Warden currently supports four inference providers:
 
 | Provider | Credentials | Notes |
 |----------|-------------|-------|
 | `openai` | `OPENAI_API_KEY` (or `provider_secrets` row) | Any OpenAI-compatible cloud model |
+| `anthropic` | `ANTHROPIC_API_KEY` (or `provider_secrets` row) | Claude models via LangChain |
 | `local` | None — optional `WARDEN_LOCAL_LLM_BASE_URL` | OpenAI-compatible local endpoint (Ollama, vLLM, etc.). Under Compose, see [Configuration → Local LLM under Docker (Ollama)](../../getting-started/configuration.md#local-llm-under-docker-ollama) |
 | `mock` | None | Credential-free demo — [Demo: Mock LLM and MCP](../../getting-started/demo-mock-llm-and-mcp.md) |
 
-YAML accepts other provider names (like `anthropic`), but they fail at runtime until you add an adapter. See [Extending Warden — LLM providers](../../advanced/extending-warden.md#add-an-llm-provider).
+Unknown `provider` values fail at worker step runtime with `ValueError` from `build_llm()`. To add another provider, see [Extending Warden — LLM providers](../../advanced/extending-warden.md#add-an-llm-provider).
 
 ## MCP tool sources
 

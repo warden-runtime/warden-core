@@ -37,6 +37,12 @@ class RetryingChatModelPort(ChatModelPort):
     def bind_tools(self, tools: Sequence[ToolProtocol]) -> RetryingChatModelPort:
         return RetryingChatModelPort(self._inner.bind_tools(tools), self._policy)
 
+    def bind_json_schema(self, schema: dict[str, Any]) -> ChatModelPort:
+        # Wrap *this* port so JSON-mode fallback ainvoke still retries via the decorator.
+        from workers.llm.structured import SchemaBoundChatModel
+
+        return SchemaBoundChatModel(self, schema)
+
     async def ainvoke(self, messages: Sequence[ChatMessage]) -> ChatResponse:
         return await retry_async(
             lambda: self._inner.ainvoke(messages),

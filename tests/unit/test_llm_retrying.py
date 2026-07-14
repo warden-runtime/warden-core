@@ -68,3 +68,21 @@ def test_bind_tools_returns_retrying_wrapper():
     assert wrapped._inner is bound_inner
     assert wrapped._policy == policy
     inner.bind_tools.assert_called_once_with(tools)
+
+
+def test_bind_json_schema_wraps_retrying_port():
+    """bind_json_schema must wrap the retry decorator so simple path keeps retries."""
+    from workers.llm.structured import SchemaBoundChatModel
+
+    inner = MagicMock()
+    policy = LlmRetryPolicy(max_attempts=3, base_delay_s=1.0, max_delay_s=60.0)
+    llm = RetryingChatModelPort(inner, policy)
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+
+    bound = llm.bind_json_schema(schema)
+
+    assert isinstance(bound, SchemaBoundChatModel)
+    assert bound._inner is llm
+    assert bound._schema == schema
+    # Do not unwrap past the retry layer (would drop retries on JSON-mode ainvoke).
+    inner.bind_json_schema.assert_not_called()

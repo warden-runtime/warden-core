@@ -42,6 +42,7 @@ worker = [
     "jsonpath-ng>=1.8",
     "mcp>=1.26",
     "opentelemetry-instrumentation-httpx>=0.60b1",
+    "langchain-anthropic>=0.3",
 ]
 cli = [
     "typer>=0.21",
@@ -120,6 +121,7 @@ markers = [
     "integration: engine+worker+DB wiring tests (mock adapter; no network)",
     "postgres: requires PostgreSQL (Docker testcontainers or WARDEN_TEST_POSTGRES_URL)",
     "schema_migration: manages Postgres schema directly; skips table truncate",
+    "live: optional live provider API checks (requires WARDEN_LIVE_LLM=1 + provider key)",
 ]
 filterwarnings = [
     "ignore:Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater:UserWarning",

@@ -6,6 +6,7 @@ import logging
 import os
 
 from common.llm import ChatModelPort
+from workers.llm.anthropic import AnthropicChatAdapter
 from workers.llm.mock import MockChatAdapter
 from workers.llm.openai import OpenAIChatAdapter
 from workers.llm.retrying import wrap_llm_with_retry
@@ -32,10 +33,10 @@ def build_llm(
         temperature: Sampling temperature.
 
     Returns:
-        ChatModelPort implementation (e.g. OpenAIChatAdapter).
+        ChatModelPort implementation (e.g. OpenAIChatAdapter, AnthropicChatAdapter).
 
     Raises:
-        ValueError: If provider is not supported (e.g. anthropic not yet implemented).
+        ValueError: If provider is not supported.
     """
     normalized = (provider or "").strip().lower()
     if normalized == "openai":
@@ -66,12 +67,15 @@ def build_llm(
         logger.info("Initializing mock LLM for demo: model=%s", model_name)
         return MockChatAdapter()
     if normalized == "anthropic":
-        logger.error(
-            "Provider 'anthropic' is not implemented; add langchain-anthropic and an adapter."
-        )
-        raise ValueError(
-            "Provider 'anthropic' is not implemented. "
-            "Install langchain-anthropic and add workers.llm.anthropic adapter, or use provider='openai'."
+        logger.info("Initializing Anthropic Claude LLM: model=%s", model_name)
+        return wrap_llm_with_retry(
+            AnthropicChatAdapter(
+                model_name=model_name,
+                api_key=api_key,
+                temperature=temperature,
+            )
         )
     logger.error("Unknown LLM provider: %s", provider)
-    raise ValueError(f"Unknown LLM provider: {provider!r}. Supported: openai, local, mock.")
+    raise ValueError(
+        f"Unknown LLM provider: {provider!r}. Supported: openai, local, anthropic, mock."
+    )

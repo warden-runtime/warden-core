@@ -6,64 +6,13 @@ import logging
 from collections.abc import Sequence
 from typing import Any, cast
 
-from common.llm import ChatMessage, ChatModelPort, ChatResponse, ToolCall, ToolProtocol
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
+from common.llm import ChatMessage, ChatModelPort, ChatResponse, ToolProtocol
+from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
+from workers.llm.message_content import aimessage_to_chat_response, chat_message_to_langchain
 from workers.llm.structured import SchemaBoundChatModel
 
 logger = logging.getLogger(__name__)
-
-
-def _chat_message_to_langchain(msg: ChatMessage) -> BaseMessage:
-    """Convert a ChatMessage to the corresponding LangChain message type."""
-    if msg.role == "system":
-        return SystemMessage(content=msg.content)
-    if msg.role == "human":
-        return HumanMessage(content=msg.content)
-    if msg.role == "assistant":
-        lc_tool_calls = None
-        if msg.tool_calls:
-            lc_tool_calls = [
-                {"name": tc.name, "args": tc.args, "id": tc.id} for tc in msg.tool_calls
-            ]
-        return AIMessage(content=msg.content, tool_calls=lc_tool_calls or [])
-    if msg.role == "tool":
-        return ToolMessage(
-            content=msg.content,
-            tool_call_id=msg.tool_call_id or "",
-            name=msg.name or "",
-        )
-    raise ValueError(f"Unknown ChatMessage role: {msg.role!r}")
-
-
-def _aimessage_to_chat_response(aimessage: AIMessage) -> ChatResponse:
-    """Convert a LangChain AIMessage to ChatResponse."""
-    content = aimessage.content if isinstance(aimessage.content, str) else None
-    tool_calls: list[ToolCall] = []
-    for tc in getattr(aimessage, "tool_calls", []) or []:
-        if hasattr(tc, "get"):
-            tool_calls.append(
-                ToolCall(
-                    name=tc.get("name", ""),
-                    args=tc.get("args") or {},
-                    id=tc.get("id") or "",
-                )
-            )
-        else:
-            tool_calls.append(
-                ToolCall(
-                    name=getattr(tc, "name", ""),
-                    args=getattr(tc, "args", None) or {},
-                    id=getattr(tc, "id", "") or "",
-                )
-            )
-    return ChatResponse(content=content, tool_calls=tool_calls)
 
 
 class OpenAIChatAdapter(ChatModelPort):
@@ -147,12 +96,12 @@ class OpenAIChatAdapter(ChatModelPort):
             Exception: Re-raised after logging on LLM or conversion failure.
         """
         try:
-            lc_messages = [_chat_message_to_langchain(m) for m in messages]
+            lc_messages = [chat_message_to_langchain(m) for m in messages]
             aimessage = await self._llm.ainvoke(lc_messages)
             if not isinstance(aimessage, AIMessage):
                 logger.error("Unexpected response type: %s", type(aimessage), exc_info=False)
                 raise TypeError(f"Expected AIMessage, got {type(aimessage)}")
-            return _aimessage_to_chat_response(aimessage)
+            return aimessage_to_chat_response(aimessage)
         except Exception:
             logger.exception("OpenAI adapter ainvoke failed")
             raise

@@ -41,6 +41,7 @@ htmlcov/
 /RECOVERY_PLAN.md
 example_docs-review.yaml
 warden-walkthrough/
+*.org
 
 # --- Python packaging ---
 .venv/
@@ -63,3 +64,4 @@ website/build/
 
 # Generated OpenAPI reference MDX (run `make docs-api`)
 docs/api/
+.aider*

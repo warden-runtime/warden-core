@@ -28,7 +28,7 @@ Warden uses the word **adapter** in three places — they are not interchangeabl
 
 | Layer | Interface | Selected by | Shipped today |
 |-------|-----------|-------------|---------------|
-| **LLM adapter** | `ChatModelPort` | Worker manifest `provider` → `build_llm()` | `openai`, `local`, `mock` |
+| **LLM adapter** | `ChatModelPort` | Worker manifest `provider` → `build_llm()` | `openai`, `anthropic`, `local`, `mock` |
 | **Agent adapter** | `AgentAdapterPort` | Worker manifest `adapter` (optional, default `langchain`) → `resolve_adapter()` | `langchain` only |
 | **Reason strategy** | Inside `AgentAdapterPort` | Saga step `agent-adapter: react \| simple` (default `react`) | `react`, `simple` on `langchain` |
 | **Adapter hooks** | `AdapterHooks` (registry `adapter` slot) | `register_adapter_hooks()` at plugin install | NoOp default |
@@ -57,7 +57,7 @@ class ChatModelPort(ABC):
 
 **Steps:**
 
-1. Implement `ChatModelPort` under `workers/llm/` (reference: `workers/llm/openai.py`, `workers/llm/mock.py`).
+1. Implement `ChatModelPort` under `workers/llm/` (reference: `workers/llm/openai.py`, `workers/llm/anthropic.py`, `workers/llm/mock.py`).
 2. Register the provider name in `workers/llm/factory.py` → `build_llm()`.
 3. Set `provider: <name>` on the worker manifest and document any new env vars in [Configuration](../getting-started/configuration.md).
 

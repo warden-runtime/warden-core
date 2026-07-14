@@ -122,11 +122,12 @@ You normally do not run `make migrate` for a first boot — the one-shot **migra
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | `postgres` service (Compose) | Must match credentials in host `DB_URL` |
 | `ENGINE_URL` | **host CLI only** | `http://127.0.0.1:8000` from your machine (published port). Engine and worker containers do **not** use this variable—they coordinate through Postgres. If you run the CLI inside the Compose network, use `http://engine:8000` instead of loopback |
 | `OPENAI_API_KEY` | worker | when `provider: openai` — not required for `provider: local` or `provider: mock`. Checked at **step runtime**, not at deploy |
+| `ANTHROPIC_API_KEY` | worker | when `provider: anthropic` — Claude via LangChain. Checked at **step runtime**, not at deploy |
 | `WARDEN_LOCAL_LLM_BASE_URL` | worker | OpenAI-compatible local endpoint (optional; defaults to `http://localhost:11434/v1`) |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | worker | GitHub MCP demo only (stdio `env_inherit`) |
 | `${ENV:…}` in worker manifest | worker | SSE MCP auth — names like `COMPANY_MCP_TOKEN` referenced in `tool_sources[].headers`; set on worker, not in YAML |
 
-Under Compose, `.env` is injected when a container **starts**. After you add or change worker-scoped variables (`OPENAI_API_KEY`, `WARDEN_LOCAL_LLM_BASE_URL`, MCP tokens), restart the worker — not the engine: `docker compose up -d worker`. A step that already failed with missing credentials stays failed until you retry it or start a new saga instance.
+Under Compose, `.env` is injected when a container **starts**. After you add or change worker-scoped variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `WARDEN_LOCAL_LLM_BASE_URL`, MCP tokens), restart the worker — not the engine: `docker compose up -d worker`. A step that already failed with missing credentials stays failed until you retry it or start a new saga instance.
 
 For **hosted SSE MCP**, declare headers in the worker manifest with `${ENV:VAR}` placeholders and set `VAR` on the worker process. Example worker manifest:
 
