@@ -8,9 +8,12 @@ Worker processes accumulate usage across ReAct / structured LLM calls and emit
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from common.agent_adapter import ExecutionStepError
+from common.error_details import build_step_error_details
 from common.execution_timing import clamp_nonneg
 
 if TYPE_CHECKING:
@@ -33,6 +36,44 @@ _DETAIL_KEY_ALIASES: dict[str, str] = {
     "reasoning": "reasoning_tokens",
     "reasoning_tokens": "reasoning_tokens",
 }
+
+
+def effective_max_step_tokens(step_value: int | None) -> int | None:
+    """Resolve step YAML budget, falling back to WARDEN_MAX_STEP_TOKENS when unset.
+
+    Returns None when unlimited (omit / null step field and env unset or 0).
+    """
+    if step_value is not None:
+        return step_value if step_value > 0 else None
+    raw = os.environ.get("WARDEN_MAX_STEP_TOKENS", "0") or "0"
+    try:
+        env = int(raw)
+    except ValueError:
+        return None
+    return env if env > 0 else None
+
+
+def enforce_step_token_budget(
+    usage_acc: WorkerUsageAccumulator,
+    max_step_tokens: int | None,
+) -> None:
+    """Abort the step when accumulated provider total_tokens exceed the budget."""
+    if not max_step_tokens or usage_acc.total_tokens <= max_step_tokens:
+        return
+    message = (
+        f"Step consumed {usage_acc.total_tokens} tokens, exceeding budget of {max_step_tokens}."
+    )
+    raise ExecutionStepError(
+        f"Step token budget of {max_step_tokens} exceeded (consumed {usage_acc.total_tokens}).",
+        error_details=build_step_error_details(
+            code="STEP_TOKEN_LIMIT_EXCEEDED",
+            message=message,
+            tokens_used=usage_acc.total_tokens,
+            max_step_tokens=max_step_tokens,
+            prompt_tokens=usage_acc.prompt_tokens,
+            completion_tokens=usage_acc.completion_tokens,
+        ),
+    )
 
 
 def _normalize_detail_key(key: str) -> str | None:

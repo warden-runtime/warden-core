@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 from common.agent_adapter import ExecutionStepError
 from common.error_details import build_step_error_details
 from common.execution_timing import elapsed_ms
+from common.execution_usage import enforce_step_token_budget
 from common.governance import admit_and_validate
 from common.llm import ChatMessage, ChatModelPort, ChatResponse
 from common.utils import create_pydantic_model_from_schema
@@ -112,6 +113,7 @@ async def invoke_structured_output(
     *,
     timing_acc: WorkerTimingAccumulator | None = None,
     usage_acc: WorkerUsageAccumulator | None = None,
+    max_step_tokens: int | None = None,
 ) -> dict[str, Any]:
     """Run tiered structured completion and return a validated business dict."""
     llm_start: float | None = None
@@ -133,6 +135,7 @@ async def invoke_structured_output(
         timing_acc.add_ms("llm_ms", elapsed_ms(llm_start))
     if usage_acc is not None:
         usage_acc.add(usage)
+        enforce_step_token_budget(usage_acc, max_step_tokens)
 
     if payload is None:
         _raise_structured_output_failed(

@@ -42,6 +42,7 @@ CREATE TABLE saga_step_instances (
   end_time TIMESTAMPTZ NULL,
   timeout_seconds INTEGER NOT NULL,
   max_turns INTEGER NOT NULL DEFAULT 10,
+  max_step_tokens INTEGER NULL,
   status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
   worker VARCHAR(255) NOT NULL,
   worker_version VARCHAR(50) NOT NULL DEFAULT '1.0.0',

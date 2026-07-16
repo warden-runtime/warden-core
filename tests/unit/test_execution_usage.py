@@ -154,3 +154,48 @@ def test_clear_step_timing_fields_also_clears_usage():
     assert step.execution_timing is None
     assert step.pending_engine_timing is None
     assert step.execution_usage is None
+
+
+def test_effective_max_step_tokens_prefers_step_value(monkeypatch):
+    from common.execution_usage import effective_max_step_tokens
+
+    monkeypatch.setenv("WARDEN_MAX_STEP_TOKENS", "999")
+    assert effective_max_step_tokens(50) == 50
+    assert effective_max_step_tokens(None) == 999
+
+
+def test_effective_max_step_tokens_env_zero_means_unlimited(monkeypatch):
+    from common.execution_usage import effective_max_step_tokens
+
+    monkeypatch.setenv("WARDEN_MAX_STEP_TOKENS", "0")
+    assert effective_max_step_tokens(None) is None
+    monkeypatch.delenv("WARDEN_MAX_STEP_TOKENS", raising=False)
+    assert effective_max_step_tokens(None) is None
+
+
+def test_enforce_step_token_budget_raises_with_forensics():
+    from common.agent_adapter import ExecutionStepError
+    from common.execution_usage import WorkerUsageAccumulator, enforce_step_token_budget
+    from common.llm import TokenUsage
+
+    acc = WorkerUsageAccumulator()
+    acc.add(TokenUsage(prompt_tokens=70, completion_tokens=30, total_tokens=100))
+    with pytest.raises(ExecutionStepError) as exc_info:
+        enforce_step_token_budget(acc, 50)
+    details = exc_info.value.error_details or {}
+    assert details["code"] == "STEP_TOKEN_LIMIT_EXCEEDED"
+    assert details["tokens_used"] == 100
+    assert details["max_step_tokens"] == 50
+    assert details["prompt_tokens"] == 70
+    assert details["completion_tokens"] == 30
+
+
+def test_enforce_step_token_budget_noop_when_unlimited_or_under():
+    from common.execution_usage import WorkerUsageAccumulator, enforce_step_token_budget
+    from common.llm import TokenUsage
+
+    acc = WorkerUsageAccumulator()
+    acc.add(TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+    enforce_step_token_budget(acc, None)
+    enforce_step_token_budget(acc, 15)
+    enforce_step_token_budget(acc, 100)

@@ -235,6 +235,7 @@ ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **to
 |----------|---------|---------|
 | `WORKER_MAX_IN_FLIGHT` | `1` | Max concurrent step commands handled by **one worker process** (outbox consumer semaphore) |
 | `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping |
+| `WARDEN_MAX_STEP_TOKENS` | unset / `0` | Process-wide fallback token budget for reason steps that omit `max_step_tokens`; `0` or unset = no fallback |
 
 ### LLM JSON admission
 

@@ -204,6 +204,9 @@ async def _create_saga_and_steps(
             idempotency_key=f"{trace_id}-{step_id}",
             timeout_seconds=step_model.timeout_seconds,
             max_turns=step_model.max_turns,
+            max_step_tokens=(
+                step_model.max_step_tokens if isinstance(step_model, ReasonSagaStep) else None
+            ),
             agent_adapter=(
                 step_model.agent_adapter if isinstance(step_model, ReasonSagaStep) else "react"
             ),

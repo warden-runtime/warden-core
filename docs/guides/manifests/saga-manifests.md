@@ -105,6 +105,7 @@ Contrast with the GitHub triage step (default `react`, tools + `_submit`):
 | `react` | `empty_submit_result` | `_submit` called with `{}` |
 | `simple` | `structured_output_failed` | Model response was not parseable JSON (common on weak local models) |
 | `simple` | `empty_structured_result` | Parsed JSON object was empty |
+| either | `STEP_TOKEN_LIMIT_EXCEEDED` | Accumulated provider `total_tokens` exceeded `max_step_tokens` (or `WARDEN_MAX_STEP_TOKENS`) |
 | either | `validation: output_schema` / `OUTPUT_SCHEMA_VALIDATION_FAILED` | Payload failed JSON Schema |
 
 Optional context fields on `error_details` (CLI `warden list steps --errors` / `warden show step`):
@@ -113,6 +114,7 @@ Optional context fields on `error_details` (CLI `warden list steps --errors` / `
 |-------|----------------|
 | `reason`, `turns_used`, `last_assistant_content` | `no_submit_call` when the model exited with prose instead of `_submit` (`reason: model_text_exit`) |
 | `reason`, `turns_used`, `last_tool_errors` | `no_submit_call` when tool output matched MCP failure heuristics (e.g. `MCP error: …`) |
+| `tokens_used`, `max_step_tokens`, `prompt_tokens`, `completion_tokens` | `STEP_TOKEN_LIMIT_EXCEEDED` |
 | `tool_result_preview` | `FACT_EXTRACTION_FAILED` / `TOOL_RESULT_TRUNCATED` when tool text explains the failure |
 | `truncation_limit` | `TOOL_RESULT_TRUNCATED` when JSON was cut at the worker record limit |
 | `response_preview` | `structured_output_failed` on `simple` steps |
@@ -357,7 +359,18 @@ There is no built-in reviewer UI — the kernel exposes CLI and HTTP only. For c
 
 ## Step budgets
 
-`reason` steps accept `max_turns` (default **10**, max **200**) on **`agent-adapter: react`** steps — a cap on back-and-forth tool/LLM rounds. **`simple`** steps ignore `max_turns` (always one LLM call).
+`reason` steps accept two independent caps:
+
+| Field | Applies to | Default | Meaning |
+|-------|------------|---------|---------|
+| `max_turns` | **`react` only** | **10** (max **200**) | Cap on back-and-forth tool/LLM rounds. **`simple`** ignores it (always one LLM call). |
+| `max_step_tokens` | **`react` and `simple`** | unlimited (omit / null) | Financial guardrail: abort when accumulated provider-reported **`total_tokens`** (prompt + completion across the step) exceed this budget. |
+
+`max_step_tokens` counts **gross physical tokens** from the provider usage metadata — not cache-discounted billed tokens. Prompt caching can make the invoice much smaller than the counted total; the budget still uses the raw counter. Compensation loops **never** enforce this budget (hydrate always passes unlimited) so rollbacks are not cut short mid-cleanup.
+
+Optional process-wide fallback: set worker env `WARDEN_MAX_STEP_TOKENS` (see [Configuration](../../getting-started/configuration.md)). It applies only when the step omits `max_step_tokens`. Unset or `0` means no fallback.
+
+When the budget is exceeded, the step fails with `error_details.code: STEP_TOKEN_LIMIT_EXCEEDED` (includes `tokens_used`, `max_step_tokens`, `prompt_tokens`, `completion_tokens`). Usage from completed LLM turns is still written to `execution_usage` on `STEP_FAILED`.
 
 `timeout_seconds` is a safety clock for step execution (default **600** seconds). If a worker claims a step and then crashes or hangs, Warden waits for this window to expire, marks the step `FAILED`, and can trigger compensation — it won't auto-retry a stuck step. See [Saga recovery](../cli/saga-recovery.md) for how the open kernel vs enterprise handle timeouts and stale claims.
 
@@ -370,6 +383,7 @@ On `triage`:
     worker_version: "1.0.0"
     prompt: triage.j2
     max_turns: 15
+    max_step_tokens: 50000
     timeout_seconds: 600
     tools:
       allow:
@@ -377,7 +391,7 @@ On `triage`:
         - name: issue_read
 ```
 
-Compensation steps inherit `max_turns` from the forward step unless you override it in the compensation file. Compensation YAML lives at `config/<compensation-file>.yaml` (via `COMPENSATIONS_ROOT`; see [Compensation](compensation.md#declaring-compensation)).
+Compensation steps inherit `max_turns` from the forward step unless you override it in the compensation file. Compensation YAML lives at `config/<compensation-file>.yaml` (via `COMPENSATIONS_ROOT`; see [Compensation](compensation.md#declaring-compensation)). Token budgets do not apply to compensation.
 
 ## Structured output (`output_schema`)
 

@@ -10,8 +10,9 @@ from workers.llm.structured import invoke_structured_output
 
 
 class _JsonContentLLM(ChatModelPort):
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, *, usage=None) -> None:
         self._content = content
+        self._usage = usage
 
     def bind_tools(self, tools):
         return self
@@ -23,7 +24,7 @@ class _JsonContentLLM(ChatModelPort):
         return None
 
     async def ainvoke(self, messages):
-        return ChatResponse(content=self._content)
+        return ChatResponse(content=self._content, usage=self._usage)
 
 
 def test_resolve_effective_schema_uses_fallback():
@@ -95,3 +96,28 @@ async def test_invoke_structured_output_fails_on_unparseable_content():
         )
     assert exc_info.value.error_details.get("code") == "structured_output_failed"
     assert exc_info.value.error_details.get("message")
+
+
+@pytest.mark.asyncio
+async def test_invoke_structured_output_enforces_token_budget():
+    from common.execution_usage import WorkerUsageAccumulator
+    from common.llm import TokenUsage
+
+    llm = _JsonContentLLM(
+        '{"summary": "hello"}',
+        usage=TokenUsage(prompt_tokens=80, completion_tokens=20, total_tokens=100),
+    )
+    usage_acc = WorkerUsageAccumulator()
+    with pytest.raises(ExecutionStepError) as exc_info:
+        await invoke_structured_output(
+            llm,
+            [ChatMessage(role="human", content="go")],
+            FALLBACK_SIMPLE_OUTPUT_SCHEMA,
+            usage_acc=usage_acc,
+            max_step_tokens=50,
+        )
+    details = exc_info.value.error_details or {}
+    assert details.get("code") == "STEP_TOKEN_LIMIT_EXCEEDED"
+    assert details.get("tokens_used") == 100
+    assert details.get("max_step_tokens") == 50
+    assert usage_acc.total_tokens == 100

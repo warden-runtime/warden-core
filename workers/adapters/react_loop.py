@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from common.agent_adapter import ExecutionStepError
 from common.error_details import build_step_error_details
 from common.execution_timing import elapsed_ms
+from common.execution_usage import enforce_step_token_budget
 from common.llm import ChatMessage, ChatModelPort, ChatResponse, ToolCall
 from common.tool_results import clip_tool_text_for_llm, tool_message_limit_from_env
 from common.utils import (
@@ -377,6 +378,7 @@ async def _react_loop_turn(
     log_preview_len: int | None,
     timing_acc: WorkerTimingAccumulator | None,
     usage_acc: WorkerUsageAccumulator | None,
+    max_step_tokens: int | None,
     turns_used: int,
     max_turns: int,
     tool_message_limit: int | None = None,
@@ -389,6 +391,7 @@ async def _react_loop_turn(
         timing_acc.add_ms("llm_ms", elapsed_ms(llm_start))
     if usage_acc is not None:
         usage_acc.add(response.usage)
+        enforce_step_token_budget(usage_acc, max_step_tokens)
     if response.tool_calls:
         submit_payload = await _process_tool_calls(
             response=response,
@@ -452,6 +455,7 @@ async def run_react_loop(
     log_preview_len: int | None = None,
     timing_acc: WorkerTimingAccumulator | None = None,
     usage_acc: WorkerUsageAccumulator | None = None,
+    max_step_tokens: int | None = None,
 ) -> ReactLoopResult:
     """
     Run a bounded ReAct loop: LLM turns, MCP tool execution, then submit or assistant JSON.
@@ -469,12 +473,15 @@ async def run_react_loop(
             ``0`` disables truncation. Falls back to ``WARDEN_REACT_LOG_PREVIEW_LEN``.
         timing_acc: Optional worker timing accumulator (``llm_ms`` / ``tool_ms``).
         usage_acc: Optional worker usage accumulator (provider token totals).
+        max_step_tokens: Optional accumulated total_tokens budget; None means unlimited
+            (compensation must pass None).
 
     Returns:
         ReactLoopResult with transcript and completion fields.
 
     Raises:
-        ExecutionStepError: Governance, allowlist, tool failure, no _submit, or compensation max turns.
+        ExecutionStepError: Governance, allowlist, tool failure, no _submit, token budget,
+            or compensation max turns.
     """
     messages = list(initial_messages)
     tool_results: list[dict[str, Any]] = []
@@ -494,6 +501,7 @@ async def run_react_loop(
             log_preview_len=log_preview_len,
             timing_acc=timing_acc,
             usage_acc=usage_acc,
+            max_step_tokens=max_step_tokens,
             turns_used=turn_index + 1,
             max_turns=max_turns,
             tool_message_limit=tool_message_limit,

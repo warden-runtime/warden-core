@@ -437,3 +437,80 @@ def test_parse_compensation_output_synthetic():
     )
     out = parse_compensation_output(result)
     assert out["rollback_status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_raises_when_step_token_budget_exceeded():
+    from common.execution_usage import WorkerUsageAccumulator
+    from common.llm import TokenUsage
+
+    usage_acc = WorkerUsageAccumulator()
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[ToolCall(name="sandbox_write", args={}, id="1")],
+                usage=TokenUsage(prompt_tokens=40, completion_tokens=10, total_tokens=50),
+            ),
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"summary": "done"}},
+                        id="2",
+                    )
+                ],
+                usage=TokenUsage(prompt_tokens=40, completion_tokens=10, total_tokens=50),
+            ),
+        ]
+    )
+    mock_tool = MagicMock()
+    mock_tool.name = "sandbox_write"
+    mock_tool.ainvoke = AsyncMock(return_value="ok")
+
+    with pytest.raises(ExecutionStepError) as exc_info:
+        await run_react_loop(
+            llm=llm,
+            initial_messages=[ChatMessage(role="human", content="go")],
+            mcp_tools=[mock_tool],
+            allowed_tool_names=["sandbox_write"],
+            completion_mode="submit",
+            max_turns=5,
+            usage_acc=usage_acc,
+            max_step_tokens=60,
+        )
+    details = exc_info.value.error_details or {}
+    assert details.get("code") == "STEP_TOKEN_LIMIT_EXCEEDED"
+    assert details.get("tokens_used") == 100
+    assert details.get("max_step_tokens") == 60
+    assert details.get("prompt_tokens") == 80
+    assert details.get("completion_tokens") == 20
+    assert usage_acc.total_tokens == 100
+
+
+@pytest.mark.asyncio
+async def test_compensation_mode_ignores_token_budget_when_none():
+    """Compensation passes max_step_tokens=None; loop must not abort on tokens."""
+    from common.execution_usage import WorkerUsageAccumulator
+    from common.llm import TokenUsage
+
+    usage_acc = WorkerUsageAccumulator()
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                content='{"rollback_status": "completed"}',
+                usage=TokenUsage(prompt_tokens=500, completion_tokens=50, total_tokens=550),
+            )
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="undo")],
+        mcp_tools=[],
+        allowed_tool_names=[],
+        completion_mode="assistant_json",
+        max_turns=5,
+        usage_acc=usage_acc,
+        max_step_tokens=None,
+    )
+    assert result.final_content is not None
+    assert usage_acc.total_tokens == 550
