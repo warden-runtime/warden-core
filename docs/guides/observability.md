@@ -177,6 +177,8 @@ Forward steps and compensation undo rows may persist provider-reported LLM token
 
 Worker result events carry top-level `usage.worker` on the outbox wire (same envelope shape as `timing.worker`). The engine writes that payload at ingest. Counts come from the provider via LangChain `AIMessage.usage_metadata` (OpenAI / Anthropic today); Warden does **not** run local tokenizers. Dollar / pricing conversion is intentionally out of core — capture raw tokens + `model_id` here; map to USD in a control plane.
 
+Reason steps may also set `max_step_tokens` (or worker env `WARDEN_MAX_STEP_TOKENS`) to abort when accumulated `total_tokens` exceed a budget — see [Saga manifests → Step budgets](manifests/saga-manifests.md#step-budgets). That guardrail uses the same gross physical counters (not cache-adjusted billed tokens). Failed budget aborts still persist usage on `STEP_FAILED`.
+
 ### Usage shape
 
 ```json

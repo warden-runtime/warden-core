@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from common.agent_adapter import StepResult
+from common.agent_adapter import ExecutionStepError, StepResult
 from common.execution_timing import WorkerTimingAccumulator
 from common.execution_usage import WorkerUsageAccumulator
 from common.llm import TokenUsage
@@ -74,3 +74,67 @@ async def test_run_forward_command_emits_timing_after_run():
     assert usage_worker.get("total_tokens") == 15
     assert usage_worker.get("model_id") == "gpt-test"
     assert usage_worker.get("llm_calls") == 1
+
+
+@pytest.mark.asyncio
+async def test_run_forward_command_emits_usage_on_token_budget_failure():
+    """Gotcha A: STEP_TOKEN_LIMIT_EXCEEDED still flushes usage_acc on STEP_FAILED."""
+    timing_acc = WorkerTimingAccumulator()
+    usage_acc = WorkerUsageAccumulator()
+    emitted_usage: dict | None = None
+    emitted_output: dict | None = None
+
+    async def _run() -> StepResult:
+        usage_acc.add(
+            TokenUsage(
+                prompt_tokens=80,
+                completion_tokens=20,
+                total_tokens=100,
+                model_id="gpt-test",
+            )
+        )
+        raise ExecutionStepError(
+            "Step token budget of 50 exceeded (consumed 100).",
+            error_details={
+                "code": "STEP_TOKEN_LIMIT_EXCEEDED",
+                "message": "Step consumed 100 tokens, exceeding budget of 50.",
+                "tokens_used": 100,
+                "max_step_tokens": 50,
+                "prompt_tokens": 80,
+                "completion_tokens": 20,
+            },
+        )
+
+    async def _fake_finalize_failure(**kwargs) -> None:
+        nonlocal emitted_usage, emitted_output
+        emitted_usage = kwargs.get("usage")
+        emitted_output = kwargs.get("output")
+
+    with patch(
+        "workers.logic._finalize_failure",
+        new=AsyncMock(side_effect=_fake_finalize_failure),
+    ):
+        await _run_forward_command(
+            run=_run,
+            scope=AsyncMock(),
+            worker_definition=AsyncMock(),
+            idempotency_key="idem",
+            claim_token=AsyncMock(),
+            handler_started_at=AsyncMock(),
+            namespace="default",
+            saga_trace_id="trace",
+            step_span_id="span",
+            failure_log_prefix="Step",
+            generic_error_code="step_failed",
+            success_log_message="ok %s",
+            timing_acc=timing_acc,
+            usage_acc=usage_acc,
+        )
+
+    assert emitted_usage is not None
+    usage_worker = emitted_usage.get("worker") or {}
+    assert usage_worker.get("total_tokens") == 100
+    assert usage_worker.get("prompt_tokens") == 80
+    assert usage_worker.get("completion_tokens") == 20
+    assert emitted_output is not None
+    assert emitted_output.get("code") == "STEP_TOKEN_LIMIT_EXCEEDED"

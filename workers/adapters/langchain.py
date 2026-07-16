@@ -292,6 +292,7 @@ class LangChainAdapter(AgentAdapterPort):
         ctx: dict[str, Any],
         timing_acc: WorkerTimingAccumulator | None,
         usage_acc: WorkerUsageAccumulator | None,
+        max_step_tokens: int | None,
         tool_specs: list[dict[str, Any]],
         resource_specs: list[ResourceSpec],
     ) -> StepResult:
@@ -321,6 +322,7 @@ class LangChainAdapter(AgentAdapterPort):
                 schema,
                 timing_acc=timing_acc,
                 usage_acc=usage_acc,
+                max_step_tokens=max_step_tokens,
             )
         except ExecutionStepError:
             raise
@@ -359,6 +361,7 @@ class LangChainAdapter(AgentAdapterPort):
         context: dict[str, Any] | None = None,
         output_schema: dict[str, Any] | None = None,
         max_turns: int | None = None,
+        max_step_tokens: int | None = None,
         facts_extractors: list[dict[str, Any]] | None = None,
         agent_adapter: AgentAdapterMode = "react",
     ) -> StepResult:
@@ -386,6 +389,7 @@ class LangChainAdapter(AgentAdapterPort):
                 ctx=ctx,
                 timing_acc=timing_acc,
                 usage_acc=usage_acc,
+                max_step_tokens=max_step_tokens,
                 tool_specs=tool_specs or [],
                 resource_specs=resources,
             )
@@ -438,6 +442,7 @@ class LangChainAdapter(AgentAdapterPort):
                     log_preview_len=_react_log_preview_len(ctx),
                     timing_acc=timing_acc,
                     usage_acc=usage_acc,
+                    max_step_tokens=max_step_tokens,
                 )
             except ExecutionStepError:
                 raise

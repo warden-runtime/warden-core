@@ -246,6 +246,17 @@ class ReasonSagaStep(_SagaStepBase):
             "``simple`` runs a single structured LLM turn with no MCP tools."
         ),
     )
+    max_step_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Optional financial guardrail: abort the reason step when accumulated "
+            "provider-reported total_tokens (prompt + completion) exceed this budget. "
+            "Omit for unlimited (or fall back to WARDEN_MAX_STEP_TOKENS). "
+            "Counts gross physical tokens, not cache-discounted billed tokens. "
+            "Not applied during compensation."
+        ),
+    )
     tools: ToolsSpec | None = None
     facts: list[StepFactsExtractor] | None = Field(
         default=None,

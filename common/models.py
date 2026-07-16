@@ -94,6 +94,13 @@ class SagaStepInstance(models.Model):
         default=10,
         description="Max LLM invocations for reason-step ReAct and multi-tool compensation.",
     )
+    max_step_tokens = fields.IntField(
+        null=True,
+        description=(
+            "Optional reason-step token budget (provider total_tokens); "
+            "null means unlimited at the step level."
+        ),
+    )
     agent_adapter = fields.CharField(
         max_length=32,
         default="react",

@@ -16,6 +16,7 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
     # Baseline schema column; catches partial migration state early.
     "saga_step_instances": (
         "max_turns",
+        "max_step_tokens",
         "execution_timing",
         "pending_engine_timing",
         "execution_usage",
