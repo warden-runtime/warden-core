@@ -123,6 +123,7 @@ You normally do not run `make migrate` for a first boot — the one-shot **migra
 | `ENGINE_URL` | **host CLI only** | `http://127.0.0.1:8000` from your machine (published port). Engine and worker containers do **not** use this variable—they coordinate through Postgres. If you run the CLI inside the Compose network, use `http://engine:8000` instead of loopback |
 | `OPENAI_API_KEY` | worker | when `provider: openai` — not required for `provider: local` or `provider: mock`. Checked at **step runtime**, not at deploy |
 | `ANTHROPIC_API_KEY` | worker | when `provider: anthropic` — Claude via LangChain. Checked at **step runtime**, not at deploy |
+| `LOGGING_LEVEL` | engine, worker | Root JSON log level (`INFO` default; use `DEBUG` for ReAct transcript lines on `warden.react.transcript`) |
 | `WARDEN_LOCAL_LLM_BASE_URL` | worker | OpenAI-compatible local endpoint (optional; defaults to `http://localhost:11434/v1`) |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | worker | GitHub MCP demo only (stdio `env_inherit`) |
 | `${ENV:…}` in worker manifest | worker | SSE MCP auth — names like `COMPANY_MCP_TOKEN` referenced in `tool_sources[].headers`; set on worker, not in YAML |

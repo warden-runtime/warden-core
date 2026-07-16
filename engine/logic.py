@@ -85,6 +85,10 @@ from engine.execution_timing import (
     persist_pending_engine_timing,
     persist_schedule_engine_timing_on_policy_denial,
 )
+from engine.execution_usage import (
+    finalize_step_execution_usage,
+    merge_step_usage_if_needed,
+)
 from engine.utils import resolve_parameters_spec
 
 if TYPE_CHECKING:
@@ -806,6 +810,7 @@ async def handle_step_completed(
         return
 
     await merge_step_timing_if_needed(step, worker_timing=event.timing, conn=db_conn)
+    await merge_step_usage_if_needed(step, worker_usage=event.usage, conn=db_conn)
 
     if step.output_schema:
         try:
@@ -828,6 +833,7 @@ async def handle_step_completed(
                 error_details={"code": "OUTPUT_SCHEMA_VALIDATION_FAILED", "message": str(e)},
                 output=event.output,
                 timing=event.timing,
+                usage=event.usage,
             )
             await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
             return
@@ -871,8 +877,12 @@ async def handle_step_completed(
                 error_details=step.error_details,
                 output=event.output,
                 timing=event.timing,
+                usage=event.usage,
             )
-            await step.save(using_db=db_conn, update_fields=["execution_timing", "error_details"])
+            await step.save(
+                using_db=db_conn,
+                update_fields=["execution_timing", "execution_usage", "error_details"],
+            )
             await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
             return
 
@@ -889,14 +899,21 @@ async def handle_step_completed(
                 error_details=step.error_details,
                 output=event.output,
                 timing=event.timing,
+                usage=event.usage,
             )
-            await step.save(using_db=db_conn, update_fields=["execution_timing", "error_details"])
+            await step.save(
+                using_db=db_conn,
+                update_fields=["execution_timing", "execution_usage", "error_details"],
+            )
             await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
             return
 
     if step.hitl_required and step.step_kind == "reason":
         output_for_review = event.output if isinstance(event.output, dict) else {}
-        await step.save(using_db=db_conn, update_fields=["execution_timing"])
+        await step.save(
+            using_db=db_conn,
+            update_fields=["execution_timing", "execution_usage"],
+        )
         await _enter_hitl_hold(
             saga,
             step,
@@ -1292,6 +1309,7 @@ async def _apply_step_failure_lifecycle(
     raw_payload = _step_failure_payload(event)
     trace_ctx = trace_context if trace_context is not None else _ingest_trace_context(event)
     await merge_step_timing_if_needed(step, worker_timing=event.timing, conn=db_conn)
+    await merge_step_usage_if_needed(step, worker_usage=event.usage, conn=db_conn)
     reaper_pre_timed_out = step.status == StepStatus.TIMED_OUT
 
     logger.warning("Saga %s failed at step %s.", saga.trace_id, step.order_index)
@@ -1316,6 +1334,7 @@ async def _apply_step_failure_lifecycle(
             "end_time",
             "execution_timing",
             "pending_engine_timing",
+            "execution_usage",
         ],
     )
     code = raw_payload.get("code")
@@ -1515,6 +1534,7 @@ async def handle_compensation_completed(
 
     trace_ctx = _ingest_trace_context(event)
     await finalize_step_execution_timing(step, worker_timing=event.timing, conn=db_conn)
+    await finalize_step_execution_usage(step, worker_usage=event.usage, conn=db_conn)
     from_status = status_value(step.status)
     step.status = StepStatus.COMPENSATED
     step.end_time = datetime.now(UTC)
@@ -1527,6 +1547,7 @@ async def handle_compensation_completed(
             "output_payload",
             "execution_timing",
             "pending_engine_timing",
+            "execution_usage",
         ],
     )
     output_hash = None
@@ -1590,6 +1611,7 @@ async def handle_compensation_failed(
     trace_ctx = _ingest_trace_context(event)
     if step:
         await finalize_step_execution_timing(step, worker_timing=event.timing, conn=db_conn)
+        await finalize_step_execution_usage(step, worker_usage=event.usage, conn=db_conn)
         from_status = status_value(step.status)
         step.status = StepStatus.FAILED
         step.end_time = datetime.now(UTC)
@@ -1602,6 +1624,7 @@ async def handle_compensation_failed(
                 "error_details",
                 "execution_timing",
                 "pending_engine_timing",
+                "execution_usage",
             ],
         )
         await get_registry().engine.on_step_transition(

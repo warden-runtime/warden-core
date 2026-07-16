@@ -50,11 +50,29 @@ class ToolCall(BaseModel):
     id: str = ""
 
 
+class TokenUsage(BaseModel):
+    """Provider-reported token counts for one chat-model invocation.
+
+    Core counters map to LangChain ``usage_metadata``. Provider-specific extras
+    (cache read/write, reasoning tokens, …) live in ``details`` so the wire/DB
+    shape can grow without schema migrations.
+    """
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    model_id: str | None = None
+    details: dict[str, int] = Field(default_factory=dict)
+
+    model_config = {"extra": "forbid"}
+
+
 class ChatResponse(BaseModel):
     """Response from a chat model: content and/or tool calls."""
 
     content: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    usage: TokenUsage | None = None
 
     model_config = {"extra": "forbid"}
 

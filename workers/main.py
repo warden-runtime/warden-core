@@ -27,7 +27,7 @@ async def _await_shutdown_task(task: asyncio.Task[None]) -> None:
 async def main():
     """Main application entrypoint for the Worker."""
     setup_telemetry("worker-node")
-    configure_logging("worker-node")
+    configure_logging("worker-node", level=get_settings().logging_level)
 
     from common.plugins.loader import load_plugins_from_env
 

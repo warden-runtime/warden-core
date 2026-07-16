@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import uuid
@@ -30,6 +29,7 @@ from common.contracts import (
     coerce_worker_command_dict,
 )
 from common.execution_timing import WorkerTimingAccumulator
+from common.execution_usage import WorkerUsageAccumulator
 from common.models import ProcessedCommand, ProviderSecret, WorkerDefinition
 from common.outbox import emit_saga_event
 from common.plugins.context import ExecutionScope
@@ -41,7 +41,7 @@ from common.processed_command_claim import (
 )
 from common.processed_command_reap import reap_stale_claim_by_key
 from common.prompts import load_prompt_content
-from common.telemetry import trace_boundary
+from common.telemetry import run_in_executor_with_log_context, trace_boundary
 from common.topics import TOPIC_ORCHESTRATOR_EVENTS
 from common.worker_ref import assert_worker_snapshot_version, require_worker_definition
 from opentelemetry.propagate import inject
@@ -139,7 +139,7 @@ async def _hydrate_forward_command(
             raise ValueError(
                 "prompts_root is not configured; set PROMPTS_ROOT on the worker service."
             )
-        prompt_template = await asyncio.to_thread(
+        prompt_template = await run_in_executor_with_log_context(
             load_prompt_content,
             prompts_root,
             cmd.prompt_ref,
@@ -304,6 +304,7 @@ async def _emit_step_completed(
     step_span_id: str,
     output: dict[str, Any],
     timing: dict[str, Any] | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> None:
     event = StepCompletedEvent(
         namespace=namespace,
@@ -311,6 +312,7 @@ async def _emit_step_completed(
         step_span_id=step_span_id,
         output=output,
         timing=timing,
+        usage=usage,
     )
     await emit_saga_event(
         topic=TOPIC_ORCHESTRATOR_EVENTS,
@@ -355,12 +357,14 @@ async def _run_forward_command(
     generic_error_code: str,
     success_log_message: str,
     timing_acc: WorkerTimingAccumulator,
+    usage_acc: WorkerUsageAccumulator,
 ) -> None:
     try:
         result = await run()
     except Exception as e:
         logger.exception("%s failed: %s", failure_log_prefix, e)
         wire_timing = timing_acc.to_wire() or None
+        wire_usage = usage_acc.to_wire() or None
         output, error_code = _map_execution_exception_to_output(
             e,
             generic_error_code=generic_error_code,
@@ -378,9 +382,11 @@ async def _run_forward_command(
             output=output,
             error_code=error_code,
             timing=wire_timing,
+            usage=wire_usage,
         )
     else:
         wire_timing = timing_acc.to_wire() or None
+        wire_usage = usage_acc.to_wire() or None
         await _finalize_success(
             scope=scope,
             worker_definition=worker_definition,
@@ -396,6 +402,7 @@ async def _run_forward_command(
                 step_span_id=step_span_id,
                 output=result.output,
                 timing=wire_timing,
+                usage=wire_usage,
             ),
         )
         logger.info(success_log_message, step_span_id)
@@ -416,6 +423,7 @@ async def _run_compensation_command(
     saga_trace_id: str,
     step_span_id: str,
     timing_acc: WorkerTimingAccumulator,
+    usage_acc: WorkerUsageAccumulator,
 ) -> None:
     compensation_prompt = compensation_prompt_from_snapshot(
         cmd.worker_snapshot,
@@ -443,6 +451,7 @@ async def _run_compensation_command(
     except Exception as e:
         logger.exception("Compensation failed: %s", e)
         wire_timing = timing_acc.to_wire() or None
+        wire_usage = usage_acc.to_wire() or None
         await _finalize_failure(
             scope=scope,
             worker_definition=worker_definition,
@@ -456,10 +465,12 @@ async def _run_compensation_command(
             output={"error": str(e)},
             error_code="compensation_failed",
             timing=wire_timing,
+            usage=wire_usage,
         )
         logger.warning("Reported COMPENSATION_FAILED for step %s", step_span_id)
     else:
         wire_timing = timing_acc.to_wire() or None
+        wire_usage = usage_acc.to_wire() or None
 
         async def _emit_compensated(active_conn: BaseDBAsyncClient) -> None:
             await report_result(
@@ -469,6 +480,7 @@ async def _run_compensation_command(
                 event_type=EventType.STEP_COMPENSATED,
                 output=result.output,
                 timing=wire_timing,
+                usage=wire_usage,
                 conn=active_conn,
             )
 
@@ -625,6 +637,7 @@ async def _finalize_failure(
     error_code: str | None = None,
     release_claim: bool = True,
     timing: dict[str, Any] | None = None,
+    usage: dict[str, Any] | None = None,
     conn: BaseDBAsyncClient | None = None,
 ) -> None:
     async def _write(active_conn: BaseDBAsyncClient) -> None:
@@ -642,6 +655,7 @@ async def _finalize_failure(
             event_type=event_type,
             output=output,
             timing=timing,
+            usage=usage,
             conn=active_conn,
         )
         await get_registry().worker.on_execution_failed(
@@ -687,6 +701,7 @@ class _WorkerCommandExecution:
     saga_trace_id: str
     step_span_id: str
     timing_acc: WorkerTimingAccumulator
+    usage_acc: WorkerUsageAccumulator
 
 
 async def _prepare_worker_command_execution(
@@ -737,6 +752,7 @@ async def _prepare_worker_command_execution(
     claim_token = claim.claim_token
     handler_started_at = claim.handler_started_at
     timing_acc = WorkerTimingAccumulator()
+    usage_acc = WorkerUsageAccumulator()
 
     timing_acc.start("hydrate")
     try:
@@ -797,6 +813,7 @@ async def _prepare_worker_command_execution(
         "resource_specs": hydrated.resource_specs,
         "saga_vars": hydrated.saga_vars,
         "timing": timing_acc,
+        "usage": usage_acc,
     }
 
     try:
@@ -857,6 +874,7 @@ async def _prepare_worker_command_execution(
         saga_trace_id=saga_trace_id,
         step_span_id=step_span_id,
         timing_acc=timing_acc,
+        usage_acc=usage_acc,
     )
 
 
@@ -877,6 +895,7 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
             saga_trace_id=execution.saga_trace_id,
             step_span_id=execution.step_span_id,
             timing_acc=execution.timing_acc,
+            usage_acc=execution.usage_acc,
         )
         return
 
@@ -909,6 +928,7 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
             generic_error_code="step_failed",
             success_log_message="Reported STEP_COMPLETED for step %s",
             timing_acc=execution.timing_acc,
+            usage_acc=execution.usage_acc,
         )
         return
 
@@ -933,6 +953,7 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
             generic_error_code="commit_failed",
             success_log_message="Reported STEP_COMPLETED for commit step %s",
             timing_acc=execution.timing_acc,
+            usage_acc=execution.usage_acc,
         )
 
 
@@ -1151,6 +1172,7 @@ async def report_result(
     output: dict[str, Any],
     conn: BaseDBAsyncClient | None = None,
     timing: dict[str, Any] | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> None:
     """Emit step result to engine via outbox (STEP_COMPENSATED, STEP_FAILED, COMPENSATION_FAILED).
 
@@ -1161,6 +1183,8 @@ async def report_result(
         event_type: One of STEP_COMPENSATED, STEP_FAILED, COMPENSATION_FAILED.
         output: Result payload (and error_details for failure events).
         conn: Optional DB connection for transactional emit (same transaction as ProcessedCommand).
+        timing: Optional worker timing wire payload.
+        usage: Optional worker LLM usage wire payload.
     """
     if event_type == EventType.STEP_COMPENSATED:
         event = StepCompensatedEvent(
@@ -1170,6 +1194,7 @@ async def report_result(
             type=EventType.STEP_COMPENSATED,
             output=output,
             timing=timing,
+            usage=usage,
         )
     elif event_type == EventType.STEP_FAILED:
         event = StepFailedResultEvent(
@@ -1179,6 +1204,7 @@ async def report_result(
             output=output,
             error_details=output,
             timing=timing,
+            usage=usage,
         )
     elif event_type == EventType.COMPENSATION_FAILED:
         event = CompensationFailedEvent(
@@ -1188,6 +1214,7 @@ async def report_result(
             output=output,
             error_details=output,
             timing=timing,
+            usage=usage,
         )
     else:
         logger.error("Unknown event_type %s for report_result; dropping.", event_type)

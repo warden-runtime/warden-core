@@ -570,6 +570,9 @@ def _format_step_detail_human(data: dict[str, Any], *, raw: bool) -> None:
     timing = data.get("timing")
     if timing:
         _format_payload_block("timing", timing, raw=raw)
+    usage = data.get("usage")
+    if usage:
+        _format_payload_block("usage", usage, raw=raw)
 
 
 def _parse_started_at(value: Any) -> datetime:
