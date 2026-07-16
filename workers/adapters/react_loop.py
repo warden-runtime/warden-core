@@ -15,9 +15,12 @@ from typing import TYPE_CHECKING, Any, Literal, NoReturn
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from common.execution_timing import WorkerTimingAccumulator
+    from common.execution_usage import WorkerUsageAccumulator
+
 from common.agent_adapter import ExecutionStepError
 from common.error_details import build_step_error_details
-from common.execution_timing import WorkerTimingAccumulator, elapsed_ms
+from common.execution_timing import elapsed_ms
 from common.llm import ChatMessage, ChatModelPort, ChatResponse, ToolCall
 from common.tool_results import clip_tool_text_for_llm, tool_message_limit_from_env
 from common.utils import (
@@ -26,10 +29,16 @@ from common.utils import (
     tool_call_args_to_dict,
 )
 from workers.adapters import state_utils
+from workers.adapters.react_otel import (
+    mark_llm_response,
+    mark_tool_output,
+    react_llm_span,
+    react_tool_span,
+)
 from workers.tools import get_warden_tool_input_schema
 
 logger = logging.getLogger(__name__)
-
+_transcript_logger = logging.getLogger("warden.react.transcript")
 CompletionMode = Literal["submit", "assistant_json"]
 SUBMIT_TOOL_NAME = "_submit"
 _DEFAULT_PREVIEW_LEN = 500
@@ -114,22 +123,42 @@ def _log_transcript(
     *,
     log_preview_len: int | None = None,
 ) -> None:
+    """Emit full ReAct transcript at DEBUG (dedicated logger); not INFO noise."""
     preview_len = _resolve_log_preview_len(log_preview_len)
-    logger.info("ReAct transcript (%d messages)", len(messages))
+    _transcript_logger.debug("ReAct transcript (%d messages)", len(messages))
     for i, msg in enumerate(messages):
         content = msg.content or ""
         if preview_len and len(content) > preview_len:
             content = content[:preview_len] + "..."
         if msg.tool_calls:
             names_args = [(tc.name, tc.args) for tc in msg.tool_calls]
-            logger.info(
+            _transcript_logger.debug(
                 "ReAct message %d [%s] tool_calls=%s",
                 i + 1,
                 msg.role,
                 names_args,
             )
         else:
-            logger.info("ReAct message %d [%s] content=%s", i + 1, msg.role, content)
+            _transcript_logger.debug(
+                "ReAct message %d [%s] content=%s",
+                i + 1,
+                msg.role,
+                content,
+            )
+
+
+def _log_react_summary(
+    *,
+    outcome: str,
+    turns_used: int,
+    message_count: int,
+) -> None:
+    logger.info(
+        "ReAct completed outcome=%s turns=%d messages=%d",
+        outcome,
+        turns_used,
+        message_count,
+    )
 
 
 async def _invoke_mcp_tool(
@@ -213,6 +242,7 @@ async def _process_tool_calls(
     tool_results: list[dict[str, Any]],
     timing_acc: WorkerTimingAccumulator | None = None,
     tool_message_limit: int | None = None,
+    turn_index: int = 0,
 ) -> dict[str, Any] | None:
     """Append assistant message, run tool calls; return submit payload if _submit completes."""
     tool_calls = [_ensure_tool_call_id(tc) for tc in response.tool_calls]
@@ -236,13 +266,15 @@ async def _process_tool_calls(
             return _submit_payload_from_call(tool_call)
 
         tool_start = time.perf_counter() if timing_acc is not None else None
-        output = await _invoke_mcp_tool(
-            tool_call=tool_call,
-            mcp_tools=mcp_tools,
-            merge_tool_args=merge_tool_args,
-            merge_context=merge_context,
-            strict_errors=strict_errors,
-        )
+        with react_tool_span(tool_call=tool_call, turn_index=turn_index) as tool_span:
+            output = await _invoke_mcp_tool(
+                tool_call=tool_call,
+                mcp_tools=mcp_tools,
+                merge_tool_args=merge_tool_args,
+                merge_context=merge_context,
+                strict_errors=strict_errors,
+            )
+            mark_tool_output(tool_span, output)
         if timing_acc is not None and tool_start is not None:
             timing_acc.add_ms("tool_ms", elapsed_ms(tool_start))
         _handle_tool_output_content(
@@ -344,14 +376,19 @@ async def _react_loop_turn(
     tool_results: list[dict[str, Any]],
     log_preview_len: int | None,
     timing_acc: WorkerTimingAccumulator | None,
+    usage_acc: WorkerUsageAccumulator | None,
     turns_used: int,
     max_turns: int,
     tool_message_limit: int | None = None,
 ) -> ReactLoopResult | None:
     llm_start = time.perf_counter() if timing_acc is not None else None
-    response = await llm.ainvoke(messages)
+    with react_llm_span(turn_index=turns_used, message_count=len(messages)) as llm_span:
+        response = await llm.ainvoke(messages)
+        mark_llm_response(llm_span, response)
     if timing_acc is not None and llm_start is not None:
         timing_acc.add_ms("llm_ms", elapsed_ms(llm_start))
+    if usage_acc is not None:
+        usage_acc.add(response.usage)
     if response.tool_calls:
         submit_payload = await _process_tool_calls(
             response=response,
@@ -364,9 +401,15 @@ async def _react_loop_turn(
             tool_results=tool_results,
             timing_acc=timing_acc,
             tool_message_limit=tool_message_limit,
+            turn_index=turns_used,
         )
         if submit_payload is not None:
             _log_transcript(messages, log_preview_len=log_preview_len)
+            _log_react_summary(
+                outcome="submit",
+                turns_used=turns_used,
+                message_count=len(messages),
+            )
             return ReactLoopResult(
                 transcript=messages,
                 submit_payload=submit_payload,
@@ -384,6 +427,11 @@ async def _react_loop_turn(
         )
 
     _log_transcript(messages, log_preview_len=log_preview_len)
+    _log_react_summary(
+        outcome="assistant_json",
+        turns_used=turns_used,
+        message_count=len(messages),
+    )
     return ReactLoopResult(
         transcript=messages,
         final_content=response.content,
@@ -403,6 +451,7 @@ async def run_react_loop(
     merge_context: dict[str, Any] | None = None,
     log_preview_len: int | None = None,
     timing_acc: WorkerTimingAccumulator | None = None,
+    usage_acc: WorkerUsageAccumulator | None = None,
 ) -> ReactLoopResult:
     """
     Run a bounded ReAct loop: LLM turns, MCP tool execution, then submit or assistant JSON.
@@ -418,6 +467,8 @@ async def run_react_loop(
         merge_context: Second argument to merge_tool_args (e.g. original_input).
         log_preview_len: Optional transcript log truncation override (from injection context);
             ``0`` disables truncation. Falls back to ``WARDEN_REACT_LOG_PREVIEW_LEN``.
+        timing_acc: Optional worker timing accumulator (``llm_ms`` / ``tool_ms``).
+        usage_acc: Optional worker usage accumulator (provider token totals).
 
     Returns:
         ReactLoopResult with transcript and completion fields.
@@ -442,6 +493,7 @@ async def run_react_loop(
             tool_results=tool_results,
             log_preview_len=log_preview_len,
             timing_acc=timing_acc,
+            usage_acc=usage_acc,
             turns_used=turn_index + 1,
             max_turns=max_turns,
             tool_message_limit=tool_message_limit,
@@ -464,6 +516,11 @@ async def run_react_loop(
         logger.warning(
             "Compensation: max turns without final JSON; synthetic output from %d tool result(s).",
             len(tool_results),
+        )
+        _log_react_summary(
+            outcome="compensation_synthetic",
+            turns_used=max_turns,
+            message_count=len(messages),
         )
         return ReactLoopResult(transcript=messages, tool_results=tool_results)
     _raise_compensation_max_turns(

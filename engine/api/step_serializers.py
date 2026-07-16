@@ -28,6 +28,7 @@ def saga_step_instance_item_from_row(row: SagaStepInstance) -> SagaStepInstanceI
         compensates_span_id=row.compensates_span_id,
         error_details=row.error_details,
         timing=row.execution_timing,
+        usage=row.execution_usage,
     )
 
 

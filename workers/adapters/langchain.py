@@ -23,6 +23,7 @@ from common.compensation_context import (
 )
 from common.error_details import build_step_error_details
 from common.execution_timing import WorkerTimingAccumulator, elapsed_ms
+from common.execution_usage import WorkerUsageAccumulator
 from common.governance import admit_and_validate, validate_against_schema
 from common.llm import ChatMessage, ToolProtocol
 from common.models import ProviderSecret, WorkerDefinition
@@ -55,6 +56,13 @@ def _timing_acc_from_context(context: dict[str, Any] | None) -> WorkerTimingAccu
         return None
     raw = context.get("timing")
     return raw if isinstance(raw, WorkerTimingAccumulator) else None
+
+
+def _usage_acc_from_context(context: dict[str, Any] | None) -> WorkerUsageAccumulator | None:
+    if not context:
+        return None
+    raw = context.get("usage")
+    return raw if isinstance(raw, WorkerUsageAccumulator) else None
 
 
 def _react_log_preview_len(context: dict[str, Any]) -> int | None:
@@ -283,6 +291,7 @@ class LangChainAdapter(AgentAdapterPort):
         output_schema: dict[str, Any] | None,
         ctx: dict[str, Any],
         timing_acc: WorkerTimingAccumulator | None,
+        usage_acc: WorkerUsageAccumulator | None,
         tool_specs: list[dict[str, Any]],
         resource_specs: list[ResourceSpec],
     ) -> StepResult:
@@ -311,6 +320,7 @@ class LangChainAdapter(AgentAdapterPort):
                 initial_messages,
                 schema,
                 timing_acc=timing_acc,
+                usage_acc=usage_acc,
             )
         except ExecutionStepError:
             raise
@@ -354,6 +364,7 @@ class LangChainAdapter(AgentAdapterPort):
     ) -> StepResult:
         ctx = context or self._context
         timing_acc = _timing_acc_from_context(ctx)
+        usage_acc = _usage_acc_from_context(ctx)
         turn_budget = max_turns if max_turns is not None else DEFAULT_MAX_TURNS
         resources = resource_specs or []
         allowed_tool_names = [
@@ -374,6 +385,7 @@ class LangChainAdapter(AgentAdapterPort):
                 output_schema=output_schema,
                 ctx=ctx,
                 timing_acc=timing_acc,
+                usage_acc=usage_acc,
                 tool_specs=tool_specs or [],
                 resource_specs=resources,
             )
@@ -425,6 +437,7 @@ class LangChainAdapter(AgentAdapterPort):
                     max_turns=turn_budget,
                     log_preview_len=_react_log_preview_len(ctx),
                     timing_acc=timing_acc,
+                    usage_acc=usage_acc,
                 )
             except ExecutionStepError:
                 raise
@@ -558,6 +571,7 @@ class LangChainAdapter(AgentAdapterPort):
     ) -> ReactLoopResult:
         resources = resource_specs or []
         timing_acc = _timing_acc_from_context(ctx)
+        usage_acc = _usage_acc_from_context(ctx)
         if timing_acc is not None:
             timing_acc.start("comp_react_setup")
         async with AsyncExitStack() as stack:
@@ -598,6 +612,7 @@ class LangChainAdapter(AgentAdapterPort):
                 merge_context=original_input,
                 log_preview_len=_react_log_preview_len(ctx),
                 timing_acc=timing_acc,
+                usage_acc=usage_acc,
             )
 
     async def _run_single_tool_compensation(

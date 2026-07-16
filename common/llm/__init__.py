@@ -4,6 +4,7 @@ from common.llm.protocol import (
     ChatMessage,
     ChatModelPort,
     ChatResponse,
+    TokenUsage,
     ToolCall,
     ToolProtocol,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "ChatMessage",
     "ChatModelPort",
     "ChatResponse",
+    "TokenUsage",
     "ToolCall",
     "ToolProtocol",
 ]

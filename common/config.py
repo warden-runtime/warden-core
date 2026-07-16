@@ -88,6 +88,11 @@ class Settings(BaseSettings):
         validation_alias="OTLP_INSECURE",
         description="Use insecure gRPC channel for OTLP when true.",
     )
+    logging_level: str = Field(
+        default="INFO",
+        validation_alias="LOGGING_LEVEL",
+        description="Root logger level for engine/worker JSON logs (e.g. INFO, DEBUG).",
+    )
     log_pretty_json: bool = Field(
         default=False,
         validation_alias="WARDEN_LOG_PRETTY_JSON",

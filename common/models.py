@@ -182,6 +182,10 @@ class SagaStepInstance(models.Model):
         null=True,
         description="In-flight engine timing staging and dispatch perf_counter anchor.",
     )
+    execution_usage = fields.JSONField(
+        null=True,
+        description="Worker LLM token usage (provider-reported); never merged into saga context.",
+    )
 
     class Meta:
         table = "saga_step_instances"

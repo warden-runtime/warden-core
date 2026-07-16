@@ -60,7 +60,7 @@ async def main():
     wire_messaging_from_registry()
 
     setup_telemetry("engine-node")
-    configure_logging("engine-node")
+    configure_logging("engine-node", level=get_settings().logging_level)
 
     from common.prompts import validate_prompts_root_if_configured
 

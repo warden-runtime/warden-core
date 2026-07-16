@@ -67,7 +67,8 @@ CREATE TABLE saga_step_instances (
   facts_extractors JSONB NOT NULL DEFAULT '[]'::jsonb,
   compensates_span_id VARCHAR(16) NULL,
   execution_timing JSONB NULL,
-  pending_engine_timing JSONB NULL
+  pending_engine_timing JSONB NULL,
+  execution_usage JSONB NULL
 );
 
 CREATE INDEX idx_saga_step_instances_namespace ON saga_step_instances (namespace);

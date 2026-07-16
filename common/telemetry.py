@@ -1,16 +1,19 @@
+import asyncio
 import atexit
+import contextlib
+import contextvars
 import inspect
 import json
 import logging
 import logging.handlers
 import queue
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from opentelemetry import trace
 from opentelemetry.context import Context
@@ -39,6 +42,28 @@ _FIELD_TO_SPAN_ATTR = {
     "event_type": "event.type",
     "namespace": "namespace",
 }
+_NOISY_LOGGERS = (
+    "tortoise",
+    "asyncio",
+    "httpx",
+    "httpcore",
+    "openai",
+    "anthropic",
+    "urllib3",
+    "opentelemetry",
+)
+
+_cv_trace_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "warden_log_trace_id", default=None
+)
+_cv_span_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "warden_log_span_id", default=None
+)
+_cv_step_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "warden_log_step_id", default=None
+)
+
+T = TypeVar("T")
 
 
 class _SpanTagKind(Enum):
@@ -55,6 +80,97 @@ _OTEL_LOG_KEYS = ("otelTraceID", "otelSpanID", "otelServiceName", "otelTraceSamp
 
 TIMING_WORKER_ATTR_PREFIX = "timing.worker."
 TIMING_ENGINE_ATTR_PREFIX = "timing.engine."
+USAGE_WORKER_ATTR_PREFIX = "usage.worker."
+
+
+def resolve_logging_level(level: int | str | None = None) -> int:
+    """Resolve LOGGING_LEVEL / Settings into a stdlib logging level int."""
+    if level is None:
+        from common.config import get_settings
+
+        level = get_settings().logging_level
+    if isinstance(level, int):
+        return level
+    name = str(level).strip().upper()
+    resolved = logging.getLevelNamesMapping().get(name)
+    if resolved is None:
+        logger.warning("Unknown LOGGING_LEVEL %r; defaulting to INFO", level)
+        return logging.INFO
+    return resolved
+
+
+def bind_log_context(
+    *,
+    trace_id: str | None = None,
+    span_id: str | None = None,
+    step_id: str | None = None,
+) -> None:
+    """Bind Warden ledger / manifest IDs into the current context for JSON logs."""
+    if trace_id is not None:
+        _cv_trace_id.set(str(trace_id) or None)
+    if span_id is not None:
+        _cv_span_id.set(str(span_id) or None)
+    if step_id is not None:
+        _cv_step_id.set(str(step_id) or None)
+
+
+def clear_log_context() -> None:
+    """Clear bound Warden log context (call from ``finally`` after a handler)."""
+    _cv_trace_id.set(None)
+    _cv_span_id.set(None)
+    _cv_step_id.set(None)
+
+
+@contextlib.contextmanager
+def log_context(
+    *,
+    trace_id: str | None = None,
+    span_id: str | None = None,
+    step_id: str | None = None,
+) -> Iterator[None]:
+    """Temporarily bind ledger IDs for structured logs; reset on exit."""
+    t_trace = _cv_trace_id.set(str(trace_id) if trace_id else None)
+    t_span = _cv_span_id.set(str(span_id) if span_id else None)
+    t_step = _cv_step_id.set(str(step_id) if step_id else None)
+    try:
+        yield
+    finally:
+        _cv_trace_id.reset(t_trace)
+        _cv_span_id.reset(t_span)
+        _cv_step_id.reset(t_step)
+
+
+def get_bound_log_context() -> dict[str, str | None]:
+    """Return currently bound Warden log fields (for tests / debugging)."""
+    return {
+        "trace_id": _cv_trace_id.get(),
+        "span_id": _cv_span_id.get(),
+        "step_id": _cv_step_id.get(),
+    }
+
+
+async def run_in_executor_with_log_context(
+    func: Callable[..., T],
+    /,
+    *args: Any,
+    executor: Any = None,
+    **kwargs: Any,
+) -> T:
+    """Run ``func`` in a thread pool with a copied contextvars snapshot.
+
+    Required when background work must emit logs under the same Warden
+    ``trace_id`` / ``span_id`` / ``step_id`` binding as the caller. Contextvars do
+    not propagate to new threads automatically::
+
+        await run_in_executor_with_log_context(your_logging_sandbox_task)
+    """
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+
+    def _call() -> T:
+        return ctx.run(func, *args, **kwargs)
+
+    return await loop.run_in_executor(executor, _call)
 
 
 def record_timing_bucket_on_current_span(
@@ -85,6 +201,31 @@ def record_timing_bucket_on_current_span(
         return
     prefix = TIMING_WORKER_ATTR_PREFIX if section == "worker" else TIMING_ENGINE_ATTR_PREFIX
     span.set_attribute(f"{prefix}{bucket}", cumulative)
+
+
+def record_usage_counter_on_current_span(
+    *,
+    section: Literal["worker"],
+    key: str,
+    value: int,
+) -> None:
+    """Mirror a cumulative worker usage counter onto the active OTel span.
+
+    Same call-site rules as ``record_timing_bucket_on_current_span``. Pass the
+    **running total** for the counter (not the delta).
+    """
+    from common.execution_timing import clamp_nonneg
+    from common.execution_usage import WORKER_USAGE_COUNTERS
+
+    if section != "worker":
+        return
+    cumulative = clamp_nonneg(int(value))
+    if cumulative <= 0 or key not in WORKER_USAGE_COUNTERS:
+        return
+    span = trace.get_current_span()
+    if not span.is_recording():
+        return
+    span.set_attribute(f"{USAGE_WORKER_ATTR_PREFIX}{key}", cumulative)
 
 
 def safe_truncate_tag(value: Any, max_len: int = _MAX_SPAN_TAG_LEN) -> str:
@@ -127,6 +268,21 @@ def _extract_parent_context(event_data: object) -> Context | None:
     return extract(ctx_data)
 
 
+def _as_optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _log_fields_from_payload(payload: dict) -> dict[str, str | None]:
+    return {
+        "trace_id": _as_optional_str(payload.get("saga_trace_id") or payload.get("saga_id")),
+        "span_id": _as_optional_str(payload.get("step_span_id")),
+        "step_id": _as_optional_str(payload.get("step_id")),
+    }
+
+
 class _ServiceNameFilter(logging.Filter):
     def __init__(self, service_name: str) -> None:
         super().__init__()
@@ -134,6 +290,16 @@ class _ServiceNameFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.service_name = self._service_name
+        return True
+
+
+class _WardenLogContextFilter(logging.Filter):
+    """Copy contextvars onto the LogRecord at emit time (QueueHandler emission thread)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.warden_trace_id = _cv_trace_id.get()
+        record.warden_span_id = _cv_span_id.get()
+        record.warden_step_id = _cv_step_id.get()
         return True
 
 
@@ -145,6 +311,9 @@ class _JsonLogFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
             "service": getattr(record, "service_name", None),
+            "trace_id": getattr(record, "warden_trace_id", None),
+            "span_id": getattr(record, "warden_span_id", None),
+            "step_id": getattr(record, "warden_step_id", None),
         }
         for key in _OTEL_LOG_KEYS:
             value = getattr(record, key, None)
@@ -162,23 +331,42 @@ def _stop_log_listener() -> None:
         _log_listener = None
 
 
-def configure_logging(service_name: str, *, level: int = logging.INFO) -> None:
-    """Configure non-blocking structured logging aligned with OTel trace context.
+def _quiet_third_party_loggers(*, root_level: int) -> None:
+    # Keep third-party noise off stderr unless the process is DEBUG.
+    library_level = logging.DEBUG if root_level <= logging.DEBUG else logging.WARNING
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(library_level)
 
+
+def configure_logging(service_name: str, *, level: int | str | None = None) -> None:
+    """Configure non-blocking structured JSON logging on the **root** logger.
+
+    Hijacks ``logging.getLogger()`` (root): removes pre-existing handlers so
+    third-party libraries cannot emit raw text to stderr alongside JSON lines.
     Uses a ``QueueHandler`` so emitters on the asyncio event loop do not block on
-    stderr I/O. Safe to call once per process; subsequent calls are no-ops.
+    stderr I/O. Safe to call once per process; subsequent calls only refresh level.
     """
     global _log_listener
+    resolved_level = resolve_logging_level(level)
+
+    root = logging.getLogger()
+    root.setLevel(resolved_level)
+    _quiet_third_party_loggers(root_level=resolved_level)
+
     if _log_listener is not None:
         return
 
-    root = logging.getLogger()
-    root.setLevel(level)
     for handler in list(root.handlers):
         root.removeHandler(handler)
+        with contextlib.suppress(Exception):
+            handler.close()
 
     log_queue: queue.Queue[logging.LogRecord] = queue.Queue(-1)
-    root.addHandler(logging.handlers.QueueHandler(log_queue))
+    queue_handler = logging.handlers.QueueHandler(log_queue)
+    # Filter runs on the emitting task so contextvars are still correct before
+    # the record is formatted on the QueueListener thread.
+    queue_handler.addFilter(_WardenLogContextFilter())
+    root.addHandler(queue_handler)
 
     stream_handler = logging.StreamHandler(sys.stderr)
     stream_handler.setFormatter(_JsonLogFormatter())
@@ -205,7 +393,7 @@ def trace_boundary(span_name_key: str = "event_type"):
 
     Extracts trace context from event payload (dict with "trace_context", or
     JSON string), starts a consumer span, tags saga/step/event_type from payload,
-    and re-raises after recording exceptions.
+    binds Warden log context, and re-raises after recording exceptions.
 
     Args:
         span_name_key: Key in event_data (if dict) to use as span name; default
@@ -230,15 +418,22 @@ def trace_boundary(span_name_key: str = "event_type"):
             with tracer.start_as_current_span(
                 span_name, context=parent_context, kind=trace.SpanKind.CONSUMER
             ) as span:
+                log_fields: dict[str, str | None] = {
+                    "trace_id": None,
+                    "span_id": None,
+                    "step_id": None,
+                }
                 if isinstance(event_data, dict):
                     _tag_span_from_dict(span, event_data)
+                    log_fields = _log_fields_from_payload(event_data)
 
-                try:
-                    return await func(event_data, *args, **kwargs)
-                except Exception as e:
-                    span.record_exception(e)
-                    span.set_status(trace.Status(trace.StatusCode.ERROR, safe_truncate_tag(e)))
-                    raise e
+                with log_context(**log_fields):
+                    try:
+                        return await func(event_data, *args, **kwargs)
+                    except Exception as e:
+                        span.record_exception(e)
+                        span.set_status(trace.Status(trace.StatusCode.ERROR, safe_truncate_tag(e)))
+                        raise e
 
         return wrapper
 
@@ -249,9 +444,12 @@ def _tag_span_from_dict(span: trace.Span, payload: dict) -> None:
     saga_id = payload.get("saga_trace_id") or payload.get("saga_id")
     if saga_id:
         _set_truncated_attribute(span, "saga.id", saga_id)
-    step_id = payload.get("step_span_id") or payload.get("step_id")
-    if step_id:
-        _set_truncated_attribute(span, "saga.step_span_id", step_id)
+    step_span_id = payload.get("step_span_id")
+    if step_span_id:
+        _set_truncated_attribute(span, "saga.step_span_id", step_span_id)
+    manifest_step_id = payload.get("step_id")
+    if manifest_step_id:
+        _set_truncated_attribute(span, "saga.step_id", manifest_step_id)
     event_type = payload.get("event_type")
     if event_type:
         _set_truncated_attribute(span, "event.type", event_type)
@@ -273,6 +471,11 @@ def _tag_span_from_pydantic(span: trace.Span, model: BaseModel) -> None:
         attr = _FIELD_TO_SPAN_ATTR.get(key)
         if attr is not None:
             _set_truncated_attribute(span, attr, value)
+    # Manifest step_id is optional on ingest models — tag when present.
+    if "step_id" in model_type.model_fields:
+        step_id = getattr(model, "step_id", None)
+        if step_id:
+            _set_truncated_attribute(span, "saga.step_id", step_id)
 
 
 def _type_identity(val: object) -> tuple[str, str]:
@@ -294,6 +497,7 @@ def _tag_span_from_step(span: trace.Span, val: object) -> None:
     step = cast("SagaStepInstance", val)
     _set_truncated_attribute(span, "saga.id", step.saga_trace_id)
     _set_truncated_attribute(span, "saga.step_span_id", step.span_id)
+    _set_truncated_attribute(span, "saga.step_id", step.step_id)
     _set_truncated_attribute(span, "namespace", step.namespace)
     _set_truncated_attribute(span, "worker.id", step.worker)
 
@@ -360,11 +564,43 @@ def _apply_tag_slots(
             _tag_bound_argument(span, slot.kind, val)
 
 
+def _merge_log_fields_from_value(
+    fields: dict[str, str | None], kind: _SpanTagKind, val: object
+) -> None:
+    if kind is _SpanTagKind.SAGA and _type_identity(val) == _SAGA_INSTANCE:
+        saga = cast("SagaInstance", val)
+        fields["trace_id"] = _as_optional_str(saga.trace_id)
+        return
+    if kind is _SpanTagKind.STEP and _type_identity(val) == _STEP_INSTANCE:
+        step = cast("SagaStepInstance", val)
+        fields["trace_id"] = _as_optional_str(step.saga_trace_id)
+        fields["span_id"] = _as_optional_str(step.span_id)
+        fields["step_id"] = _as_optional_str(step.step_id)
+        return
+    if kind is _SpanTagKind.EVENT and isinstance(val, BaseModel):
+        fields.update(_log_fields_from_payload(val.model_dump(mode="json")))
+        return
+    if kind is _SpanTagKind.TRACE_CONTEXT and isinstance(val, dict):
+        fields.update(_log_fields_from_payload(val))
+
+
+def _log_fields_from_tag_slots(
+    slots: tuple[_SpanTagSlot, ...], args: tuple, kwargs: dict
+) -> dict[str, str | None]:
+    fields: dict[str, str | None] = {"trace_id": None, "span_id": None, "step_id": None}
+    for slot in slots:
+        val = _value_for_slot(slot, args, kwargs)
+        if val is not None:
+            _merge_log_fields_from_value(fields, slot.kind, val)
+    return fields
+
+
 def trace_step(span_name: str | None = None):
     """Decorator for internal async functions: child span with auto-tagging.
 
     Creates a child span (inherits OTel context). Inspects args/kwargs for
-    saga/step/worker IDs and event_type and sets span attributes.
+    saga/step/worker IDs and event_type and sets span attributes. Binds Warden
+    log context for the duration of the call.
 
     Args:
         span_name: Name for the span; if None, uses the wrapped function name.
@@ -378,21 +614,24 @@ def trace_step(span_name: str | None = None):
 
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            # Use function name if no specific name provided
             name = span_name or func.__name__
 
             tracer = trace.get_tracer(func.__module__)
             with tracer.start_as_current_span(name) as span:
                 if tag_slots:
                     _apply_tag_slots(span, tag_slots, args, kwargs)
-
-                # --- EXECUTION ---
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    span.record_exception(e)
-                    span.set_status(trace.Status(trace.StatusCode.ERROR, safe_truncate_tag(e)))
-                    raise e
+                log_fields = (
+                    _log_fields_from_tag_slots(tag_slots, args, kwargs)
+                    if tag_slots
+                    else {"trace_id": None, "span_id": None, "step_id": None}
+                )
+                with log_context(**log_fields):
+                    try:
+                        return await func(*args, **kwargs)
+                    except Exception as e:
+                        span.record_exception(e)
+                        span.set_status(trace.Status(trace.StatusCode.ERROR, safe_truncate_tag(e)))
+                        raise e
 
         return wrapper
 

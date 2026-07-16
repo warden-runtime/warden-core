@@ -1,16 +1,25 @@
-"""Unit tests for common.telemetry OTLP wiring and span timing attributes."""
+"""Unit tests for common.telemetry OTLP wiring, log envelope, and span timing."""
 
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from unittest.mock import MagicMock
 
 import pytest
 from common.config import Settings, get_settings
 from common.execution_timing import WorkerTimingAccumulator
 from common.telemetry import (
+    _JsonLogFormatter,
     _otlp_span_exporter,
+    _tag_span_from_dict,
+    _WardenLogContextFilter,
+    get_bound_log_context,
+    log_context,
     record_timing_bucket_on_current_span,
+    resolve_logging_level,
+    run_in_executor_with_log_context,
     setup_telemetry,
 )
 from opentelemetry import trace
@@ -93,6 +102,87 @@ def test_settings_otlp_defaults():
     s = Settings()
     assert s.otlp_endpoint is None
     assert s.otlp_insecure is True
+    assert s.logging_level == "INFO"
+
+
+def test_resolve_logging_level_from_settings(monkeypatch):
+    monkeypatch.setenv("LOGGING_LEVEL", "DEBUG")
+    get_settings.cache_clear()
+    assert resolve_logging_level() == logging.DEBUG
+    get_settings.cache_clear()
+
+
+def test_json_formatter_includes_warden_log_fields():
+    fmt = _JsonLogFormatter()
+    record = logging.LogRecord(
+        name="test.logger",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hello",
+        args=(),
+        exc_info=None,
+    )
+    record.service_name = "worker-node"
+    record.warden_trace_id = "aabb" * 8
+    record.warden_span_id = "ccdd" * 4
+    record.warden_step_id = "step1"
+    payload = json.loads(fmt.format(record))
+    assert payload["trace_id"] == "aabb" * 8
+    assert payload["span_id"] == "ccdd" * 4
+    assert payload["step_id"] == "step1"
+    assert payload["level"] == "INFO"
+    assert payload["service"] == "worker-node"
+
+
+def test_warden_log_context_filter_copies_contextvars():
+    filt = _WardenLogContextFilter()
+    record = logging.LogRecord(
+        name="test.logger",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hello",
+        args=(),
+        exc_info=None,
+    )
+    with log_context(trace_id="t1", span_id="s1", step_id="step1"):
+        assert filt.filter(record) is True
+    assert record.warden_trace_id == "t1"
+    assert record.warden_span_id == "s1"
+    assert record.warden_step_id == "step1"
+
+
+def test_tag_span_from_dict_separates_manifest_step_id(memory_span_exporter):
+    tracer = trace.get_tracer("test")
+    with tracer.start_as_current_span("tagged") as span:
+        _tag_span_from_dict(
+            span,
+            {
+                "saga_trace_id": "trace-1",
+                "step_span_id": "span-1",
+                "step_id": "greet",
+            },
+        )
+    attrs = memory_span_exporter.get_finished_spans()[0].attributes
+    assert attrs["saga.id"] == "trace-1"
+    assert attrs["saga.step_span_id"] == "span-1"
+    assert attrs["saga.step_id"] == "greet"
+
+
+@pytest.mark.asyncio
+async def test_run_in_executor_with_log_context_propagates_binding():
+    with log_context(trace_id="exec-trace", span_id="exec-span", step_id="exec-step"):
+
+        def _read_bound() -> dict[str, str | None]:
+            return get_bound_log_context()
+
+        bound = await run_in_executor_with_log_context(_read_bound)
+    assert bound == {
+        "trace_id": "exec-trace",
+        "span_id": "exec-span",
+        "step_id": "exec-step",
+    }
 
 
 def test_setup_telemetry_builds_provider_with_configured_exporter(mocker, monkeypatch):

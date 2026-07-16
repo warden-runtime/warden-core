@@ -98,10 +98,35 @@ Warden bridges the two by setting **span attributes** on telemetry spans:
 |-----------|-------|----------------------------------------|
 | `saga.id` | Postgres `saga_instances.trace_id` | **No** — different field; filter on this attribute |
 | `saga.step_span_id` | Postgres `saga_step_instances.span_id` | **No** — one step row can have many child spans |
+| `saga.step_id` | Manifest step id (e.g. `greet`) | **No** — human-readable step key |
+
+JSON logs on stderr also bind the same ledger fields as first-class keys (`trace_id`, `span_id`, `step_id`) plus optional `otelTraceID` / `otelSpanID` when a span is active. Prefer the Warden keys for CLI/SQL correlation; use `otel*` only for collector drill-down.
 
 Outbox messages also carry `trace_context` so engine and worker spans link in the trace UI. That propagation is OTel's graph; `saga.id` is still the id returned by `warden start saga`.
 
 **To correlate:** copy `trace_id` from `warden start saga` (or `warden list sagas`), filter traces on attribute `saga.id`, then use `warden list steps --trace-id …` or query `saga_step_instances` by `saga_trace_id`. Do not assume the collector's top-level Trace ID column is your saga id.
+
+### Structured JSON logs
+
+Engine and worker emit one JSON object per line on **stderr**. Set `LOGGING_LEVEL` (default `INFO`) on both services — Compose sets it for engine and worker.
+
+| Field | Meaning |
+|-------|---------|
+| `timestamp`, `level`, `logger`, `message`, `service` | Standard envelope |
+| `trace_id`, `span_id`, `step_id` | Warden ledger / manifest IDs when a handler has bound context |
+| `otelTraceID`, `otelSpanID`, … | Present when an OTel span is active (not the Postgres ids) |
+
+ReAct full transcripts are **not** written to Postgres. At `INFO`, the worker logs a short summary (`ReAct completed outcome=…`). Full turn lines go to logger `warden.react.transcript` at `DEBUG` — set `LOGGING_LEVEL=DEBUG` for local replay without a UI.
+
+### ReAct child spans (OpenInference-oriented)
+
+Under the worker reason-step span, Warden emits nested spans such as `react.llm.turn_N` and `react.tool.<name>` with `openinference.span.kind` (`LLM` / `TOOL`), Warden-native `tool.parameters` / tool-call previews, and `saga.*` correlation attributes. Attribute values are truncated for collector safety; use DEBUG logs for full payloads.
+
+Default Compose already runs **Jaeger** (`http://127.0.0.1:16686`) and points engine/worker `OTLP_ENDPOINT` at it. Nested ReAct spans appear under the worker command span when you filter on `saga.id`.
+
+For Langfuse / Phoenix (LLMOps UIs), point `OTLP_ENDPOINT` at that collector instead — opt-in; not shipped in the default Compose file. Long-term transcript retention / PII scrubbing remains an enterprise plugin concern, not a core Postgres table.
+
+Postgres is the system of record for **execution state** (`saga_instances`, `saga_step_instances`, outbox) — not for LLM transcripts.
 
 ## Execution timing
 
@@ -146,7 +171,59 @@ WHERE saga_trace_id = :trace_id
 
 See [Compensation](manifests/compensation.md) for single-tool vs ReAct undo timing expectations.
 
-### OpenTelemetry span attributes
+## Execution usage (LLM tokens)
+
+Forward steps and compensation undo rows may persist provider-reported LLM token totals in `saga_step_instances.execution_usage` (JSONB) — a sibling of `execution_timing`. Usage is **never** injected into user `output_payload` / saga context `data`.
+
+Worker result events carry top-level `usage.worker` on the outbox wire (same envelope shape as `timing.worker`). The engine writes that payload at ingest. Counts come from the provider via LangChain `AIMessage.usage_metadata` (OpenAI / Anthropic today); Warden does **not** run local tokenizers. Dollar / pricing conversion is intentionally out of core — capture raw tokens + `model_id` here; map to USD in a control plane.
+
+### Usage shape
+
+```json
+{
+  "worker": {
+    "model_id": "claude-sonnet-4-20250514",
+    "prompt_tokens": 1200,
+    "completion_tokens": 340,
+    "total_tokens": 1540,
+    "llm_calls": 3,
+    "details": {
+      "cache_read_tokens": 800,
+      "reasoning_tokens": 120
+    }
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `prompt_tokens` / `completion_tokens` / `total_tokens` | Sum across ReAct turns or the single structured call (`simple`) |
+| `llm_calls` | Number of provider invocations that reported usage |
+| `model_id` | Last non-empty model id from response metadata |
+| `details.*` | Extensible provider extras (cache / reasoning); summed ints; new keys need no migration |
+
+Missing metadata (mock / local without usage) leaves `usage` null — zeros are not invented.
+
+### Inspect usage
+
+HTTP: `GET /v1/sagas/steps?trace_id=…` returns `usage` next to `timing`. CLI `show step` prints a `usage` block when present.
+
+```sql
+SELECT span_id, step_id, status, execution_usage
+FROM saga_step_instances
+WHERE saga_trace_id = :trace_id;
+```
+
+### OpenTelemetry span attributes (usage)
+
+| Attribute | Where |
+|-----------|--------|
+| `llm.token_count.prompt` / `completion` / `total`, `llm.model_name` | Per-turn `react.llm.turn_*` child spans |
+| `usage.worker.prompt_tokens` (and sibling counters) | Cumulative on worker `handle_worker_command` (running totals, like `timing.worker.*`) |
+
+Postgres `execution_usage` remains authoritative for step-level totals.
+
+### OpenTelemetry span attributes (timing)
 
 When `OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) is configured, the same timing buckets are mirrored as **span attributes** on existing handler spans. Postgres `execution_timing` remains authoritative; attributes are for Jaeger/Tempo drill-down.
 

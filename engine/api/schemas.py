@@ -205,6 +205,10 @@ class SagaStepInstanceItem(BaseModel):
         default=None,
         description="Merged worker/engine execution timing buckets (milliseconds).",
     )
+    usage: dict[str, Any] | None = Field(
+        default=None,
+        description="Worker LLM token usage (provider-reported); sibling of timing.",
+    )
 
 
 class SagaStepInstanceListResponse(BaseModel):

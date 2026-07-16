@@ -77,8 +77,10 @@ async def finalize_step_execution_timing(
 
 
 def clear_step_timing_fields(step: SagaStepInstance) -> None:
+    """Clear timing (and sibling usage) staging before retry / recovery redispatch."""
     step.execution_timing = None
     step.pending_engine_timing = None
+    step.execution_usage = None
 
 
 def add_engine_bucket_ms(

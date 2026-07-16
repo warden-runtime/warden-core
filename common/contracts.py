@@ -183,6 +183,7 @@ class WorkerResultEvent(BaseSagaMessage):
 
     output: dict[str, Any] = Field(default_factory=dict)
     timing: dict[str, Any] | None = None
+    usage: dict[str, Any] | None = None
 
 
 class StepFailedResultEvent(WorkerResultEvent):
@@ -296,6 +297,7 @@ class BaseSagaIngestEvent(BaseSagaEnvelope):
     trace_context: dict[str, Any] | None = None
     step_span_id: str | None = None
     timing: dict[str, Any] | None = None
+    usage: dict[str, Any] | None = None
 
     model_config = _INGEST_CONFIG
 
