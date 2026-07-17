@@ -234,7 +234,10 @@ ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **to
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WORKER_MAX_IN_FLIGHT` | `1` | Max concurrent step commands handled by **one worker process** (outbox consumer semaphore) |
-| `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping |
+| `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping. Also used as the Tier 1 memory-redaction threshold |
+| `WARDEN_REACT_MEMORY_COMPRESSION` | `1` | Master switch for golden-ratio ReAct memory compression; set `0` / `false` / `off` to disable (A/B vs unbounded transcript) |
+| `WARDEN_REACT_CONTEXT_LIMIT` | unset / `0` | Optional token-axis budget for golden-ratio ReAct memory compression; `0` or unset = turn-axis only (when compression is on) |
+| `WARDEN_REACT_CONTEXT_HEADROOM` | `0.9` | Fraction of `WARDEN_REACT_CONTEXT_LIMIT` used for φ budgets (absorbs EMA estimator lag); clamped to `(0, 1]` |
 | `WARDEN_MAX_STEP_TOKENS` | unset / `0` | Process-wide fallback token budget for reason steps that omit `max_step_tokens`; `0` or unset = no fallback |
 
 ### LLM JSON admission

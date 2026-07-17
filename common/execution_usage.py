@@ -26,6 +26,15 @@ WORKER_USAGE_COUNTERS: tuple[str, ...] = (
     "llm_calls",
 )
 
+# Nested under execution_usage.worker.memory — compression layer counters (ints only).
+WORKER_MEMORY_COUNTERS: tuple[str, ...] = (
+    "compressions",
+    "groups_evicted",
+    "estimated_tokens_saved",
+    "max_tier",
+    "tier1_redactions",
+)
+
 # Stable aliases from LangChain / provider detail blobs → Warden keys.
 _DETAIL_KEY_ALIASES: dict[str, str] = {
     "cache_read": "cache_read_tokens",
@@ -126,6 +135,18 @@ def normalize_usage_details(raw: dict[str, Any] | None) -> dict[str, int]:
     return {k: v for k, v in out.items() if v > 0}
 
 
+def normalize_usage_memory(raw: dict[str, Any] | None) -> dict[str, int]:
+    """Normalize ``worker.memory`` compression counters (zeros omitted)."""
+    if not raw or not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key in WORKER_MEMORY_COUNTERS:
+        n = _coerce_nonneg_int(raw.get(key))
+        if n is not None and n > 0:
+            out[key] = n
+    return out
+
+
 def _normalize_worker_usage_dict(raw: dict[str, Any] | None) -> dict[str, Any]:
     if not raw or not isinstance(raw, dict):
         return {}
@@ -142,6 +163,11 @@ def _normalize_worker_usage_dict(raw: dict[str, Any] | None) -> dict[str, Any]:
     )
     if details:
         out["details"] = details
+    memory = normalize_usage_memory(
+        raw.get("memory") if isinstance(raw.get("memory"), dict) else None
+    )
+    if memory:
+        out["memory"] = memory
     return out
 
 
@@ -175,6 +201,9 @@ def merge_execution_usage(
         section["model_id"] = incoming["model_id"]
     if isinstance(incoming.get("details"), dict):
         section["details"] = dict(incoming["details"])
+    if isinstance(incoming.get("memory"), dict):
+        # Replace with latest worker snapshot (accumulator already summed within the step).
+        section["memory"] = dict(incoming["memory"])
     if section:
         merged["worker"] = section
     return merged
@@ -188,6 +217,7 @@ class WorkerUsageAccumulator:
     llm_calls: int = 0
     model_id: str | None = None
     details: dict[str, int] = field(default_factory=dict)
+    memory: dict[str, int] = field(default_factory=dict)
 
     def add(self, usage: TokenUsage | None) -> None:
         """Accumulate one model invocation's provider-reported usage."""
@@ -203,6 +233,18 @@ class WorkerUsageAccumulator:
         for key, val in normalize_usage_details(usage.details).items():
             self.details[key] = self.details.get(key, 0) + val
         self._mirror_counters()
+
+    def add_memory_stats(self, stats: Any) -> None:
+        """Accumulate compression-layer counters from a CompressionStats-like object."""
+        to_mem = getattr(stats, "to_usage_memory", None)
+        incoming = to_mem() if callable(to_mem) else None
+        if not isinstance(incoming, dict) or not incoming:
+            return
+        for key, val in normalize_usage_memory(incoming).items():
+            if key == "max_tier":
+                self.memory[key] = max(self.memory.get(key, 0), val)
+            else:
+                self.memory[key] = self.memory.get(key, 0) + val
 
     def _mirror_counters(self) -> None:
         from common.telemetry import record_usage_counter_on_current_span
@@ -225,6 +267,9 @@ class WorkerUsageAccumulator:
         details = {k: v for k, v in self.details.items() if v > 0}
         if details:
             out["details"] = details
+        memory = normalize_usage_memory(self.memory)
+        if memory:
+            out["memory"] = memory
         return out
 
     def to_wire(self) -> dict[str, Any]:

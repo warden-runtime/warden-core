@@ -30,8 +30,17 @@ from common.utils import (
     tool_call_args_to_dict,
 )
 from workers.adapters import state_utils
+from workers.adapters.react_memory import (
+    CalibratedEstimator,
+    compress_if_needed,
+    context_headroom_from_env,
+    context_limit_from_env,
+    memory_compression_enabled_from_env,
+    serialize_for_estimate,
+)
 from workers.adapters.react_otel import (
     mark_llm_response,
+    mark_memory_compression,
     mark_tool_output,
     react_llm_span,
     react_tool_span,
@@ -382,13 +391,34 @@ async def _react_loop_turn(
     turns_used: int,
     max_turns: int,
     tool_message_limit: int | None = None,
+    estimator: CalibratedEstimator | None = None,
+    context_limit: int | None = None,
+    context_headroom: float | None = None,
 ) -> ReactLoopResult | None:
+    memory_stats = None
+    if estimator is not None:
+        compressed, memory_stats = compress_if_needed(
+            messages,
+            max_turns=max_turns,
+            context_limit=context_limit,
+            estimator=estimator,
+            tool_redact_limit=tool_message_limit,
+            headroom=context_headroom,
+        )
+        messages[:] = compressed
+        if usage_acc is not None and memory_stats is not None:
+            usage_acc.add_memory_stats(memory_stats)
+
     llm_start = time.perf_counter() if timing_acc is not None else None
     with react_llm_span(turn_index=turns_used, message_count=len(messages)) as llm_span:
+        if memory_stats is not None:
+            mark_memory_compression(llm_span, memory_stats)
         response = await llm.ainvoke(messages)
         mark_llm_response(llm_span, response)
     if timing_acc is not None and llm_start is not None:
         timing_acc.add_ms("llm_ms", elapsed_ms(llm_start))
+    if estimator is not None and response.usage and response.usage.prompt_tokens > 0:
+        estimator.calibrate(serialize_for_estimate(messages), response.usage.prompt_tokens)
     if usage_acc is not None:
         usage_acc.add(response.usage)
         enforce_step_token_budget(usage_acc, max_step_tokens)
@@ -487,6 +517,18 @@ async def run_react_loop(
     tool_results: list[dict[str, Any]] = []
     ctx = merge_context if merge_context is not None else {}
     tool_message_limit = tool_message_limit_from_env()
+    compression_on = memory_compression_enabled_from_env()
+    estimator = CalibratedEstimator() if compression_on else None
+    context_limit = context_limit_from_env() if compression_on else None
+    context_headroom = context_headroom_from_env() if compression_on else None
+    if compression_on:
+        logger.debug(
+            "ReAct memory compression enabled context_limit=%s headroom=%s",
+            context_limit,
+            context_headroom,
+        )
+    else:
+        logger.debug("ReAct memory compression disabled")
 
     for turn_index in range(max_turns):
         turn_result = await _react_loop_turn(
@@ -505,6 +547,9 @@ async def run_react_loop(
             turns_used=turn_index + 1,
             max_turns=max_turns,
             tool_message_limit=tool_message_limit,
+            estimator=estimator,
+            context_limit=context_limit,
+            context_headroom=context_headroom,
         )
         if turn_result is not None:
             return turn_result

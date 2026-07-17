@@ -192,6 +192,13 @@ Reason steps may also set `max_step_tokens` (or worker env `WARDEN_MAX_STEP_TOKE
     "details": {
       "cache_read_tokens": 800,
       "reasoning_tokens": 120
+    },
+    "memory": {
+      "compressions": 2,
+      "max_tier": 2,
+      "groups_evicted": 3,
+      "estimated_tokens_saved": 4200,
+      "tier1_redactions": 1
     }
   }
 }
@@ -203,6 +210,9 @@ Reason steps may also set `max_step_tokens` (or worker env `WARDEN_MAX_STEP_TOKE
 | `llm_calls` | Number of provider invocations that reported usage |
 | `model_id` | Last non-empty model id from response metadata |
 | `details.*` | Extensible provider extras (cache / reasoning); summed ints; new keys need no migration |
+| `memory.*` | Optional golden-ratio compression counters (present when the layer fired at least once) |
+
+`memory` is estimator-based (not provider truth). Use it for A/B and ops; compare ON vs OFF runs via `prompt_tokens` for real savings.
 
 Missing metadata (mock / local without usage) leaves `usage` null — zeros are not invented.
 
@@ -222,6 +232,7 @@ WHERE saga_trace_id = :trace_id;
 |-----------|--------|
 | `llm.token_count.prompt` / `completion` / `total`, `llm.model_name` | Per-turn `react.llm.turn_*` child spans |
 | `usage.worker.prompt_tokens` (and sibling counters) | Cumulative on worker `handle_worker_command` (running totals, like `timing.worker.*`) |
+| `warden.memory.compressed` / `trigger_tier` / `groups_evicted` / `estimated_tokens_saved` | Per-turn `react.llm.turn_*` when memory compression ran (or `compressed=false` when enabled but idle) |
 
 Postgres `execution_usage` remains authoritative for step-level totals.
 

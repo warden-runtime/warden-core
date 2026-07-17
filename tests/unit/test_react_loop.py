@@ -35,6 +35,68 @@ class _ScriptedLLM:
 
 
 @pytest.mark.asyncio
+async def test_memory_compression_toggle_skips_compress(monkeypatch):
+    """WARDEN_REACT_MEMORY_COMPRESSION=0 must not call compress_if_needed."""
+    calls: list[int] = []
+
+    def _track(messages, **kwargs):
+        from workers.adapters.react_memory import CompressionStats
+
+        calls.append(len(messages))
+        return list(messages), CompressionStats()
+
+    monkeypatch.setattr("workers.adapters.react_loop.compress_if_needed", _track)
+    monkeypatch.setenv("WARDEN_REACT_MEMORY_COMPRESSION", "0")
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"ok": True}},
+                        id="1",
+                    )
+                ]
+            )
+        ]
+    )
+    await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[],
+        allowed_tool_names=[],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert calls == []
+
+    monkeypatch.setenv("WARDEN_REACT_MEMORY_COMPRESSION", "1")
+    llm2 = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"ok": True}},
+                        id="2",
+                    )
+                ]
+            )
+        ]
+    )
+    await run_react_loop(
+        llm=llm2,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[],
+        allowed_tool_names=[],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_submit_mode_returns_payload_on_submit_call():
     llm = _ScriptedLLM(
         [
