@@ -583,6 +583,19 @@
             "description": "Merged worker/engine execution timing buckets (milliseconds).",
             "title": "Timing"
           },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worker LLM token usage (provider-reported); sibling of timing.",
+            "title": "Usage"
+          },
           "worker": {
             "title": "Worker",
             "type": "string"
@@ -696,6 +709,19 @@
             ],
             "description": "Merged worker/engine execution timing buckets (milliseconds).",
             "title": "Timing"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worker LLM token usage (provider-reported); sibling of timing.",
+            "title": "Usage"
           },
           "worker": {
             "title": "Worker",
