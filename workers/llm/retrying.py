@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from common.config import get_settings
 from common.llm import ChatMessage, ChatModelPort, ChatResponse, ToolProtocol
 from common.retry import retry_async
-from workers.llm.retry_policy import is_transient_llm_error
+from workers.llm.retry_policy import is_transient_llm_error, suggested_retry_delay_s
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,9 @@ class LlmRetryPolicy:
     base_delay_s: float
     max_delay_s: float
     is_retryable: Callable[[BaseException], bool] = field(default=is_transient_llm_error)
+    suggested_delay_s: Callable[[BaseException], float | None] = field(
+        default=suggested_retry_delay_s,
+    )
 
 
 class RetryingChatModelPort(ChatModelPort):
@@ -50,6 +53,7 @@ class RetryingChatModelPort(ChatModelPort):
             max_attempts=self._policy.max_attempts,
             base_delay_s=self._policy.base_delay_s,
             max_delay_s=self._policy.max_delay_s,
+            suggested_delay_s=self._policy.suggested_delay_s,
         )
 
 
