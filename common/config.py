@@ -173,7 +173,7 @@ class Settings(BaseSettings):
         default=60.0,
         gt=0,
         validation_alias="WARDEN_LLM_RETRY_MAX_DELAY_S",
-        description="Max delay cap (seconds) for LLM retry backoff before jitter.",
+        description="Hard cap (seconds) on LLM retry sleep, including provider wait hints.",
     )
 
     @model_validator(mode="after")

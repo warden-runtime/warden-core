@@ -313,14 +313,14 @@ For compliance-grade capabilities—forensic audit history, extended operational
 
 ## LLM retries (automated backoff)
 
-`WARDEN_LLM_RETRY_*` variables configure **transient LLM API resilience** inside the worker — network blips, rate limits, and short provider outages on each `ainvoke` call (ReAct turns on **`react`** steps, the single call on **`simple`** steps). The worker retries with exponential backoff and jitter; it does **not** restart a failed saga step, re-run compensation, or replace operator actions.
+`WARDEN_LLM_RETRY_*` variables configure **transient LLM API resilience** inside the worker — network blips, rate limits, and short provider outages on each `ainvoke` call (ReAct turns on **`react`** steps, the single call on **`simple`** steps). The worker retries with exponential backoff and jitter; when the provider suggests a wait (`Retry-After` or “Please try again in Xs”), the sleep is **at least** that duration (still capped by `WARDEN_LLM_RETRY_MAX_DELAY_S`). It does **not** restart a failed saga step, re-run compensation, or replace operator actions.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WARDEN_LLM_RETRY_ENABLED` | `true` | Toggle backoff wrapper around LLM calls |
 | `WARDEN_LLM_RETRY_MAX_ATTEMPTS` | `3` | Max attempts per LLM call (including the first) |
 | `WARDEN_LLM_RETRY_BASE_DELAY_S` | `1.0` | Initial backoff delay (seconds) |
-| `WARDEN_LLM_RETRY_MAX_DELAY_S` | `60.0` | Cap on backoff delay before jitter |
+| `WARDEN_LLM_RETRY_MAX_DELAY_S` | `60.0` | Hard cap on sleep (backoff and provider wait hints) |
 
 | If you need… | Use… |
 |--------------|------|
