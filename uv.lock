@@ -3135,7 +3135,7 @@ requires-dist = [
     { name = "jsonpath-ng", marker = "extra == 'worker'", specifier = ">=1.8" },
     { name = "jsonschema", specifier = ">=4.26" },
     { name = "langchain", marker = "extra == 'worker'", specifier = ">=1.2" },
-    { name = "langchain-anthropic", marker = "extra == 'worker'", specifier = ">=0.3" },
+    { name = "langchain-anthropic", marker = "extra == 'worker'", specifier = ">=1.4.0" },
     { name = "langchain-core", marker = "extra == 'worker'", specifier = ">=1.4" },
     { name = "langchain-openai", marker = "extra == 'worker'", specifier = ">=1.2" },
     { name = "mcp", marker = "extra == 'worker'", specifier = ">=1.26" },

@@ -42,7 +42,7 @@ worker = [
     "jsonpath-ng>=1.8",
     "mcp>=1.26",
     "opentelemetry-instrumentation-httpx>=0.60b1",
-    "langchain-anthropic>=0.3",
+    "langchain-anthropic>=1.4.0",
 ]
 cli = [
     "typer>=0.21",
