@@ -7,7 +7,7 @@ from common.llm import ChatMessage, ChatResponse
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from workers.adapters.simple_schema import FALLBACK_SIMPLE_OUTPUT_SCHEMA
-from workers.llm.anthropic import AnthropicChatAdapter, _CACHE_CONTROL
+from workers.llm.anthropic import _CACHE_CONTROL, AnthropicChatAdapter
 from workers.llm.structured import SchemaBoundChatModel, invoke_structured_output
 
 

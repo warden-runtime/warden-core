@@ -43,46 +43,47 @@ def _tag_last_tool_for_cache(tools: Sequence[Any]) -> list[Any]:
     return tagged
 
 
+def _system_message_with_cache_control(msg: SystemMessage) -> SystemMessage | None:
+    """Return a copy of ``msg`` with cache_control on the last content block, or None."""
+    content = msg.content
+    if isinstance(content, str) and content:
+        return SystemMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": dict(_CACHE_CONTROL),
+                }
+            ]
+        )
+    if not isinstance(content, list) or not content:
+        return None
+    new_content = list(content)
+    last = new_content[-1]
+    if isinstance(last, dict):
+        new_content[-1] = {**last, "cache_control": dict(_CACHE_CONTROL)}
+    elif isinstance(last, str) and last:
+        new_content[-1] = {
+            "type": "text",
+            "text": last,
+            "cache_control": dict(_CACHE_CONTROL),
+        }
+    else:
+        return None
+    return SystemMessage(content=new_content)
+
+
 def _tag_system_message_for_cache(messages: list[BaseMessage]) -> list[BaseMessage]:
     """Put cache_control on the first non-empty system message content block."""
     out: list[BaseMessage] = []
     tagged = False
     for msg in messages:
-        if tagged or not isinstance(msg, SystemMessage):
-            out.append(msg)
-            continue
-        content = msg.content
-        if isinstance(content, str) and content:
-            out.append(
-                SystemMessage(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": content,
-                            "cache_control": dict(_CACHE_CONTROL),
-                        }
-                    ]
-                )
-            )
-            tagged = True
-            continue
-        if isinstance(content, list) and content:
-            new_content = list(content)
-            last = new_content[-1]
-            if isinstance(last, dict):
-                new_content[-1] = {**last, "cache_control": dict(_CACHE_CONTROL)}
-            elif isinstance(last, str) and last:
-                new_content[-1] = {
-                    "type": "text",
-                    "text": last,
-                    "cache_control": dict(_CACHE_CONTROL),
-                }
-            else:
-                out.append(msg)
+        if not tagged and isinstance(msg, SystemMessage):
+            rewritten = _system_message_with_cache_control(msg)
+            if rewritten is not None:
+                out.append(rewritten)
+                tagged = True
                 continue
-            out.append(SystemMessage(content=new_content))
-            tagged = True
-            continue
         out.append(msg)
     return out
 
