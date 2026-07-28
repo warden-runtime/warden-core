@@ -169,7 +169,14 @@ async def test_run_step_simple_adapter_returns_structured_output(mocker):
 
 @pytest.mark.asyncio
 async def test_run_step_raises_when_no_submit(mocker):
-    _patch_build_llm(mocker, [ChatResponse(content='{"summary": "Fallback result."}')])
+    # Default WARDEN_REACT_SUBMIT_TEXT_RETRIES=1 soft-retries text-only exits once.
+    _patch_build_llm(
+        mocker,
+        [
+            ChatResponse(content='{"summary": "Fallback result."}'),
+            ChatResponse(content='{"summary": "still no submit"}'),
+        ],
+    )
     mocker.patch(
         "workers.adapters.langchain.build_tools_for_worker",
         new_callable=AsyncMock,
@@ -193,7 +200,13 @@ async def test_run_step_raises_when_no_submit(mocker):
 
 @pytest.mark.asyncio
 async def test_run_step_raises_when_no_submit_and_prose_content(mocker):
-    _patch_build_llm(mocker, [ChatResponse(content="not valid json")])
+    _patch_build_llm(
+        mocker,
+        [
+            ChatResponse(content="not valid json"),
+            ChatResponse(content="still prose, no _submit"),
+        ],
+    )
     mocker.patch(
         "workers.adapters.langchain.build_tools_for_worker",
         new_callable=AsyncMock,

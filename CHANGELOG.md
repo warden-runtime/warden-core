@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `provider: azure` — Azure OpenAI / Microsoft Foundry via LangChain `ChatOpenAI` and the OpenAI-compatible `/openai/v1/` path (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`; worker `model_name` is the deployment name). Defaults to Chat Completions for prompt-cache friendliness; Responses API is opt-in via `WARDEN_AZURE_USE_RESPONSES_API`.
+
 ### Fixed
 
 - Coerce sloppy LLM tool arguments against MCP `inputSchema` before ReAct validation (common Ollama/vLLM stringified array/object fields)

@@ -141,3 +141,39 @@ def test_coerce_null_string_without_nullable_schema_stays_literal():
     schema = {"type": "object", "properties": {"note": {"type": "string"}}}
     assert coerce_llm_json_from_schema({"note": "null"}, schema) == {"note": "null"}
     assert coerce_llm_json_from_schema({"note": "None"}, schema) == {"note": "None"}
+
+
+def test_coerce_path_symbol_object_to_string_locus():
+    """GPT-style {path, symbol} objects admit into string fields (SWE architect locus)."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "strategies": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "locus": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["name", "locus"],
+                },
+            }
+        },
+        "required": ["strategies"],
+    }
+    payload = {
+        "strategies": [
+            {
+                "name": "A",
+                "locus": {
+                    "path": "astropy/modeling/separable.py",
+                    "symbol": "_separable",
+                },
+            },
+            {"name": "B", "locus": "other/file.py::helper"},
+        ]
+    }
+    admitted = admit_and_validate(payload, schema, "test")
+    assert admitted["strategies"][0]["locus"] == "astropy/modeling/separable.py::_separable"
+    assert admitted["strategies"][1]["locus"] == "other/file.py::helper"

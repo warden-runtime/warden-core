@@ -208,6 +208,17 @@ def _coerce_string_for_primary_type(
     return value
 
 
+def _coerce_dict_to_string(value: dict[str, Any]) -> Any:
+    """Flatten common LLM {path, symbol} objects when schema expects a string."""
+    path = value.get("path")
+    if isinstance(path, str) and path.strip():
+        symbol = value.get("symbol")
+        if isinstance(symbol, str) and symbol.strip():
+            return f"{path.strip()}::{symbol.strip()}"
+        return path.strip()
+    return value
+
+
 def _coerce_value_for_schema(
     value: Any,
     field_schema: dict[str, Any],
@@ -223,6 +234,8 @@ def _coerce_value_for_schema(
 
     primary = _primary_json_type(type_names)
     if primary == "string":
+        if isinstance(value, dict):
+            return _coerce_dict_to_string(value)
         return value
 
     if isinstance(value, str):

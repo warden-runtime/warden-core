@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class ModelProvider(StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
+    AZURE = "azure"
     LOCAL = "local"
     MOCK = "mock"
 

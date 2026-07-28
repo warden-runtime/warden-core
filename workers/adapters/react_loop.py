@@ -54,6 +54,28 @@ SUBMIT_TOOL_NAME = "_submit"
 _DEFAULT_PREVIEW_LEN = 500
 _TOOL_ERROR_PREVIEW_LEN = 500
 _MAX_LAST_TOOL_ERRORS = 5
+_DEFAULT_SUBMIT_TEXT_RETRIES = 1
+_SUBMIT_TEXT_EXIT_NUDGE = (
+    "[SYSTEM]: Your previous message was plain text without a tool call. "
+    "This step requires calling the `_submit` tool now with the full result object. "
+    "Do not summarize or explain in chat — invoke `_submit` immediately."
+)
+
+
+def submit_text_retries_from_env() -> int:
+    """Resolve ``WARDEN_REACT_SUBMIT_TEXT_RETRIES``; default 1 soft recovery on text-only exit."""
+    raw = os.environ.get("WARDEN_REACT_SUBMIT_TEXT_RETRIES", str(_DEFAULT_SUBMIT_TEXT_RETRIES))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _DEFAULT_SUBMIT_TEXT_RETRIES
+
+
+@dataclass(frozen=True)
+class _TurnContinue:
+    """Continue the ReAct loop after tool rounds or a submit text-exit soft retry."""
+
+    used_submit_text_recovery: bool = False
 
 
 def _content_preview_len() -> int:
@@ -394,7 +416,8 @@ async def _react_loop_turn(
     estimator: CalibratedEstimator | None = None,
     context_limit: int | None = None,
     context_headroom: float | None = None,
-) -> ReactLoopResult | None:
+    allow_submit_text_recovery: bool = False,
+) -> ReactLoopResult | _TurnContinue:
     memory_stats = None
     if estimator is not None:
         compressed, memory_stats = compress_if_needed(
@@ -448,9 +471,18 @@ async def _react_loop_turn(
                 submit_payload=submit_payload,
                 tool_results=tool_results or None,
             )
-        return None
+        return _TurnContinue()
 
     if completion_mode == "submit":
+        if allow_submit_text_recovery:
+            messages.append(ChatMessage(role="assistant", content=response.content or ""))
+            messages.append(ChatMessage(role="human", content=_SUBMIT_TEXT_EXIT_NUDGE))
+            logger.info(
+                "ReAct submit soft-retry: model_text_exit; injected _submit nudge (turn=%d/%d)",
+                turns_used,
+                max_turns,
+            )
+            return _TurnContinue(used_submit_text_recovery=True)
         _raise_no_submit(
             reason="model_text_exit",
             turns_used=turns_used,
@@ -496,7 +528,8 @@ async def run_react_loop(
         mcp_tools: MCP StructuredTool instances (not including virtual _submit).
         allowed_tool_names: Names from step tool_specs (excludes _submit).
         completion_mode: ``submit`` for reason steps (_submit required); ``assistant_json`` for compensation.
-        max_turns: Maximum LLM invocations.
+        max_turns: Maximum LLM invocations (submit-mode text-exit soft retry may add at most
+            ``WARDEN_REACT_SUBMIT_TEXT_RETRIES`` bonus call(s) when prose exit hits the last turn).
         merge_tool_args: Optional merger for compensation tool args with engine original_input.
         merge_context: Second argument to merge_tool_args (e.g. original_input).
         log_preview_len: Optional transcript log truncation override (from injection context);
@@ -521,6 +554,9 @@ async def run_react_loop(
     estimator = CalibratedEstimator() if compression_on else None
     context_limit = context_limit_from_env() if compression_on else None
     context_headroom = context_headroom_from_env() if compression_on else None
+    submit_text_recoveries_left = (
+        submit_text_retries_from_env() if completion_mode == "submit" else 0
+    )
     if compression_on:
         logger.debug(
             "ReAct memory compression enabled context_limit=%s headroom=%s",
@@ -530,7 +566,12 @@ async def run_react_loop(
     else:
         logger.debug("ReAct memory compression disabled")
 
-    for turn_index in range(max_turns):
+    # Soft text-exit recovery may grant one bonus LLM call past max_turns when the
+    # prose exit happens on the final scheduled turn (still capped by recoveries_left).
+    effective_max_turns = max_turns
+    turns_used = 0
+    while turns_used < effective_max_turns:
+        turns_used += 1
         turn_result = await _react_loop_turn(
             llm=llm,
             messages=messages,
@@ -544,20 +585,26 @@ async def run_react_loop(
             timing_acc=timing_acc,
             usage_acc=usage_acc,
             max_step_tokens=max_step_tokens,
-            turns_used=turn_index + 1,
+            turns_used=turns_used,
             max_turns=max_turns,
             tool_message_limit=tool_message_limit,
             estimator=estimator,
             context_limit=context_limit,
             context_headroom=context_headroom,
+            allow_submit_text_recovery=submit_text_recoveries_left > 0,
         )
-        if turn_result is not None:
+        if isinstance(turn_result, ReactLoopResult):
             return turn_result
+        if turn_result.used_submit_text_recovery:
+            submit_text_recoveries_left -= 1
+            if turns_used >= effective_max_turns:
+                effective_max_turns = turns_used + 1
+        # else: tool round(s) without _submit — continue
 
     if completion_mode == "submit":
         _raise_no_submit(
             reason="max_turns_exceeded",
-            turns_used=max_turns,
+            turns_used=turns_used,
             max_turns=max_turns,
             tool_results=tool_results,
         )
@@ -572,7 +619,7 @@ async def run_react_loop(
         )
         _log_react_summary(
             outcome="compensation_synthetic",
-            turns_used=max_turns,
+            turns_used=turns_used,
             message_count=len(messages),
         )
         return ReactLoopResult(transcript=messages, tool_results=tool_results)
