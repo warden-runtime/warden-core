@@ -21,6 +21,8 @@ dependencies = [
     "opentelemetry-instrumentation>=0.60b1",
     "opentelemetry-instrumentation-logging>=0.60b1",
     "jsonschema>=4.26",
+    # common.prompts (engine + worker): FileSystemLoader / {% include %}
+    "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +36,6 @@ engine = [
     "cel-python>=0.5.0",
 ]
 worker = [
-    "jinja2>=3.1",
     "httpx>=0.28",
     "langchain>=1.2",
     "langchain-openai>=1.2",

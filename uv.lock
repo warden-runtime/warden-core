@@ -3065,6 +3065,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },
+    { name = "jinja2" },
     { name = "jsonschema" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
@@ -3109,7 +3110,6 @@ engine = [
 ]
 worker = [
     { name = "httpx" },
-    { name = "jinja2" },
     { name = "jsonpath-ng" },
     { name = "langchain" },
     { name = "langchain-anthropic" },
@@ -3130,7 +3130,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'cli'", specifier = ">=0.28" },
     { name = "httpx", marker = "extra == 'worker'", specifier = ">=0.28" },
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.0" },
-    { name = "jinja2", marker = "extra == 'worker'", specifier = ">=3.1" },
+    { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonpath-ng", marker = "extra == 'engine'", specifier = ">=1.8" },
     { name = "jsonpath-ng", marker = "extra == 'worker'", specifier = ">=1.8" },
     { name = "jsonschema", specifier = ">=4.26" },
