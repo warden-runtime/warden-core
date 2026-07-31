@@ -20,6 +20,7 @@ from workers.tools import (
     _terminate_stdio_process_if_running,
     build_tools_for_worker,
     get_warden_tool_input_schema,
+    get_warden_tool_mcp_name,
 )
 
 
@@ -671,3 +672,91 @@ async def test_build_tools_for_worker_requires_sources_when_resources_configured
                 resource_specs=[{"uri": "file:///policies/fraud-v3.md"}],
             )
     assert exc_info.value.error_details.get("code") == "MCP_SOURCES_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_convert_mcp_sanitizes_dotted_name_keeps_original_for_call_tool():
+    mcp_tool = McpTool(
+        name="calendar.list_events",
+        description="List events",
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(return_value=MagicMock(content=[]))
+
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+
+    assert tool.name == "calendar_list_events"
+    assert get_warden_tool_mcp_name(tool) == "calendar.list_events"
+    await tool.ainvoke({})
+    mock_session.call_tool.assert_called_once_with("calendar.list_events", arguments={})
+
+
+@pytest.mark.asyncio
+async def test_build_tools_underscore_allowlist_matches_dotted_mcp(mocker):
+    mock_session = MagicMock()
+    mock_session.list_tools = AsyncMock(
+        return_value=MagicMock(
+            tools=[
+                McpTool(name="calendar.list_events", description="List", inputSchema={}),
+            ]
+        )
+    )
+
+    async def _fake_connect(source_config, stack):
+        return mock_session
+
+    mocker.patch(
+        "workers.tools._connect_to_source",
+        new_callable=AsyncMock,
+        side_effect=_fake_connect,
+    )
+
+    worker_def = MagicMock(spec=WorkerDefinition)
+    worker_def.tool_sources = [{"name": "mcp1", "transport": "sse", "url": "http://localhost"}]
+
+    async with AsyncExitStack() as stack:
+        result = await build_tools_for_worker(
+            worker_def=worker_def,
+            tool_specs=[{"name": "calendar_list_events"}],
+            exit_stack=stack,
+        )
+
+    assert len(result) == 1
+    assert result[0].name == "calendar_list_events"
+    assert get_warden_tool_mcp_name(result[0]) == "calendar.list_events"
+
+
+@pytest.mark.asyncio
+async def test_build_tools_dotted_allowlist_matches_dotted_mcp(mocker):
+    mock_session = MagicMock()
+    mock_session.list_tools = AsyncMock(
+        return_value=MagicMock(
+            tools=[
+                McpTool(name="calendar.list_events", description="List", inputSchema={}),
+            ]
+        )
+    )
+
+    async def _fake_connect(source_config, stack):
+        return mock_session
+
+    mocker.patch(
+        "workers.tools._connect_to_source",
+        new_callable=AsyncMock,
+        side_effect=_fake_connect,
+    )
+
+    worker_def = MagicMock(spec=WorkerDefinition)
+    worker_def.tool_sources = [{"name": "mcp1", "transport": "sse", "url": "http://localhost"}]
+
+    async with AsyncExitStack() as stack:
+        result = await build_tools_for_worker(
+            worker_def=worker_def,
+            tool_specs=[{"name": "calendar.list_events"}],
+            exit_stack=stack,
+        )
+
+    assert len(result) == 1
+    assert result[0].name == "calendar_list_events"
+    assert get_warden_tool_mcp_name(result[0]) == "calendar.list_events"

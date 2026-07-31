@@ -36,7 +36,7 @@ from workers.adapters.react_otel import (
     react_llm_span,
     react_tool_span,
 )
-from workers.tools import get_warden_tool_input_schema
+from workers.tools import get_warden_tool_input_schema, get_warden_tool_mcp_name
 
 logger = logging.getLogger(__name__)
 _transcript_logger = logging.getLogger("warden.react.transcript")
@@ -231,6 +231,14 @@ def _handle_tool_output_content(
         )
 
 
+def _mcp_fact_tool_name(tool_call: ToolCall, mcp_tools: Sequence[Any]) -> str:
+    """Original MCP id for facts/tool_results; fall back to the LLM wire name."""
+    selected = next((t for t in mcp_tools if t.name == tool_call.name), None)
+    if selected is None:
+        return tool_call.name
+    return get_warden_tool_mcp_name(selected) or tool_call.name
+
+
 async def _process_tool_calls(
     *,
     response: ChatResponse,
@@ -285,7 +293,7 @@ async def _process_tool_calls(
         )
         tool_results.append(
             {
-                "tool": tool_call.name,
+                "tool": _mcp_fact_tool_name(tool_call, mcp_tools),
                 # Full payload for facts/JSONPath; do not truncate execution memory here.
                 "result": output,
             },
