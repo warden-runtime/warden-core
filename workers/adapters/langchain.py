@@ -21,6 +21,7 @@ from common.compensation_context import (
     COMPENSATION_METADATA_KEY,
     merge_compensation_tool_arguments,
 )
+from common.config import get_settings
 from common.error_details import build_step_error_details
 from common.execution_timing import WorkerTimingAccumulator, elapsed_ms
 from common.execution_usage import WorkerUsageAccumulator
@@ -37,6 +38,7 @@ from common.tool_results import clip_tool_text_for_llm, resolve_tool_message_lim
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 from workers.adapters.react_loop import (
+    SUBMIT_TOOL_NAME,
     ReactLoopResult,
     parse_compensation_output,
     run_react_loop,
@@ -132,12 +134,71 @@ def _validate_submit_payload(
         try:
             return admit_and_validate(payload, output_schema, "step output (_submit)")
         except Exception as e:
-            logger.exception("Step output schema validation failed: %s", e)
+            logger.warning("Step output schema validation failed: %s", e)
+            message = str(e)
             raise ExecutionStepError(
-                str(e),
-                error_details={"error": str(e), "validation": "output_schema"},
+                message,
+                error_details=build_step_error_details(
+                    code="OUTPUT_SCHEMA_VALIDATION_FAILED",
+                    message=message,
+                    error=message,
+                    validation="output_schema",
+                ),
             ) from e
     return payload
+
+
+def _is_output_schema_validation_error(exc: ExecutionStepError) -> bool:
+    details = exc.error_details or {}
+    return (
+        details.get("code") == "OUTPUT_SCHEMA_VALIDATION_FAILED"
+        or details.get("validation") == "output_schema"
+    )
+
+
+def _schema_retry_max_attempts() -> int:
+    settings = get_settings()
+    if not settings.llm_schema_retry_enabled:
+        return 1
+    return settings.llm_schema_retry_max_attempts
+
+
+def _last_submit_tool_call_id(transcript: list[ChatMessage]) -> str | None:
+    for msg in reversed(transcript):
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        for tool_call in msg.tool_calls:
+            if tool_call.name == SUBMIT_TOOL_NAME:
+                return tool_call.id or None
+    return None
+
+
+def _count_assistant_turns(transcript: list[ChatMessage]) -> int:
+    return sum(1 for msg in transcript if msg.role == "assistant")
+
+
+def _append_submit_schema_feedback(
+    transcript: list[ChatMessage],
+    *,
+    error: ExecutionStepError,
+    output_schema: dict[str, Any] | None,
+) -> list[ChatMessage]:
+    tool_call_id = _last_submit_tool_call_id(transcript) or ""
+    payload = {
+        "ok": False,
+        "error": "output_schema_validation_failed",
+        "message": str(error),
+        "schema": output_schema,
+    }
+    return [
+        *transcript,
+        ChatMessage(
+            role="tool",
+            name=SUBMIT_TOOL_NAME,
+            tool_call_id=tool_call_id,
+            content=json.dumps(payload, ensure_ascii=False),
+        ),
+    ]
 
 
 def _validate_structured_payload(
@@ -425,47 +486,83 @@ class LangChainAdapter(AgentAdapterPort):
                 api_key=self._secret.api_key,
             )
             llm_with_tools = llm.bind_tools(cast("list[ToolProtocol]", bind_tools))
-            initial_messages = [
+            loop_messages = [
                 ChatMessage(role="system", content=system_prompt),
                 ChatMessage(role="human", content=json.dumps(final_input, default=str)),
             ]
             if timing_acc is not None:
                 timing_acc.stop("adapter_setup", bucket="setup_ms")
-            try:
-                loop_result = await run_react_loop(
-                    llm=llm_with_tools,
-                    initial_messages=initial_messages,
-                    mcp_tools=mcp_tools,
-                    allowed_tool_names=allowed_tool_names,
-                    completion_mode="submit",
-                    max_turns=turn_budget,
-                    log_preview_len=_react_log_preview_len(ctx),
-                    timing_acc=timing_acc,
-                    usage_acc=usage_acc,
-                    max_step_tokens=max_step_tokens,
-                )
-            except ExecutionStepError:
-                raise
-            except Exception as e:
-                logger.exception("ReAct loop failed: %s", e)
-                raise ExecutionStepError(
-                    str(e),
-                    error_details={"error": str(e), "phase": "agent_invoke"},
-                ) from e
 
-        return await self._finalize_reason_step(
-            ctx=ctx,
-            system_prompt=system_prompt,
-            prompt_template=prompt_template,
-            final_input=final_input,
-            allowed_tool_names=allowed_tool_names,
-            transcript=loop_result.transcript,
-            raw_payload=loop_result.submit_payload,
-            output_schema=output_schema,
-            tool_results=loop_result.tool_results,
-            facts_extractors=facts_extractors,
-            validate_payload=_validate_submit_payload,
-        )
+            max_schema_attempts = _schema_retry_max_attempts()
+            remaining_turns = turn_budget
+            loop_result: ReactLoopResult | None = None
+            for schema_attempt in range(1, max_schema_attempts + 1):
+                try:
+                    loop_result = await run_react_loop(
+                        llm=llm_with_tools,
+                        initial_messages=loop_messages,
+                        mcp_tools=mcp_tools,
+                        allowed_tool_names=allowed_tool_names,
+                        completion_mode="submit",
+                        max_turns=remaining_turns,
+                        log_preview_len=_react_log_preview_len(ctx),
+                        timing_acc=timing_acc,
+                        usage_acc=usage_acc,
+                        max_step_tokens=max_step_tokens,
+                    )
+                except ExecutionStepError:
+                    raise
+                except Exception as e:
+                    logger.exception("ReAct loop failed: %s", e)
+                    raise ExecutionStepError(
+                        str(e),
+                        error_details={"error": str(e), "phase": "agent_invoke"},
+                    ) from e
+
+                try:
+                    _validate_submit_payload(
+                        loop_result.submit_payload,
+                        output_schema=output_schema,
+                    )
+                    break
+                except ExecutionStepError as exc:
+                    if (
+                        not _is_output_schema_validation_error(exc)
+                        or schema_attempt >= max_schema_attempts
+                    ):
+                        break
+                    logger.info(
+                        "ReAct _submit schema validation failed (attempt %s/%s); soft-retrying",
+                        schema_attempt,
+                        max_schema_attempts,
+                    )
+                    loop_messages = _append_submit_schema_feedback(
+                        loop_result.transcript,
+                        error=exc,
+                        output_schema=output_schema,
+                    )
+                    used_turns = _count_assistant_turns(loop_result.transcript)
+                    remaining_turns = max(1, turn_budget - used_turns)
+
+            if loop_result is None:
+                raise ExecutionStepError(
+                    "ReAct schema soft-retry produced no result",
+                    error_details={"code": "react_schema_retry_empty"},
+                )
+
+            return await self._finalize_reason_step(
+                ctx=ctx,
+                system_prompt=system_prompt,
+                prompt_template=prompt_template,
+                final_input=final_input,
+                allowed_tool_names=allowed_tool_names,
+                transcript=loop_result.transcript,
+                raw_payload=loop_result.submit_payload,
+                output_schema=output_schema,
+                tool_results=loop_result.tool_results,
+                facts_extractors=facts_extractors,
+                validate_payload=_validate_submit_payload,
+            )
 
     async def run_commit(
         self,

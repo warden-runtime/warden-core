@@ -414,6 +414,59 @@ steps:
 
 
 @pytest.mark.asyncio
+async def test_register_manifest_saga_rejects_unsupported_output_schema_keywords(
+    monkeypatch, tmp_path
+):
+    (tmp_path / "bad.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {
+                    "event": {
+                        "type": "object",
+                        "anyOf": [{"type": "object"}, {"type": "null"}],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SCHEMAS_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    try:
+        await WorkerDefinition.create(
+            namespace="default",
+            name="schema-test-worker-unsupported",
+            model_provider="openai",
+            model_name="gpt-4o",
+            system_prompt="Hi.",
+        )
+        service = RegistryService()
+        saga_yaml = """
+kind: saga
+name: saga-unsupported-schema
+namespace: default
+version: "1.0.0"
+description: Unsupported keywords
+steps:
+  - id: s1
+    kind: reason
+    name: S1
+    worker: schema-test-worker-unsupported
+    worker_version: "1.0.0"
+    with: {}
+    prompt: p.j2
+    output_schema: bad.json
+    timeout_seconds: 600
+"""
+        with pytest.raises(ValueError, match="unsupported keyword"):
+            await service.register_manifest(saga_yaml)
+    finally:
+        monkeypatch.delenv("SCHEMAS_ROOT", raising=False)
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
 async def test_register_manifest_saga_accepts_step_resources_allow():
     """Saga registration accepts step-level resources.allow entries."""
     await WorkerDefinition.create(

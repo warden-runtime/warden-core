@@ -175,6 +175,23 @@ class Settings(BaseSettings):
         validation_alias="WARDEN_LLM_RETRY_MAX_DELAY_S",
         description="Hard cap (seconds) on LLM retry sleep, including provider wait hints.",
     )
+    llm_schema_retry_enabled: bool = Field(
+        default=True,
+        validation_alias="WARDEN_LLM_SCHEMA_RETRY_ENABLED",
+        description=(
+            "When true, reason steps re-invoke the LLM with validation feedback after "
+            "OUTPUT_SCHEMA_VALIDATION_FAILED (distinct from transient WARDEN_LLM_RETRY_*)."
+        ),
+    )
+    llm_schema_retry_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        validation_alias="WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS",
+        description=(
+            "Max structured-output / _submit validation attempts per reason step "
+            "(including the first)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_llm_retry_delays(self) -> Self:
