@@ -78,6 +78,27 @@ def resolve_input(template_structure: Any, context: dict[str, Any]) -> Any:
     return template_structure
 
 
+def resolve_step_prompt(
+    *,
+    prompt_template: str,
+    template_context: dict[str, Any],
+    context: dict[str, Any] | None,
+) -> Any:
+    """Render a reason-step prompt; use file loader when ``prompt_ref`` is in context.
+
+    File prompts under ``PROMPTS_ROOT`` support Jinja ``{% include %}``. Inline /
+    string templates (tests, ``with`` bindings) keep ``BaseLoader`` via ``resolve_input``.
+    """
+    from common.config import get_settings
+    from common.prompts import render_prompt_file
+
+    prompts_root = get_settings().prompts_root
+    prompt_ref = (context or {}).get("prompt_ref")
+    if prompts_root and isinstance(prompt_ref, str) and prompt_ref.strip():
+        return render_prompt_file(prompts_root, prompt_ref, template_context)
+    return resolve_input(template_structure=prompt_template, context=template_context)
+
+
 def parse_llm_json(text: str) -> dict:
     """Extract JSON from LLM response text; tolerate Markdown code fences.
 

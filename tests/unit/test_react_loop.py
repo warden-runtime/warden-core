@@ -265,6 +265,43 @@ async def test_react_loop_coerces_stringified_array_args_before_ainvoke():
 
 
 @pytest.mark.asyncio
+async def test_react_loop_sanitized_llm_name_records_original_mcp_in_tool_results():
+    """LLM calls sanitized name; call_tool and facts tool_results use original MCP id."""
+    mcp_tool = McpTool(
+        name="calendar.list_events",
+        description="List",
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(
+        return_value=MagicMock(content=[MagicMock(type="text", text='{"ok": true}')]),
+    )
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+    assert tool.name == "calendar_list_events"
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(tool_calls=[ToolCall(name="calendar_list_events", args={}, id="1")]),
+            ChatResponse(
+                tool_calls=[ToolCall(name="_submit", args={"result": {"summary": "done"}}, id="2")]
+            ),
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[tool],
+        allowed_tool_names=["calendar_list_events"],
+        completion_mode="submit",
+        max_turns=10,
+    )
+    assert result.tool_results == [
+        {"tool": "calendar.list_events", "result": '{"ok": true}'},
+    ]
+    mock_session.call_tool.assert_called_once_with("calendar.list_events", arguments={})
+
+
+@pytest.mark.asyncio
 async def test_tool_results_store_full_payload_without_truncation():
     large_payload = '{"totalCount": 1, "issues": [{"body": "' + ("z" * 8500) + '"}]}'
     mock_tool = MagicMock()

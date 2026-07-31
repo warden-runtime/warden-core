@@ -46,9 +46,12 @@ from workers.adapters.react_loop import (
 from workers.adapters.simple_schema import resolve_effective_schema
 from workers.llm import build_llm
 from workers.llm.structured import invoke_structured_output
-from workers.resource_runtime import READ_RESOURCE_TOOL_NAME
-from workers.tools import build_tools_for_worker
-from workers.utils import resolve_input
+from workers.tools import (
+    build_tools_for_worker,
+    get_warden_tool_mcp_name,
+    tool_matches_allow_name,
+)
+from workers.utils import resolve_step_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -434,17 +437,15 @@ class LangChainAdapter(AgentAdapterPort):
         usage_acc = _usage_acc_from_context(ctx)
         turn_budget = max_turns if max_turns is not None else DEFAULT_MAX_TURNS
         resources = resource_specs or []
-        allowed_tool_names = [
-            name for t in (tool_specs or []) if isinstance(name := t.get("name"), str)
-        ]
-        template_context = {
-            **arguments,
-            "allowed_tools": allowed_tool_names + (["_submit"] if agent_adapter == "react" else []),
-        }
-        final_input = resolve_input(template_structure=prompt_template, context=template_context)
-        logger.info("Resolved prompt template: %s", final_input)
 
         if agent_adapter == "simple":
+            template_context = {**arguments}
+            final_input = resolve_step_prompt(
+                prompt_template=prompt_template,
+                template_context=template_context,
+                context=ctx,
+            )
+            logger.info("Resolved prompt template: %s", final_input)
             return await self._run_simple_step(
                 system_prompt=system_prompt,
                 prompt_template=prompt_template,
@@ -459,19 +460,12 @@ class LangChainAdapter(AgentAdapterPort):
                 resource_specs=resources,
             )
 
-        if resources:
-            allowed_tool_names = allowed_tool_names + [READ_RESOURCE_TOOL_NAME]
-        if "_submit" in allowed_tool_names:
+        spec_names = [name for t in (tool_specs or []) if isinstance(name := t.get("name"), str)]
+        if "_submit" in spec_names:
             raise ExecutionStepError(
                 "MCP tool name '_submit' is reserved for step completion; rename the tool in tool_specs.",
                 error_details={"code": "reserved_tool_name", "tool": "_submit"},
             )
-        template_context = {
-            **arguments,
-            "allowed_tools": allowed_tool_names + ["_submit"],
-        }
-        final_input = resolve_input(template_structure=prompt_template, context=template_context)
-        logger.info("Resolved prompt template: %s", final_input)
 
         if timing_acc is not None:
             timing_acc.start("adapter_setup")
@@ -483,6 +477,23 @@ class LangChainAdapter(AgentAdapterPort):
                 context=ctx,
                 resource_specs=resources or None,
             )
+            allowed_tool_names = [tool.name for tool in mcp_tools]
+            if "_submit" in allowed_tool_names:
+                raise ExecutionStepError(
+                    "MCP tool name '_submit' is reserved for step completion; rename the tool in tool_specs.",
+                    error_details={"code": "reserved_tool_name", "tool": "_submit"},
+                )
+            template_context = {
+                **arguments,
+                "allowed_tools": allowed_tool_names + ["_submit"],
+            }
+            final_input = resolve_step_prompt(
+                prompt_template=prompt_template,
+                template_context=template_context,
+                context=ctx,
+            )
+            logger.info("Resolved prompt template: %s", final_input)
+
             bind_tools = mcp_tools + [_build_submit_tool()]
             llm = build_llm(
                 provider=self._worker_definition.model_provider,
@@ -596,7 +607,7 @@ class LangChainAdapter(AgentAdapterPort):
                 context=ctx,
                 resource_specs=resource_specs or None,
             )
-            commit_tools = [tool for tool in tools if tool.name == tool_name]
+            commit_tools = [tool for tool in tools if tool_matches_allow_name(tool, tool_name)]
             if len(commit_tools) != 1:
                 raise ExecutionStepError(
                     "Commit step could not load exactly one MCP tool",
@@ -607,6 +618,7 @@ class LangChainAdapter(AgentAdapterPort):
                     },
                 )
             tool = commit_tools[0]
+            mcp_tool_name = get_warden_tool_mcp_name(tool) or tool.name
             clean_args = {k: v for k, v in arguments.items() if v is not None}
             if timing_acc is not None:
                 timing_acc.stop("commit_setup", bucket="setup_ms")
@@ -614,7 +626,7 @@ class LangChainAdapter(AgentAdapterPort):
             if scope is not None:
                 logger.info(
                     "run_commit invoking %s (namespace=%s trace=%s step=%s idempotency_key=%s)",
-                    tool.name,
+                    mcp_tool_name,
                     scope.namespace,
                     scope.trace_id,
                     scope.step_span_id,
@@ -626,17 +638,17 @@ class LangChainAdapter(AgentAdapterPort):
                 if timing_acc is not None and tool_start is not None:
                     timing_acc.add_ms("tool_ms", elapsed_ms(tool_start))
             except Exception as e:
-                logger.exception("run_commit tool %s failed: %s", tool.name, e)
+                logger.exception("run_commit tool %s failed: %s", mcp_tool_name, e)
                 raise ExecutionStepError(
                     str(e),
-                    tool=tool.name,
+                    tool=mcp_tool_name,
                     error_details=_commit_error_details(
                         scope=scope,
                         base={"error": str(e)},
-                        tool=tool.name,
+                        tool=mcp_tool_name,
                     ),
                 ) from e
-            tool_name = tool.name
+            tool_name = mcp_tool_name
 
         if isinstance(result_text, str):
             try:
@@ -689,9 +701,7 @@ class LangChainAdapter(AgentAdapterPort):
                 context=ctx,
                 resource_specs=resources or None,
             )
-            allowed = [name for t in tool_specs if isinstance(name := t.get("name"), str)]
-            if resources:
-                allowed = allowed + [READ_RESOURCE_TOOL_NAME]
+            allowed = [tool.name for tool in tools]
             llm = build_llm(
                 provider=self._worker_definition.model_provider,
                 model_name=self._worker_definition.model_name,

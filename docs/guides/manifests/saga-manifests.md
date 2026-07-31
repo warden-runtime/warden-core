@@ -472,7 +472,7 @@ Each extractor has three parts:
 
 | Key | What it is | What it does |
 |-----|------------|--------------|
-| `tool` | MCP tool id | Which tool call to read from. Must match a name in `tools.allow` **and** a call the agent made during this step. If the agent never called that tool, this extractor is skipped entirely. |
+| `tool` | MCP tool id | Which tool call to read from. Must be the **original MCP tool id** (not the sanitized LLM wire name) **and** match a call the agent made during this step. If the agent never called that tool, this extractor is skipped entirely. `tools.allow` may list either the raw MCP id or its sanitized form. |
 | `into` | Bucket name you choose | Groups the extracted fields under `steps.<step_id>.facts.<into>`. Use a short, stable id (e.g. `triage_metrics`) — this is your saga-context name, not the MCP tool name. |
 | `fields` | Map of saga key → JSONPath | For each entry, the **left** key is the name you use in `when.cel` and `with` (`total_count`). The **right** value is JSONPath into the tool's JSON response (`$.totalCount`). |
 

@@ -84,7 +84,7 @@ Common registration errors:
 Bindings are resolved right before the step runs (JSONPath against saga context). The worker gets a flat map and builds the Jinja context:
 
 - Each `with` key becomes a top-level template variable (`repo` → `{{ repo }}`).
-- **`allowed_tools`** — you don't declare this under `with`. On **`react`** steps, the worker injects it automatically: MCP tool IDs from `tools.allow`, plus `read_resource` when `resources.allow` is set, plus `_submit`. You can use `{{ allowed_tools }}` in the template to list what the agent can call. Not present on **`simple`** steps (no tool loop).
+- **`allowed_tools`** — you don't declare this under `with`. On **`react`** steps, the worker injects it automatically: **sanitized** MCP tool names bound for the step (provider-safe form of each allowed tool), plus `read_resource` when `resources.allow` is set, plus `_submit`. You can use `{{ allowed_tools }}` in the template to list what the agent can call. Not present on **`simple`** steps (no tool loop). See [MCP and tools → Tool allowlists](mcp-and-tools.md#tool-allowlists).
 
 Templates don't get the full `steps.*` tree. To use a prior step's output, bind it explicitly:
 
@@ -160,6 +160,24 @@ with:
 ```
 
 The full GitHub demo template documents the **`react`** `_submit` JSON contract — see [GitHub MCP demo](../../getting-started/demo-github-mcp.md). The [Quickstart](../../getting-started/demo-quickstart.md) uses **`simple`** with `noop.j2` (no `_submit` instructions).
+
+## Includes (`{% include %}`)
+
+File prompts under `PROMPTS_ROOT` support Jinja [`{% include %}`](https://jinja.palletsprojects.com/en/stable/templates/#include). Partials must stay under the same root — absolute paths and `..` segments are rejected.
+
+```jinja
+{# analyze.j2 #}
+{% include 'partials/profile.j2' %}
+
+Summarize the claim for {{ claim_id }}.
+```
+
+```jinja
+{# partials/profile.j2 #}
+Standing profile: {{ profile_summary }}
+```
+
+Inline / `with` string templates still use a string Jinja loader and do **not** resolve includes — only prompt **files** under `PROMPTS_ROOT` do.
 
 ## The `noop` prompt
 

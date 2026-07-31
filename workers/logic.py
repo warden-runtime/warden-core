@@ -825,6 +825,8 @@ async def _prepare_worker_command_execution(
         "timing": timing_acc,
         "usage": usage_acc,
     }
+    if isinstance(cmd, DoStepCommand) and getattr(cmd, "prompt_ref", None):
+        injection_context["prompt_ref"] = cmd.prompt_ref
 
     try:
         adapter = resolve_adapter(

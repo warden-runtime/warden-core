@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
+
+from jinja2 import BaseLoader, Environment, TemplateNotFound
 
 
 def resolve_prompts_root(prompts_root: str | None) -> str:
@@ -43,6 +46,46 @@ def load_prompt_content(prompts_root: str, prompt_ref: str) -> str:
 def assert_prompt_file_exists(prompts_root: str, prompt_ref: str) -> None:
     """Verify the prompt file exists without reading its body."""
     resolved_prompt_path(prompts_root, prompt_ref)
+
+
+class _SandboxedPromptLoader(BaseLoader):
+    """Jinja loader that only opens files via ``resolved_prompt_path`` (no ``..`` escapes)."""
+
+    def __init__(self, prompts_root: str) -> None:
+        self._root = resolve_prompts_root(prompts_root)
+
+    def get_source(self, environment: Environment, template: str) -> tuple[str, str, Any]:
+        try:
+            path = resolved_prompt_path(self._root, template)
+        except ValueError as e:
+            raise TemplateNotFound(template) from e
+        source = path.read_text(encoding="utf-8")
+        mtime = path.stat().st_mtime
+
+        def uptodate() -> bool:
+            try:
+                return path.stat().st_mtime == mtime
+            except OSError:
+                return False
+
+        return source, str(path), uptodate
+
+
+def render_prompt_file(prompts_root: str, prompt_ref: str, context: dict[str, Any]) -> str:
+    """Render a prompt file under PROMPTS_ROOT with Jinja ``{% include %}`` support."""
+    ref = (prompt_ref or "").strip().lstrip("/")
+    # Fail fast with the same path errors as load_prompt_content before Jinja.
+    resolved_prompt_path(prompts_root, ref)
+    env = Environment(
+        loader=_SandboxedPromptLoader(prompts_root),
+        autoescape=False,
+    )  # nosemgrep: missing-autoescape-disabled
+    try:
+        return env.get_template(ref).render(**context)
+    except TemplateNotFound as e:
+        raise ValueError(f"Prompt include not found or escapes PROMPTS_ROOT: {e}") from e
+    except Exception as e:
+        raise ValueError(f"Jinja render failed for prompt {ref!r}: {e}") from e
 
 
 def validate_prompts_root_if_configured() -> None:

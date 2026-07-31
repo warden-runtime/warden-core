@@ -41,9 +41,11 @@ Literal header values (no `${…}` placeholder) work for non-secret metadata. St
 
 ## Tool allowlists
 
-Each saga step has a `tools.allow` list. Names in that list must match MCP tool IDs from the worker's `tool_sources`. During execution, the worker rejects tool calls that aren't on the step's allowlist.
+Each saga step has a `tools.allow` list. Each entry may use the **raw MCP tool id** (e.g. `calendar.list_events`) **or** the **provider-safe sanitized form** (e.g. `calendar_list_events`). During execution the worker matches either form against discovered MCP tools.
 
-**`react`** reason steps run a multi-turn ReAct loop and can call any tool on their allowlist across multiple turns. **`simple`** reason steps (`agent-adapter: simple`) use no MCP tools — only structured LLM output. Commit steps call exactly one allowed tool and don't invoke an LLM. The engine requires exactly one `tools.allow` entry when scheduling a commit step. Use commit steps for deterministic, side-effecting actions where you want no agent discretion.
+LLM providers require tool names matching `^[a-zA-Z0-9_-]{1,64}$`. Warden therefore always exposes **sanitized** names on the wire (dots and other illegal characters become `_`; collisions within a step get `_2`, `_3`, …). MCP `call_tool`, governance, policy CEL `tool.name`, and `facts[].tool` keep the **original** MCP ids.
+
+**`react`** reason steps run a multi-turn ReAct loop and can call any tool on their allowlist across multiple turns. The prompt injection `allowed_tools` lists the sanitized wire names (plus `read_resource` / `_submit` when applicable). **`simple`** reason steps (`agent-adapter: simple`) use no MCP tools — only structured LLM output. Commit steps call exactly one allowed tool and don't invoke an LLM. The engine requires exactly one `tools.allow` entry when scheduling a commit step. Use commit steps for deterministic, side-effecting actions where you want no agent discretion.
 
 On **`react`** reason steps only, the virtual **`_submit`** tool is always available. It lets the agent signal structured completion without calling an external MCP server. It does not apply to **`simple`** steps. See [Saga manifests → Reason step execution](saga-manifests.md#reason-step-execution-agent-adapter).
 

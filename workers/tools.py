@@ -45,6 +45,13 @@ from workers.resource_runtime import (
     normalize_resource_content,
     validate_and_bind_resource_uri,
 )
+from workers.tool_names import (
+    allocate_unique_sanitized_name,
+    allowlist_entry_satisfied,
+    allowlist_matches,
+    matching_allowlist_entry,
+    sanitize_mcp_tool_name,
+)
 
 logger = logging.getLogger(__name__)
 _MCP_CALL_TIMEOUT_S = float(os.getenv("WARDEN_MCP_CALL_TIMEOUT_S", "10"))
@@ -52,6 +59,7 @@ _RESOURCE_LIST_MAX_PAGES = int(os.getenv("WARDEN_MCP_RESOURCE_LIST_MAX_PAGES", "
 _RESOURCE_LIST_MAX_ITEMS = int(os.getenv("WARDEN_MCP_RESOURCE_LIST_MAX_ITEMS", "1000"))
 _SSE_HEADER_ENV_RE = re.compile(r"\$\{(?:ENV:)?([A-Z0-9_]+)\}", re.IGNORECASE)
 WARDEN_TOOL_INPUT_SCHEMA_ATTR = "warden_input_schema"
+WARDEN_TOOL_MCP_NAME_ATTR = "warden_mcp_name"
 
 
 def get_warden_tool_input_schema(tool: Any) -> dict[str, Any] | None:
@@ -61,6 +69,26 @@ def get_warden_tool_input_schema(tool: Any) -> dict[str, Any] | None:
         return None
     schema = metadata.get(WARDEN_TOOL_INPUT_SCHEMA_ATTR)
     return schema if isinstance(schema, dict) else None
+
+
+def get_warden_tool_mcp_name(tool: Any) -> str | None:
+    """Return the original MCP tool id stashed on a LangChain StructuredTool, if present."""
+    metadata = getattr(tool, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    name = metadata.get(WARDEN_TOOL_MCP_NAME_ATTR)
+    return name if isinstance(name, str) and name else None
+
+
+def tool_matches_allow_name(tool: Any, allow_name: str) -> bool:
+    """True when ``allow_name`` matches the tool's sanitized wire name or original MCP id."""
+    original = get_warden_tool_mcp_name(tool) or getattr(tool, "name", None)
+    if not isinstance(original, str):
+        return False
+    wire_name = getattr(tool, "name", None)
+    if isinstance(wire_name, str) and allow_name == wire_name:
+        return True
+    return allowlist_matches(allow_name, original)
 
 
 def _format_mcp_exc(exc: BaseException) -> str:
@@ -383,6 +411,7 @@ async def _load_tools_from_session(
     spec_by_name: dict[str, dict[str, Any]],
     allowed_tools: list[str],
     loaded_tool_names: set[str],
+    used_sanitized_names: set[str],
     scope: ExecutionScope | None,
     conn: BaseDBAsyncClient | None,
     hook_kw: dict[str, Any],
@@ -391,7 +420,8 @@ async def _load_tools_from_session(
     mcp_response = await wait_for(session.list_tools(), timeout=_MCP_CALL_TIMEOUT_S)
     loaded: list[StructuredTool] = []
     for mcp_tool in mcp_response.tools:
-        if mcp_tool.name not in allowed_tools or mcp_tool.name in loaded_tool_names:
+        allow_entry = matching_allowlist_entry(mcp_tool.name, allowed_tools)
+        if allow_entry is None or mcp_tool.name in loaded_tool_names:
             continue
         if scope is not None:
             await get_registry().tools.on_discovered(
@@ -401,15 +431,27 @@ async def _load_tools_from_session(
                 source_name=source_name,
                 **hook_kw,
             )
-        logger.info("Loading MCP tool: %s from source %s", mcp_tool.name, source_name)
+        llm_name = allocate_unique_sanitized_name(mcp_tool.name, used_sanitized_names)
+        step_spec = (
+            spec_by_name.get(allow_entry)
+            or spec_by_name.get(mcp_tool.name)
+            or spec_by_name.get(sanitize_mcp_tool_name(mcp_tool.name))
+        )
+        logger.info(
+            "Loading MCP tool: %s (llm=%s) from source %s",
+            mcp_tool.name,
+            llm_name,
+            source_name,
+        )
         loaded.append(
             _convert_mcp_to_langchain(
                 mcp_tool,
                 session,
-                step_spec=spec_by_name.get(mcp_tool.name),
+                step_spec=step_spec,
                 scope=scope,
                 conn=conn,
                 worker_definition=worker_definition,
+                llm_name=llm_name,
             )
         )
         loaded_tool_names.add(mcp_tool.name)
@@ -423,6 +465,7 @@ async def _process_mcp_source(
     spec_by_name: dict[str, dict[str, Any]],
     allowed_tools: list[str],
     loaded_tool_names: set[str],
+    used_sanitized_names: set[str],
     allowlist: ResourceAllowlist | None,
     scope: ExecutionScope | None,
     conn: BaseDBAsyncClient | None,
@@ -480,6 +523,7 @@ async def _process_mcp_source(
             spec_by_name=spec_by_name,
             allowed_tools=allowed_tools,
             loaded_tool_names=loaded_tool_names,
+            used_sanitized_names=used_sanitized_names,
             scope=scope,
             conn=conn,
             hook_kw=hook_kw,
@@ -533,6 +577,7 @@ async def build_tools_for_worker(
             spec_by_name[name] = spec
     allowed_tools = list(spec_by_name.keys())
     loaded_tool_names: set[str] = set()
+    used_sanitized_names: set[str] = set()
     source_failures: list[dict[str, Any]] = []
     source_sessions: list[tuple[str | None, ClientSession]] = []
     saga_vars = _saga_vars_from_context(context)
@@ -556,6 +601,7 @@ async def build_tools_for_worker(
                 spec_by_name=spec_by_name,
                 allowed_tools=allowed_tools,
                 loaded_tool_names=loaded_tool_names,
+                used_sanitized_names=used_sanitized_names,
                 allowlist=allowlist,
                 scope=scope,
                 conn=conn,
@@ -686,7 +732,9 @@ async def _emit_tool_loaded_and_get_missing(
     conn: BaseDBAsyncClient | None,
     hook_kw: dict[str, Any],
 ) -> list[str]:
-    missing = [name for name in allowed_tools if name not in loaded_tool_names]
+    missing = [
+        name for name in allowed_tools if not allowlist_entry_satisfied(name, loaded_tool_names)
+    ]
     if scope is not None:
         await get_registry().tools.on_loaded(
             scope=scope,
@@ -997,11 +1045,17 @@ def _convert_mcp_to_langchain(
     scope: ExecutionScope | None = None,
     conn: BaseDBAsyncClient | None = None,
     worker_definition: Any = None,
+    llm_name: str | None = None,
 ) -> StructuredTool:
-    """Create a LangChain StructuredTool that calls MCP and runs governance."""
+    """Create a LangChain StructuredTool that calls MCP and runs governance.
+
+    ``StructuredTool.name`` is the provider-safe (sanitized) alias exposed to the
+    LLM. ``session.call_tool`` and governance always use the original MCP id.
+    """
     input_schema = mcp_tool.inputSchema or {}
     properties = input_schema.get("properties", {})
     required = input_schema.get("required", [])
+    wire_name = llm_name if llm_name is not None else sanitize_mcp_tool_name(mcp_tool.name)
 
     fields = {}
     for field_name, field_def in properties.items():
@@ -1014,7 +1068,8 @@ def _convert_mcp_to_langchain(
         else:
             fields[field_name] = (field_type | None, None)
 
-    pydantic_schema = create_model(f"{mcp_tool.name}Schema", **fields)
+    schema_model_name = f"{sanitize_mcp_tool_name(mcp_tool.name)}Schema"
+    pydantic_schema = create_model(schema_model_name, **fields)
 
     async def _execute_tool(**kwargs: Any) -> str:
         arguments = {k: v for k, v in kwargs.items() if v is not None}
@@ -1046,9 +1101,12 @@ def _convert_mcp_to_langchain(
 
     tool = StructuredTool.from_function(
         coroutine=_execute_tool,
-        name=mcp_tool.name,
+        name=wire_name,
         description=mcp_tool.description or "",
         args_schema=pydantic_schema,
-        metadata={WARDEN_TOOL_INPUT_SCHEMA_ATTR: input_schema},
+        metadata={
+            WARDEN_TOOL_INPUT_SCHEMA_ATTR: input_schema,
+            WARDEN_TOOL_MCP_NAME_ATTR: mcp_tool.name,
+        },
     )
     return tool
