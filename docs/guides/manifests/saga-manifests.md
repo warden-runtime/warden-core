@@ -402,6 +402,16 @@ Reason steps can require a fixed JSON shape for worker output in `output.data`. 
 | `react` | `_submit` payload after the ReAct loop |
 | `simple` | Structured completion from the single LLM turn |
 
+### Supported schema subset
+
+Warden binds `output_schema` for **`simple`** structured output via a Pydantic subset, then validates with JSON Schema for both adapters. Supported structural pieces:
+
+- `type`: `object`, `string`, `integer`, `number`, `boolean`, `array`, and nullable unions like `["string","null"]`
+- `properties`, `required`, `items`, `description`
+- Validation-only constraints such as `minLength`, `enum`, `minimum`, `additionalProperties`
+
+**Rejected at deploy / saga start** (silent no-ops at the structured-output binder): `if`, `then`, `else`, `allOf`, `anyOf`, `oneOf`, `$ref`, `$defs`, `definitions`. Flatten conditionals into always-required fields or split steps; inline `$ref` targets.
+
 On `triage` (`react`):
 
 ```yaml
@@ -433,9 +443,9 @@ Use [tool facts](#tool-facts-facts) when you need structured data from MCP tool 
 |---------|---------|----------|
 | Valid structured JSON | Proceeds (policy, optional HITL, context merge) | Same |
 | Missing / empty output | `no_submit_call` / `empty_submit_result` | `structured_output_failed` / `empty_structured_result` |
-| Schema mismatch | `STEP_FAILED` with validation error in `error_details` | Same |
+| Schema mismatch | Soft-retry with validation feedback (`WARDEN_LLM_SCHEMA_RETRY_*`), then `STEP_FAILED` if still invalid | Same |
 
-`max_turns` bounds ReAct iterations on **`react`** only. It does **not** grant extra attempts when schema validation fails — an invalid payload fails the step on that run.
+`max_turns` bounds ReAct tool/LLM iterations on **`react`** only. Schema soft-retries (`WARDEN_LLM_SCHEMA_RETRY_*`) are a separate attempt budget for validation failures — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback).
 
 Commit steps can also attach `output_schema` for tool result validation.
 

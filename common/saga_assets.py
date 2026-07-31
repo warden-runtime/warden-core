@@ -12,6 +12,7 @@ import yaml
 
 from common.asset_paths import resolve_asset_path
 from common.schemas.saga import CompensationStep
+from common.utils import assert_output_schema_bind_supported
 
 
 async def load_output_schema(*, schemas_root: str | None, ref: str | None) -> dict[str, Any] | None:
@@ -29,6 +30,7 @@ async def load_output_schema(*, schemas_root: str | None, ref: str | None) -> di
     data: Any = json.loads(raw)
     if not isinstance(data, dict):
         raise ValueError(f"output_schema must be a JSON object: {path}")
+    assert_output_schema_bind_supported(data)
     return data
 
 

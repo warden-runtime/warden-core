@@ -322,9 +322,19 @@ For compliance-grade capabilities—forensic audit history, extended operational
 | `WARDEN_LLM_RETRY_BASE_DELAY_S` | `1.0` | Initial backoff delay (seconds) |
 | `WARDEN_LLM_RETRY_MAX_DELAY_S` | `60.0` | Hard cap on sleep (backoff and provider wait hints) |
 
+## LLM schema soft-retries (validation feedback)
+
+`WARDEN_LLM_SCHEMA_RETRY_*` configures a **separate** recovery path: when reason-step structured output or `_submit` fails `output_schema` validation, the worker re-invokes the LLM with the validation error in the transcript (up to N attempts, including the first). This is not the same as transient HTTP backoff above — schema soft-retries only apply to `OUTPUT_SCHEMA_VALIDATION_FAILED`, not parse failures, missing `_submit`, or MCP tool errors. Soft-retry usage still accumulates toward `max_step_tokens`.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WARDEN_LLM_SCHEMA_RETRY_ENABLED` | `true` | Toggle schema soft-retries on reason steps |
+| `WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS` | `3` | Max validation attempts per step (including the first) |
+
 | If you need… | Use… |
 |--------------|------|
 | Backoff on a transient provider error during execution | `WARDEN_LLM_RETRY_*` (above) |
+| Re-invoke after bad JSON shape / schema mismatch | `WARDEN_LLM_SCHEMA_RETRY_*` (above) |
 | An operator to re-run a paused human-gated step | `warden review retry` — see [HITL review](../guides/cli/hitl-review.md) |
 | Recovery after a forward step is stuck `IN_PROGRESS` | `warden saga retry-step` — see [Saga recovery](../guides/cli/saga-recovery.md) |
 | Recovery after compensation failed or stalled | `warden saga retry-compensation` |

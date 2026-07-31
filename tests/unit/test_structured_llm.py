@@ -121,3 +121,109 @@ async def test_invoke_structured_output_enforces_token_budget():
     assert details.get("tokens_used") == 100
     assert details.get("max_step_tokens") == 50
     assert usage_acc.total_tokens == 100
+
+
+class _ScriptedJsonLLM(ChatModelPort):
+    def __init__(self, contents: list[str]) -> None:
+        self._contents = list(contents)
+        self.ainvoke_calls = 0
+        self.last_messages: list[ChatMessage] | None = None
+
+    def bind_tools(self, tools):
+        return self
+
+    def bind_json_schema(self, schema):
+        return self
+
+    def get_underlying_model(self):
+        return None
+
+    async def ainvoke(self, messages):
+        self.ainvoke_calls += 1
+        self.last_messages = list(messages)
+        return ChatResponse(content=self._contents.pop(0))
+
+
+@pytest.mark.asyncio
+async def test_invoke_structured_output_soft_retries_then_succeeds(monkeypatch):
+    from common.config import get_settings
+
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", "true")
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS", "3")
+    get_settings.cache_clear()
+    try:
+        schema = {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        }
+        llm = _ScriptedJsonLLM(['{"wrong": "shape"}', '{"summary": "fixed"}'])
+        payload = await invoke_structured_output(
+            llm,
+            [ChatMessage(role="human", content="go")],
+            schema,
+        )
+        assert payload == {"summary": "fixed"}
+        assert llm.ainvoke_calls == 2
+        assert llm.last_messages is not None
+        assert any(
+            m.role == "human" and "output_schema validation" in m.content for m in llm.last_messages
+        )
+    finally:
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", raising=False)
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS", raising=False)
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_invoke_structured_output_soft_retry_exhausted(monkeypatch):
+    from common.config import get_settings
+
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", "true")
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS", "2")
+    get_settings.cache_clear()
+    try:
+        schema = {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        }
+        llm = _ScriptedJsonLLM(['{"wrong": "a"}', '{"wrong": "b"}'])
+        with pytest.raises(ExecutionStepError) as exc_info:
+            await invoke_structured_output(
+                llm,
+                [ChatMessage(role="human", content="go")],
+                schema,
+            )
+        assert exc_info.value.error_details.get("code") == "OUTPUT_SCHEMA_VALIDATION_FAILED"
+        assert llm.ainvoke_calls == 2
+    finally:
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", raising=False)
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS", raising=False)
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_invoke_structured_output_soft_retry_disabled(monkeypatch):
+    from common.config import get_settings
+
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        schema = {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        }
+        llm = _ScriptedJsonLLM(['{"wrong": "shape"}', '{"summary": "unused"}'])
+        with pytest.raises(ExecutionStepError) as exc_info:
+            await invoke_structured_output(
+                llm,
+                [ChatMessage(role="human", content="go")],
+                schema,
+            )
+        assert exc_info.value.error_details.get("code") == "OUTPUT_SCHEMA_VALIDATION_FAILED"
+        assert llm.ainvoke_calls == 1
+    finally:
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", raising=False)
+        get_settings.cache_clear()

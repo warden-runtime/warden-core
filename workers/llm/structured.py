@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from common.llm import TokenUsage
 
 from common.agent_adapter import ExecutionStepError
+from common.config import get_settings
 from common.error_details import build_step_error_details
 from common.execution_timing import elapsed_ms
 from common.execution_usage import enforce_step_token_budget
@@ -30,6 +31,13 @@ logger = logging.getLogger(__name__)
 _JSON_MODE_SYSTEM_APPENDIX = (
     "\n\nRespond with a single JSON object matching the required output schema. "
     "Do not include markdown fences or prose outside the JSON object."
+)
+
+_SCHEMA_RETRY_FEEDBACK = (
+    "Your previous JSON failed output_schema validation. "
+    "Fix it and respond with a single JSON object only.\n"
+    "Validation error: {error}\n"
+    "Required schema: {schema}"
 )
 
 
@@ -106,26 +114,44 @@ def _raise_schema_validation_failed(exc: Exception) -> NoReturn:
     ) from exc
 
 
-async def invoke_structured_output(
+def _schema_retry_max_attempts() -> int:
+    settings = get_settings()
+    if not settings.llm_schema_retry_enabled:
+        return 1
+    return settings.llm_schema_retry_max_attempts
+
+
+def _append_schema_validation_feedback(
+    messages: list[ChatMessage],
+    *,
+    bad_payload: dict[str, Any],
+    error: Exception,
+    schema: dict[str, Any],
+) -> list[ChatMessage]:
+    feedback = _SCHEMA_RETRY_FEEDBACK.format(
+        error=error,
+        schema=json.dumps(schema, ensure_ascii=False),
+    )
+    return [
+        *messages,
+        ChatMessage(role="assistant", content=json.dumps(bad_payload, ensure_ascii=False)),
+        ChatMessage(role="human", content=feedback),
+    ]
+
+
+async def _structured_completion_attempt(
     llm: ChatModelPort,
     messages: list[ChatMessage],
     schema: dict[str, Any],
     *,
-    timing_acc: WorkerTimingAccumulator | None = None,
-    usage_acc: WorkerUsageAccumulator | None = None,
-    max_step_tokens: int | None = None,
+    timing_acc: WorkerTimingAccumulator | None,
+    usage_acc: WorkerUsageAccumulator | None,
+    max_step_tokens: int | None,
 ) -> dict[str, Any]:
-    """Run tiered structured completion and return a validated business dict."""
-    llm_start: float | None = None
-    if timing_acc is not None:
-        llm_start = time.perf_counter()
-
-    payload: dict[str, Any] | None = None
-    last_error: str | None = None
-    response_preview: str | None = None
-    usage: TokenUsage | None = None
-
+    """One native→json-mode attempt; raises on unparseable or empty payload."""
+    llm_start: float | None = time.perf_counter() if timing_acc is not None else None
     payload, last_error, usage = await _try_native_structured_output(llm, messages, schema)
+    response_preview: str | None = None
     if payload is None:
         payload, last_error, response_preview, usage = await _try_json_mode_output(
             llm, messages, schema
@@ -142,14 +168,77 @@ async def invoke_structured_output(
             last_error=last_error,
             response_preview=response_preview,
         )
-
     if not payload:
         _raise_empty_structured_result()
+    return payload
 
+
+def _admit_structured_or_feedback(
+    *,
+    payload: dict[str, Any],
+    schema: dict[str, Any],
+    messages: list[ChatMessage],
+    attempt: int,
+    max_attempts: int,
+) -> dict[str, Any] | list[ChatMessage]:
+    """Return admitted payload, or an updated message list for soft-retry."""
     try:
         return admit_and_validate(payload, schema, "step output (structured)")
     except Exception as exc:
-        _raise_schema_validation_failed(exc)
+        if attempt >= max_attempts:
+            _raise_schema_validation_failed(exc)
+        logger.info(
+            "Structured output schema validation failed (attempt %s/%s); soft-retrying",
+            attempt,
+            max_attempts,
+        )
+        return _append_schema_validation_feedback(
+            messages,
+            bad_payload=payload,
+            error=exc,
+            schema=schema,
+        )
+
+
+async def invoke_structured_output(
+    llm: ChatModelPort,
+    messages: list[ChatMessage],
+    schema: dict[str, Any],
+    *,
+    timing_acc: WorkerTimingAccumulator | None = None,
+    usage_acc: WorkerUsageAccumulator | None = None,
+    max_step_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Run tiered structured completion and return a validated business dict.
+
+    On ``OUTPUT_SCHEMA_VALIDATION_FAILED``, optionally re-invokes with validation
+    feedback (see ``WARDEN_LLM_SCHEMA_RETRY_*``). Distinct from transient provider
+    retries on ``ainvoke``.
+    """
+    working = list(messages)
+    max_attempts = _schema_retry_max_attempts()
+
+    for attempt in range(1, max_attempts + 1):
+        payload = await _structured_completion_attempt(
+            llm,
+            working,
+            schema,
+            timing_acc=timing_acc,
+            usage_acc=usage_acc,
+            max_step_tokens=max_step_tokens,
+        )
+        outcome = _admit_structured_or_feedback(
+            payload=payload,
+            schema=schema,
+            messages=working,
+            attempt=attempt,
+            max_attempts=max_attempts,
+        )
+        if isinstance(outcome, dict):
+            return outcome
+        working = outcome
+
+    _raise_schema_validation_failed(RuntimeError("schema soft-retry loop exhausted"))
 
 
 def _payload_from_parsed(parsed: Any) -> dict[str, Any] | None:

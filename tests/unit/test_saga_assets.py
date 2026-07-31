@@ -46,6 +46,38 @@ async def test_load_output_schema_rejects_non_object_root(tmp_path: Path) -> Non
         await load_output_schema(schemas_root=str(tmp_path), ref="list.json")
 
 
+async def test_load_output_schema_rejects_unsupported_keywords(tmp_path: Path) -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "x": {
+                "type": "object",
+                "if": {"properties": {"op": {"const": "update"}}},
+                "then": {"required": ["event_id"]},
+            }
+        },
+    }
+    (tmp_path / "cond.json").write_text(json.dumps(schema), encoding="utf-8")
+    with pytest.raises(ValueError, match="unsupported keyword"):
+        await load_output_schema(schemas_root=str(tmp_path), ref="cond.json")
+
+
+async def test_load_output_schema_allows_nullable_and_constraints(tmp_path: Path) -> None:
+    schema = {
+        "type": "object",
+        "required": ["summary", "recommended_issue_number", "comment_body"],
+        "properties": {
+            "summary": {"type": "string", "minLength": 1},
+            "recommended_issue_number": {"type": ["integer", "null"], "minimum": 1},
+            "comment_body": {"type": ["string", "null"], "minLength": 1},
+        },
+        "additionalProperties": False,
+    }
+    (tmp_path / "ok.json").write_text(json.dumps(schema), encoding="utf-8")
+    loaded = await load_output_schema(schemas_root=str(tmp_path), ref="ok.json")
+    assert loaded == schema
+
+
 async def test_load_compensation_requires_root_when_ref_set(tmp_path: Path) -> None:
     (tmp_path / "c.yaml").write_text('worker: w1\nworker_version: "1.0.0"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="COMPENSATIONS_ROOT"):

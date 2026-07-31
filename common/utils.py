@@ -293,25 +293,71 @@ def hash_canonical_dict(data: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _field_type_from_json_schema(field_info: dict[str, Any]) -> type[Any]:
-    json_type = field_info.get("type", "string")
-    if json_type == "integer":
-        return int
-    if json_type == "number":
-        return float
-    if json_type == "boolean":
-        return bool
-    if json_type == "array":
-        items_info = field_info.get("items", {})
-        items_type = items_info.get("type", "string") if isinstance(items_info, dict) else "string"
-        if items_type == "integer":
-            return list[int]
-        if items_type == "number":
-            return list[float]
-        if items_type == "boolean":
-            return list[bool]
-        return list[str]
-    return str
+def _sanitize_model_name(name: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
+    if not cleaned or cleaned[0].isdigit():
+        cleaned = f"M_{cleaned}"
+    return cleaned
+
+
+def _split_nullable_json_type(json_type: Any) -> tuple[Any, bool]:
+    """Return (non-null type token, is_nullable) for a JSON Schema ``type`` value."""
+    if isinstance(json_type, list):
+        non_null = [t for t in json_type if t != "null"]
+        nullable = any(t == "null" for t in json_type)
+        if len(non_null) == 1:
+            return non_null[0], nullable
+        # Multi-type unions are not bindable as Pydantic unions; fall back to str.
+        return "string", nullable
+    return json_type, False
+
+
+_PRIMITIVE_JSON_TYPES: dict[str, type[Any]] = {
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "string": str,
+}
+
+
+def _object_field_type(field_info: dict[str, Any], *, model_name: str) -> type[Any]:
+    properties = field_info.get("properties")
+    if isinstance(properties, dict) and properties:
+        return create_pydantic_model_from_schema(field_info, model_name=model_name)
+    return dict[str, Any]
+
+
+def _array_field_type(field_info: dict[str, Any], *, model_name: str) -> type[Any]:
+    items_info = field_info.get("items", {})
+    if not isinstance(items_info, dict):
+        items_info = {}
+    items_type, _ = _split_nullable_json_type(items_info.get("type", "string"))
+    if items_type == "object" and isinstance(items_info.get("properties"), dict):
+        item_model = create_pydantic_model_from_schema(items_info, model_name=f"{model_name}Item")
+        return list[item_model]  # type: ignore[valid-type]
+    item_primitive = _PRIMITIVE_JSON_TYPES.get(
+        items_type if isinstance(items_type, str) else "", str
+    )
+    return list[item_primitive]  # type: ignore[valid-type]
+
+
+def _field_type_from_json_schema(
+    field_info: dict[str, Any],
+    *,
+    model_name: str,
+) -> Any:
+    json_type, nullable = _split_nullable_json_type(field_info.get("type", "string"))
+    if json_type == "object":
+        base: Any = _object_field_type(field_info, model_name=model_name)
+    elif json_type == "array":
+        base = _array_field_type(field_info, model_name=model_name)
+    elif isinstance(json_type, str) and json_type in _PRIMITIVE_JSON_TYPES:
+        base = _PRIMITIVE_JSON_TYPES[json_type]
+    else:
+        base = str
+    if nullable:
+        return base | None
+    return base
 
 
 def create_pydantic_model_from_schema(
@@ -319,19 +365,22 @@ def create_pydantic_model_from_schema(
 ) -> type[BaseModel]:
     """Dynamically creates a Pydantic model from a simplified JSON Schema subset.
 
-    Used for structured LLM output and dynamic tool arguments. Supports types:
-    string, integer, number, boolean, and arrays of those primitives. Optional
-    fields use default None. Unknown top-level keys are rejected (extra=forbid).
+    Used for structured LLM output. Supports: string, integer, number, boolean,
+    nested objects (``type: object`` with ``properties``), arrays of primitives or
+    objects, and nullable unions via ``type: ["T", "null"]``. Optional fields use
+    default None. Unknown top-level keys are rejected (extra=forbid).
 
     Args:
         schema: Dict with "properties" (and optional "required"). Each
-            property may have "type", "items" (for arrays), and "description".
+            property may have "type", "items" (for arrays), "properties" (for
+            nested objects), and "description".
         model_name: Name of the generated model class.
 
     Returns:
         A Pydantic BaseModel subclass with fields derived from schema.
     """
     fields: dict[str, Any] = {}
+    safe_root = _sanitize_model_name(model_name)
 
     properties = schema.get("properties", {})
     required_fields = set(schema.get("required", []))
@@ -339,7 +388,8 @@ def create_pydantic_model_from_schema(
     for field_name, field_info in properties.items():
         if not isinstance(field_info, dict):
             field_info = {}
-        field_type = _field_type_from_json_schema(field_info)
+        nested_name = _sanitize_model_name(f"{safe_root}_{field_name}")
+        field_type = _field_type_from_json_schema(field_info, model_name=nested_name)
         description = field_info.get("description", "")
 
         if field_name in required_fields:
@@ -348,7 +398,45 @@ def create_pydantic_model_from_schema(
             fields[field_name] = (field_type | None, Field(None, description=description))
 
     return create_model(
-        model_name,
+        safe_root,
         __config__=ConfigDict(extra="forbid"),
         **fields,
     )
+
+
+_OUTPUT_SCHEMA_UNSUPPORTED_KEYWORDS = frozenset(
+    {
+        "if",
+        "then",
+        "else",
+        "allOf",
+        "anyOf",
+        "oneOf",
+        "$ref",
+        "$defs",
+        "definitions",
+    }
+)
+
+
+def assert_output_schema_bind_supported(schema: dict[str, Any], *, path: str = "$") -> None:
+    """Reject composition/conditional keywords that silently no-op at Pydantic bind.
+
+    Validation-only constraints (``minLength``, ``enum``, ``additionalProperties``,
+    ``type: ["T","null"]``, etc.) are allowed. Raises ``ValueError`` with the JSON
+    path of the first unsupported keyword.
+    """
+    for key, value in schema.items():
+        child_path = f"{path}.{key}"
+        if key in _OUTPUT_SCHEMA_UNSUPPORTED_KEYWORDS:
+            raise ValueError(
+                f"output_schema uses unsupported keyword {key!r} at {child_path}; "
+                "flatten conditionals / inline $ref before deploy "
+                f"(unsupported: {', '.join(sorted(_OUTPUT_SCHEMA_UNSUPPORTED_KEYWORDS))})"
+            )
+        if isinstance(value, dict):
+            assert_output_schema_bind_supported(value, path=child_path)
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                if isinstance(item, dict):
+                    assert_output_schema_bind_supported(item, path=f"{child_path}[{i}]")

@@ -260,98 +260,115 @@ async def test_run_step_raises_when_empty_submit(mocker):
 
 
 @pytest.mark.asyncio
-async def test_run_step_records_after_reason_step_when_output_schema_fails(mocker):
+async def test_run_step_records_after_reason_step_when_output_schema_fails(mocker, monkeypatch):
     """Reasoning hook runs with transcript even when _submit payload fails output_schema."""
-    _patch_build_llm(
-        mocker,
-        [
-            ChatResponse(
-                tool_calls=[ToolCall(name="_submit", args={"result": {"wrong": "shape"}}, id="1")]
-            )
-        ],
-    )
-    mocker.patch(
-        "workers.adapters.langchain.build_tools_for_worker",
-        new_callable=AsyncMock,
-        return_value=[],
-    )
-    mock_after = AsyncMock()
-    mock_registry = MagicMock()
-    mock_registry.tools.on_allowlist_passed = AsyncMock()
-    mock_registry.adapter.after_reason_step = mock_after
-    mocker.patch("workers.adapters.langchain.get_registry", return_value=mock_registry)
-    scope = MagicMock()
-    mocker.patch(
-        "workers.adapters.langchain.execution_scope_from_injection",
-        return_value=scope,
-    )
-    mocker.patch("workers.adapters.langchain.db_conn_from_injection", return_value=None)
+    from common.config import get_settings
 
-    adapter = LangChainAdapter(
-        worker_definition=_make_worker_def(),
-        secret=_make_secret(),
-    )
-    output_schema = {
-        "type": "object",
-        "required": ["summary"],
-        "properties": {"summary": {"type": "string"}},
-    }
-    with pytest.raises(ExecutionStepError):
-        await adapter.run_step(
-            system_prompt="You are helpful.",
-            prompt_template="Do the task.",
-            arguments={},
-            tool_specs=[],
-            context={"execution_scope": scope},
-            output_schema=output_schema,
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        _patch_build_llm(
+            mocker,
+            [
+                ChatResponse(
+                    tool_calls=[
+                        ToolCall(name="_submit", args={"result": {"wrong": "shape"}}, id="1")
+                    ]
+                )
+            ],
         )
-    mock_registry.adapter.after_reason_step.assert_called_once()
-    hook_kwargs = mock_registry.adapter.after_reason_step.call_args.kwargs
-    assert hook_kwargs.get("output_validation_failed") is True
-    assert hook_kwargs.get("submit_payload") == {"wrong": "shape"}
-    hook_messages = hook_kwargs.get("messages")
-    assert hook_messages is not None
-    assert len(hook_messages) >= 2
+        mocker.patch(
+            "workers.adapters.langchain.build_tools_for_worker",
+            new_callable=AsyncMock,
+            return_value=[],
+        )
+        mock_after = AsyncMock()
+        mock_registry = MagicMock()
+        mock_registry.tools.on_allowlist_passed = AsyncMock()
+        mock_registry.adapter.after_reason_step = mock_after
+        mocker.patch("workers.adapters.langchain.get_registry", return_value=mock_registry)
+        scope = MagicMock()
+        mocker.patch(
+            "workers.adapters.langchain.execution_scope_from_injection",
+            return_value=scope,
+        )
+        mocker.patch("workers.adapters.langchain.db_conn_from_injection", return_value=None)
+
+        adapter = LangChainAdapter(
+            worker_definition=_make_worker_def(),
+            secret=_make_secret(),
+        )
+        output_schema = {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        }
+        with pytest.raises(ExecutionStepError):
+            await adapter.run_step(
+                system_prompt="You are helpful.",
+                prompt_template="Do the task.",
+                arguments={},
+                tool_specs=[],
+                context={"execution_scope": scope},
+                output_schema=output_schema,
+            )
+        mock_registry.adapter.after_reason_step.assert_called_once()
+        hook_kwargs = mock_registry.adapter.after_reason_step.call_args.kwargs
+        assert hook_kwargs.get("output_validation_failed") is True
+        assert hook_kwargs.get("submit_payload") == {"wrong": "shape"}
+        hook_messages = hook_kwargs.get("messages")
+        assert hook_messages is not None
+        assert len(hook_messages) >= 2
+    finally:
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", raising=False)
+        get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
-async def test_run_step_raises_when_output_schema_validation_fails(mocker):
-    _patch_build_llm(
-        mocker,
-        [
-            ChatResponse(
-                tool_calls=[ToolCall(name="_submit", args={"result": {"wrong": "shape"}}, id="1")]
-            )
-        ],
-    )
-    mocker.patch(
-        "workers.adapters.langchain.build_tools_for_worker",
-        new_callable=AsyncMock,
-        return_value=[],
-    )
+async def test_run_step_raises_when_output_schema_validation_fails(mocker, monkeypatch):
+    from common.config import get_settings
 
-    adapter = LangChainAdapter(
-        worker_definition=_make_worker_def(),
-        secret=_make_secret(),
-    )
-    output_schema = {
-        "type": "object",
-        "required": ["summary"],
-        "properties": {"summary": {"type": "string"}},
-    }
-    with pytest.raises(ExecutionStepError) as exc_info:
-        await adapter.run_step(
-            system_prompt="You are helpful.",
-            prompt_template="Do the task.",
-            arguments={},
-            tool_specs=[],
-            context={},
-            output_schema=output_schema,
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        _patch_build_llm(
+            mocker,
+            [
+                ChatResponse(
+                    tool_calls=[
+                        ToolCall(name="_submit", args={"result": {"wrong": "shape"}}, id="1")
+                    ]
+                )
+            ],
         )
-    assert (
-        "validation" in str(exc_info.value.error_details or {}).lower()
-        or "output_schema" in str(exc_info.value).lower()
-    )
+        mocker.patch(
+            "workers.adapters.langchain.build_tools_for_worker",
+            new_callable=AsyncMock,
+            return_value=[],
+        )
+
+        adapter = LangChainAdapter(
+            worker_definition=_make_worker_def(),
+            secret=_make_secret(),
+        )
+        output_schema = {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        }
+        with pytest.raises(ExecutionStepError) as exc_info:
+            await adapter.run_step(
+                system_prompt="You are helpful.",
+                prompt_template="Do the task.",
+                arguments={},
+                tool_specs=[],
+                context={},
+                output_schema=output_schema,
+            )
+        assert exc_info.value.error_details.get("code") == "OUTPUT_SCHEMA_VALIDATION_FAILED"
+    finally:
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", raising=False)
+        get_settings.cache_clear()
 
 
 def test_validate_submit_payload_admits_stringified_boolean_and_array():
@@ -410,6 +427,126 @@ def test_validate_submit_payload_still_fails_on_wrong_shape():
         _validate_submit_payload({"wrong": "shape"}, output_schema=schema)
     details = exc_info.value.error_details or {}
     assert details.get("validation") == "output_schema"
+    assert details.get("code") == "OUTPUT_SCHEMA_VALIDATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_run_step_soft_retries_submit_schema_then_succeeds(mocker, monkeypatch):
+    from common.config import get_settings
+
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", "true")
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS", "3")
+    get_settings.cache_clear()
+    try:
+        _patch_build_llm(
+            mocker,
+            [
+                ChatResponse(
+                    tool_calls=[
+                        ToolCall(name="_submit", args={"result": {"wrong": "shape"}}, id="1")
+                    ]
+                ),
+                ChatResponse(
+                    tool_calls=[
+                        ToolCall(
+                            name="_submit",
+                            args={"result": {"summary": "fixed"}},
+                            id="2",
+                        )
+                    ]
+                ),
+            ],
+        )
+        mocker.patch(
+            "workers.adapters.langchain.build_tools_for_worker",
+            new_callable=AsyncMock,
+            return_value=[],
+        )
+        adapter = LangChainAdapter(
+            worker_definition=_make_worker_def(),
+            secret=_make_secret(),
+        )
+        output_schema = {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        }
+        result = await adapter.run_step(
+            system_prompt="You are helpful.",
+            prompt_template="Do the task.",
+            arguments={},
+            tool_specs=[],
+            context={},
+            output_schema=output_schema,
+        )
+        assert result.output["data"]["summary"] == "fixed"
+    finally:
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", raising=False)
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS", raising=False)
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_run_step_soft_retry_exhausted_raises_schema_code(mocker, monkeypatch):
+    from common.config import get_settings
+
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", "true")
+    monkeypatch.setenv("WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS", "2")
+    get_settings.cache_clear()
+    try:
+        _patch_build_llm(
+            mocker,
+            [
+                ChatResponse(
+                    tool_calls=[ToolCall(name="_submit", args={"result": {"wrong": "a"}}, id="1")]
+                ),
+                ChatResponse(
+                    tool_calls=[ToolCall(name="_submit", args={"result": {"wrong": "b"}}, id="2")]
+                ),
+            ],
+        )
+        mocker.patch(
+            "workers.adapters.langchain.build_tools_for_worker",
+            new_callable=AsyncMock,
+            return_value=[],
+        )
+        mock_after = AsyncMock()
+        mock_registry = MagicMock()
+        mock_registry.tools.on_allowlist_passed = AsyncMock()
+        mock_registry.adapter.after_reason_step = mock_after
+        mocker.patch("workers.adapters.langchain.get_registry", return_value=mock_registry)
+        scope = MagicMock()
+        mocker.patch(
+            "workers.adapters.langchain.execution_scope_from_injection",
+            return_value=scope,
+        )
+        mocker.patch("workers.adapters.langchain.db_conn_from_injection", return_value=None)
+
+        adapter = LangChainAdapter(
+            worker_definition=_make_worker_def(),
+            secret=_make_secret(),
+        )
+        output_schema = {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        }
+        with pytest.raises(ExecutionStepError) as exc_info:
+            await adapter.run_step(
+                system_prompt="You are helpful.",
+                prompt_template="Do the task.",
+                arguments={},
+                tool_specs=[],
+                context={"execution_scope": scope},
+                output_schema=output_schema,
+            )
+        assert exc_info.value.error_details.get("code") == "OUTPUT_SCHEMA_VALIDATION_FAILED"
+        mock_after.assert_called_once()
+        assert mock_after.call_args.kwargs.get("output_validation_failed")
+    finally:
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", raising=False)
+        monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS", raising=False)
+        get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
