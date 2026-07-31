@@ -236,6 +236,7 @@ ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **to
 | `WORKER_MAX_IN_FLIGHT` | `1` | Max concurrent step commands handled by **one worker process** (outbox consumer semaphore) |
 | `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping |
 | `WARDEN_MAX_STEP_TOKENS` | unset / `0` | Process-wide fallback token budget for reason steps that omit `max_step_tokens`; `0` or unset = no fallback |
+| `WARDEN_MAX_COMPLETION_TOKENS` | unset / `0` | Process-wide fallback per-call generation cap for reason steps that omit `max_completion_tokens`; `0` or unset = no Warden override |
 
 ### LLM JSON admission
 
@@ -252,7 +253,8 @@ Does **not** apply to commit-step tool `output.data` (MCP/server JSON) or non-LL
 |----------|--------|
 | Depth | Two levels: top-level fields, plus one nested level inside arrays and objects |
 | Coercions | Stringified JSON arrays/objects; scalar strings → `integer`, `number`, or `boolean` when unambiguous |
-| Nullable unions | Union `type` arrays (e.g. `["string", "null"]`) supported; string `"null"` / `"none"` (case-insensitive, trimmed) coerces to JSON `null` when the schema allows it |
+| Nullable unions | Union `type` arrays (e.g. `["string", "null"]`) and simple `anyOf`/`oneOf` `[T, null]` supported; string `"null"` / `"none"` (case-insensitive, trimmed) coerces to JSON `null` when the schema allows it |
+| Omit nulls | Present JSON `null` on a field whose schema does **not** allow null is dropped (treated as absent) before validation; intentional nulls on nullable fields are kept |
 | `string` fields | Never JSON-parsed (a string value that looks like JSON stays a string) |
 | Best-effort | Values that cannot be coerced are left unchanged; validation may still fail downstream |
 | Limitation | Schemas deeper than two levels are not recursively coerced; deeply nested mistakes may still fail |

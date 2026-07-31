@@ -107,6 +107,7 @@ class AnthropicChatAdapter(ChatModelPort):
         api_key: str,
         temperature: float = 0.0,
         *,
+        max_tokens: int | None = None,
         _llm: Any = None,
     ) -> None:
         """
@@ -114,8 +115,10 @@ class AnthropicChatAdapter(ChatModelPort):
             model_name: Anthropic model identifier (e.g. claude-3-5-sonnet-20241022).
             api_key: Anthropic API key.
             temperature: Sampling temperature.
+            max_tokens: Optional per-call completion cap.
             _llm: Optional pre-bound LLM (used by bind_tools).
         """
+        self._max_tokens = max_tokens
         self._llm: Any
         if _llm is not None:
             self._llm = _llm
@@ -127,6 +130,8 @@ class AnthropicChatAdapter(ChatModelPort):
                 # Retries live in wrap_llm_with_retry; avoid stacking provider retries.
                 "max_retries": 0,
             }
+            if max_tokens is not None:
+                llm_kwargs["max_tokens"] = max_tokens
             self._llm = ChatAnthropic(**llm_kwargs)
 
     def get_underlying_model(self) -> Any:
@@ -153,6 +158,7 @@ class AnthropicChatAdapter(ChatModelPort):
             model_name=self._llm.model or "",
             api_key=getattr(self._llm, "api_key", "") or "",
             temperature=0.0 if llm_temperature is None else float(llm_temperature),
+            max_tokens=self._max_tokens,
             _llm=bound,
         )
 

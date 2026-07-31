@@ -359,18 +359,21 @@ There is no built-in reviewer UI — the kernel exposes CLI and HTTP only. For c
 
 ## Step budgets
 
-`reason` steps accept two independent caps:
+`reason` steps accept independent caps:
 
 | Field | Applies to | Default | Meaning |
 |-------|------------|---------|---------|
 | `max_turns` | **`react` only** | **10** (max **200**) | Cap on back-and-forth tool/LLM rounds. **`simple`** ignores it (always one LLM call). |
 | `max_step_tokens` | **`react` and `simple`** | unlimited (omit / null) | Financial guardrail: abort when accumulated provider-reported **`total_tokens`** (prompt + completion across the step) exceed this budget. |
+| `max_completion_tokens` | **`react` and `simple`** | no Warden override (omit / null) | Per-call generation cap passed to the provider as `max_tokens`. Distinct from `max_step_tokens`. |
 
 `max_step_tokens` counts **gross physical tokens** from the provider usage metadata — not cache-discounted billed tokens. Prompt caching can make the invoice much smaller than the counted total; the budget still uses the raw counter. Compensation loops **never** enforce this budget (hydrate always passes unlimited) so rollbacks are not cut short mid-cleanup.
 
-Optional process-wide fallback: set worker env `WARDEN_MAX_STEP_TOKENS` (see [Configuration](../../getting-started/configuration.md)). It applies only when the step omits `max_step_tokens`. Unset or `0` means no fallback.
+`max_completion_tokens` limits how much the model may generate **on each LLM call** (every ReAct turn shares the same cap). Omit it to leave the provider default (Anthropic via LangChain may still default to 8192). Compensation does not set a completion cap.
 
-When the budget is exceeded, the step fails with `error_details.code: STEP_TOKEN_LIMIT_EXCEEDED` (includes `tokens_used`, `max_step_tokens`, `prompt_tokens`, `completion_tokens`). Usage from completed LLM turns is still written to `execution_usage` on `STEP_FAILED`.
+Optional process-wide fallbacks: set worker env `WARDEN_MAX_STEP_TOKENS` / `WARDEN_MAX_COMPLETION_TOKENS` (see [Configuration](../../getting-started/configuration.md)). Each applies only when the step omits the matching field. Unset or `0` means no fallback.
+
+When the step budget is exceeded, the step fails with `error_details.code: STEP_TOKEN_LIMIT_EXCEEDED` (includes `tokens_used`, `max_step_tokens`, `prompt_tokens`, `completion_tokens`). Usage from completed LLM turns is still written to `execution_usage` on `STEP_FAILED`.
 
 `timeout_seconds` is a safety clock for step execution (default **600** seconds). If a worker claims a step and then crashes or hangs, Warden waits for this window to expire, marks the step `FAILED`, and can trigger compensation — it won't auto-retry a stuck step. See [Saga recovery](../cli/saga-recovery.md) for how the open kernel vs enterprise handle timeouts and stale claims.
 
@@ -384,6 +387,7 @@ On `triage`:
     prompt: triage.j2
     max_turns: 15
     max_step_tokens: 50000
+    max_completion_tokens: 8192
     timeout_seconds: 600
     tools:
       allow:

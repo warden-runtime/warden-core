@@ -141,3 +141,80 @@ def test_coerce_null_string_without_nullable_schema_stays_literal():
     schema = {"type": "object", "properties": {"note": {"type": "string"}}}
     assert coerce_llm_json_from_schema({"note": "null"}, schema) == {"note": "null"}
     assert coerce_llm_json_from_schema({"note": "None"}, schema) == {"note": "None"}
+
+
+def test_omit_null_on_optional_non_nullable_field():
+    schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "note": {"type": "string"},
+        },
+        "required": ["summary"],
+    }
+    payload = {"summary": "ok", "note": None}
+    coerced = coerce_llm_json_from_schema(payload, schema)
+    assert coerced == {"summary": "ok"}
+    assert admit_and_validate(payload, schema, "test") == {"summary": "ok"}
+
+
+def test_keep_null_on_nullable_optional_field():
+    schema = {
+        "type": "object",
+        "properties": {"comment_body": {"type": ["string", "null"]}},
+    }
+    assert coerce_llm_json_from_schema({"comment_body": None}, schema) == {"comment_body": None}
+    assert admit_and_validate({"comment_body": None}, schema, "test") == {"comment_body": None}
+
+
+def test_keep_null_on_required_nullable_field():
+    schema = {
+        "type": "object",
+        "required": ["comment_body"],
+        "properties": {"comment_body": {"type": ["string", "null"]}},
+    }
+    assert admit_and_validate({"comment_body": None}, schema, "test") == {"comment_body": None}
+
+
+def test_required_non_nullable_null_becomes_missing_required():
+    schema = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+    }
+    with pytest.raises(ValidationError, match="summary"):
+        admit_and_validate({"summary": None}, schema, "test")
+
+
+def test_omit_null_nested_optional_object_field():
+    schema = {
+        "type": "object",
+        "properties": {
+            "meta": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "hint": {"type": "string"},
+                },
+            }
+        },
+    }
+    payload = {"meta": {"label": "a", "hint": None}}
+    assert coerce_llm_json_from_schema(payload, schema) == {"meta": {"label": "a"}}
+
+
+def test_coerce_anyof_nullable_array_peel():
+    schema = {
+        "type": "object",
+        "properties": {
+            "tags": {
+                "anyOf": [
+                    {"type": "array", "items": {"type": "string"}},
+                    {"type": "null"},
+                ]
+            }
+        },
+    }
+    assert coerce_llm_json_from_schema({"tags": '["a"]'}, schema) == {"tags": ["a"]}
+    assert coerce_llm_json_from_schema({"tags": "null"}, schema) == {"tags": None}
+    assert coerce_llm_json_from_schema({"tags": None}, schema) == {"tags": None}

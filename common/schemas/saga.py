@@ -257,6 +257,16 @@ class ReasonSagaStep(_SagaStepBase):
             "Not applied during compensation."
         ),
     )
+    max_completion_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Optional per-call generation cap passed to the LLM provider as max_tokens. "
+            "Omit for no Warden override (or fall back to WARDEN_MAX_COMPLETION_TOKENS). "
+            "Distinct from max_step_tokens (accumulated step budget). "
+            "Not applied during compensation."
+        ),
+    )
     tools: ToolsSpec | None = None
     facts: list[StepFactsExtractor] | None = Field(
         default=None,

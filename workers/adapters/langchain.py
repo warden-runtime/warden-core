@@ -354,6 +354,7 @@ class LangChainAdapter(AgentAdapterPort):
         timing_acc: WorkerTimingAccumulator | None,
         usage_acc: WorkerUsageAccumulator | None,
         max_step_tokens: int | None,
+        max_completion_tokens: int | None,
         tool_specs: list[dict[str, Any]],
         resource_specs: list[ResourceSpec],
     ) -> StepResult:
@@ -369,6 +370,7 @@ class LangChainAdapter(AgentAdapterPort):
             provider=self._worker_definition.model_provider,
             model_name=self._worker_definition.model_name,
             api_key=self._secret.api_key,
+            max_tokens=max_completion_tokens,
         )
         initial_messages = [
             ChatMessage(role="system", content=system_prompt),
@@ -423,6 +425,7 @@ class LangChainAdapter(AgentAdapterPort):
         output_schema: dict[str, Any] | None = None,
         max_turns: int | None = None,
         max_step_tokens: int | None = None,
+        max_completion_tokens: int | None = None,
         facts_extractors: list[dict[str, Any]] | None = None,
         agent_adapter: AgentAdapterMode = "react",
     ) -> StepResult:
@@ -451,6 +454,7 @@ class LangChainAdapter(AgentAdapterPort):
                 timing_acc=timing_acc,
                 usage_acc=usage_acc,
                 max_step_tokens=max_step_tokens,
+                max_completion_tokens=max_completion_tokens,
                 tool_specs=tool_specs or [],
                 resource_specs=resources,
             )
@@ -484,6 +488,7 @@ class LangChainAdapter(AgentAdapterPort):
                 provider=self._worker_definition.model_provider,
                 model_name=self._worker_definition.model_name,
                 api_key=self._secret.api_key,
+                max_tokens=max_completion_tokens,
             )
             llm_with_tools = llm.bind_tools(cast("list[ToolProtocol]", bind_tools))
             loop_messages = [
