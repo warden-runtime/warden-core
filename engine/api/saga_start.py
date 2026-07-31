@@ -207,6 +207,9 @@ async def _create_saga_and_steps(
             max_step_tokens=(
                 step_model.max_step_tokens if isinstance(step_model, ReasonSagaStep) else None
             ),
+            max_completion_tokens=(
+                step_model.max_completion_tokens if isinstance(step_model, ReasonSagaStep) else None
+            ),
             agent_adapter=(
                 step_model.agent_adapter if isinstance(step_model, ReasonSagaStep) else "react"
             ),

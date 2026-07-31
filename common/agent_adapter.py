@@ -75,6 +75,7 @@ class AgentAdapterPort(ABC):
         output_schema: dict[str, Any] | None = None,
         max_turns: int | None = None,
         max_step_tokens: int | None = None,
+        max_completion_tokens: int | None = None,
         facts_extractors: list[dict[str, Any]] | None = None,
         agent_adapter: AgentAdapterMode = "react",
     ) -> StepResult:
@@ -93,6 +94,8 @@ class AgentAdapterPort(ABC):
             output_schema: Optional step-level JSON Schema for final output; adapter validates payload when set.
             max_turns: Max LLM invocations for the ReAct loop; defaults to saga step YAML value.
             max_step_tokens: Optional accumulated provider total_tokens budget; None means unlimited.
+            max_completion_tokens: Optional per-call generation cap (provider max_tokens); None means
+                no Warden override.
             agent_adapter: ``react`` for ReAct + _submit; ``simple`` for single structured turn.
 
         Returns:

@@ -21,7 +21,7 @@ from common.plugins.context import (
 )
 from common.plugins.registry import get_registry
 from common.resource_specs import ResourceSpec
-from common.utils import format_exception_chain
+from common.utils import format_exception_chain, resolve_bindable_json_type
 from langchain_core.tools import StructuredTool
 from mcp import ClientSession
 from mcp.client.sse import sse_client
@@ -173,7 +173,11 @@ def _hook_kwargs(context: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _mcp_field_type(field_def: dict[str, Any]) -> type:
-    json_type = field_def.get("type")
+    json_type, _nullable = resolve_bindable_json_type(field_def)
+    return _mcp_python_type(json_type)
+
+
+def _mcp_python_type(json_type: str) -> type:
     if json_type == "integer":
         return int
     if json_type == "number":
@@ -185,6 +189,11 @@ def _mcp_field_type(field_def: dict[str, Any]) -> type:
     if json_type == "object":
         return dict
     return str
+
+
+def _resolve_mcp_json_type(field_def: dict[str, Any]) -> tuple[str, bool]:
+    """Resolve MCP JSON Schema field to (type_token, is_nullable)."""
+    return resolve_bindable_json_type(field_def)
 
 
 class _ReadResourceArgs(BaseModel):
@@ -996,8 +1005,11 @@ def _convert_mcp_to_langchain(
 
     fields = {}
     for field_name, field_def in properties.items():
-        field_type = _mcp_field_type(field_def)
-        if field_name in required:
+        if not isinstance(field_def, dict):
+            field_def = {}
+        type_token, nullable = _resolve_mcp_json_type(field_def)
+        field_type = _mcp_python_type(type_token)
+        if field_name in required and not nullable:
             fields[field_name] = (field_type, ...)
         else:
             fields[field_name] = (field_type | None, None)

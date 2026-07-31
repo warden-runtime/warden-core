@@ -53,6 +53,21 @@ def effective_max_step_tokens(step_value: int | None) -> int | None:
     return env if env > 0 else None
 
 
+def effective_max_completion_tokens(step_value: int | None) -> int | None:
+    """Resolve step YAML completion cap, falling back to WARDEN_MAX_COMPLETION_TOKENS.
+
+    Returns None when no Warden override (omit / null step field and env unset or 0).
+    """
+    if step_value is not None:
+        return step_value if step_value > 0 else None
+    raw = os.environ.get("WARDEN_MAX_COMPLETION_TOKENS", "0") or "0"
+    try:
+        env = int(raw)
+    except ValueError:
+        return None
+    return env if env > 0 else None
+
+
 def enforce_step_token_budget(
     usage_acc: WorkerUsageAccumulator,
     max_step_tokens: int | None,

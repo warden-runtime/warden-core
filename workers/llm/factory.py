@@ -22,6 +22,8 @@ def build_llm(
     model_name: str,
     api_key: str,
     temperature: float = 0.0,
+    *,
+    max_tokens: int | None = None,
 ) -> ChatModelPort:
     """
     Build a chat model port implementation for the given provider.
@@ -31,6 +33,7 @@ def build_llm(
         model_name: Model name (e.g. gpt-4o).
         api_key: Provider API key.
         temperature: Sampling temperature.
+        max_tokens: Optional per-call completion cap (provider max_tokens).
 
     Returns:
         ChatModelPort implementation (e.g. OpenAIChatAdapter, AnthropicChatAdapter).
@@ -45,6 +48,7 @@ def build_llm(
                 model_name=model_name,
                 api_key=api_key,
                 temperature=temperature,
+                max_tokens=max_tokens,
             )
         )
     if normalized == "local":
@@ -61,6 +65,7 @@ def build_llm(
                 api_key=resolved_key,
                 temperature=temperature,
                 base_url=base_url,
+                max_tokens=max_tokens,
             )
         )
     if normalized == "mock":
@@ -73,6 +78,7 @@ def build_llm(
                 model_name=model_name,
                 api_key=api_key,
                 temperature=temperature,
+                max_tokens=max_tokens,
             )
         )
     logger.error("Unknown LLM provider: %s", provider)

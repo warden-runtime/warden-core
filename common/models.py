@@ -101,6 +101,12 @@ class SagaStepInstance(models.Model):
             "null means unlimited at the step level."
         ),
     )
+    max_completion_tokens = fields.IntField(
+        null=True,
+        description=(
+            "Optional per-call LLM max_tokens for reason steps; null means no Warden override."
+        ),
+    )
     agent_adapter = fields.CharField(
         max_length=32,
         default="react",

@@ -181,6 +181,69 @@ async def test_convert_mcp_to_langchain_maps_array_and_object_types():
 
 
 @pytest.mark.asyncio
+async def test_convert_mcp_to_langchain_maps_nullable_type_list():
+    mcp_tool = McpTool(
+        name="nullable_tags",
+        description="Nullable array",
+        inputSchema={
+            "type": "object",
+            "properties": {"tags": {"type": ["array", "null"]}},
+            "required": ["tags"],
+        },
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(return_value=MagicMock(content=[]))
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+    await tool.ainvoke({"tags": ["a"]})
+    mock_session.call_tool.assert_called_once_with("nullable_tags", arguments={"tags": ["a"]})
+
+
+@pytest.mark.asyncio
+async def test_convert_mcp_to_langchain_maps_anyof_nullable_array():
+    mcp_tool = McpTool(
+        name="anyof_tags",
+        description="anyOf array|null",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tags": {"anyOf": [{"type": "array"}, {"type": "null"}]},
+            },
+            "required": ["tags"],
+        },
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(return_value=MagicMock(content=[]))
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+    await tool.ainvoke({"tags": ["x"]})
+    mock_session.call_tool.assert_called_once_with("anyof_tags", arguments={"tags": ["x"]})
+
+
+@pytest.mark.asyncio
+async def test_convert_mcp_to_langchain_required_nullable_accepts_none():
+    mcp_tool = McpTool(
+        name="nullable_required",
+        description="Required nullable int",
+        inputSchema={
+            "type": "object",
+            "properties": {"count": {"type": ["integer", "null"]}},
+            "required": ["count"],
+        },
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(return_value=MagicMock(content=[]))
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+    await tool.ainvoke({"count": None})
+    # None is stripped before call_tool
+    mock_session.call_tool.assert_called_once_with("nullable_required", arguments={})
+
+
+def test_mcp_field_type_multi_non_null_anyof_falls_back_to_str():
+    from workers.tools import _mcp_field_type
+
+    assert _mcp_field_type({"anyOf": [{"type": "string"}, {"type": "integer"}]}) is str
+
+
+@pytest.mark.asyncio
 async def test_convert_mcp_to_langchain_attaches_warden_input_schema():
     """_convert_mcp_to_langchain stashes the MCP inputSchema on the StructuredTool."""
     input_schema = {

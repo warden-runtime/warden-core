@@ -122,4 +122,43 @@ def test_build_llm_anthropic_retry_disabled_returns_bare_adapter(monkeypatch):
         api_key="sk-ant-fake",
     )
     assert isinstance(llm, AnthropicChatAdapter)
+
+
+def test_build_llm_openai_passes_max_tokens(monkeypatch):
+    monkeypatch.setenv("WARDEN_LLM_RETRY_ENABLED", "false")
+    llm = build_llm(
+        provider="openai",
+        model_name="gpt-4o",
+        api_key="sk-fake",
+        max_tokens=4096,
+    )
+    assert isinstance(llm, OpenAIChatAdapter)
+    assert llm._max_tokens == 4096
+    assert llm._llm.max_tokens == 4096
+
+
+def test_build_llm_openai_bind_tools_preserves_max_tokens(monkeypatch):
+    monkeypatch.setenv("WARDEN_LLM_RETRY_ENABLED", "false")
+    llm = build_llm(
+        provider="openai",
+        model_name="gpt-4o",
+        api_key="sk-fake",
+        max_tokens=2048,
+    )
+    bound = llm.bind_tools([])
+    assert isinstance(bound, OpenAIChatAdapter)
+    assert bound._max_tokens == 2048
+
+
+def test_build_llm_anthropic_passes_max_tokens(monkeypatch):
+    monkeypatch.setenv("WARDEN_LLM_RETRY_ENABLED", "false")
+    llm = build_llm(
+        provider="anthropic",
+        model_name="claude-3-5-sonnet-20241022",
+        api_key="sk-ant-fake",
+        max_tokens=8192,
+    )
+    assert isinstance(llm, AnthropicChatAdapter)
+    assert llm._max_tokens == 8192
+    assert llm._llm.max_tokens == 8192
     assert not isinstance(llm, RetryingChatModelPort)
