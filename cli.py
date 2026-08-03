@@ -449,11 +449,11 @@ def _print_saga_step_error_briefs(items: list[dict[str, Any]]) -> None:
     ]
     if not failed:
         return
-    for it in sorted(failed, key=lambda row: row.get("order_index", 0)):
+    for it in sorted(failed, key=lambda row: row.get("forward_seq", row.get("order_index", 0))):
         step_id = str(it.get("step_id", ""))
-        order_index = it.get("order_index", "")
+        seq = it.get("forward_seq", it.get("order_index", ""))
         brief = format_step_error_brief(it.get("error_details"))
-        print(f"  {step_id} (order {order_index}): {brief}")
+        print(f"  {step_id} (seq {seq}): {brief}")
 
 
 def _print_saga_step_error_footer(*, trace_id: str | None = None) -> None:
@@ -463,6 +463,13 @@ def _print_saga_step_error_footer(*, trace_id: str | None = None) -> None:
     print("  warden show step <trace_id> --step-id <step_id>")
 
 
+def _loop_tag(item: dict[str, Any]) -> str:
+    loop_id = item.get("loop_id")
+    if not loop_id:
+        return ""
+    return str(loop_id)[:16]
+
+
 def _print_saga_step_list(
     items: list[dict[str, Any]],
     *,
@@ -470,17 +477,21 @@ def _print_saga_step_list(
     trace_id: str | None = None,
 ) -> None:
     print(
-        f"{'order':<6} {'step_id':<20} {'status':<16} {'kind':<8} "
-        f"{'step_span_id':<18} {'worker':<20} {'compensates'}"
+        f"{'seq':<5} {'order':<6} {'step_id':<18} {'status':<16} {'kind':<8} "
+        f"{'loop':<16} {'iter':<5} {'step_span_id':<18} {'worker':<18} {'compensates'}"
     )
     for it in items:
         status = str(it.get("status", ""))
         error_details = it.get("error_details")
         display_status = _step_status_for_display(status, error_details)
+        iteration = it.get("iteration")
+        iter_col = "" if iteration is None else str(iteration)
         print(
-            f"{str(it.get('order_index', '')):<6} {str(it.get('step_id', ''))[:20]:<20} "
+            f"{str(it.get('forward_seq', '')):<5} {str(it.get('order_index', '')):<6} "
+            f"{str(it.get('step_id', ''))[:18]:<18} "
             f"{display_status:<16} {str(it.get('step_kind', '')):<8} "
-            f"{it.get('step_span_id', ''):<18} {str(it.get('worker', ''))[:20]:<20} "
+            f"{_loop_tag(it):<16} {iter_col:<5} "
+            f"{it.get('step_span_id', ''):<18} {str(it.get('worker', ''))[:18]:<18} "
             f"{it.get('compensates_span_id') or ''}"
         )
     if show_errors:
@@ -546,33 +557,36 @@ def _format_payload_block(
     print("(payload truncated; use --raw or --json for full output)")
 
 
-def _format_step_detail_human(data: dict[str, Any], *, raw: bool) -> None:
-    step_id = data.get("step_id", "")
+def _print_step_failure_section(data: dict[str, Any]) -> None:
     status = data.get("status", "")
-    order_index = data.get("order_index", "")
-    step_span_id = data.get("step_span_id", "")
-    step_kind = data.get("step_kind", "")
-    print(
-        f"step_id={step_id}  status={status}  order_index={order_index}  "
-        f"step_span_id={step_span_id}  kind={step_kind}"
-    )
     error_details = data.get("error_details")
-    if error_details or status == "FAILED":
-        brief = format_step_error_brief(error_details if isinstance(error_details, dict) else None)
-        if brief:
-            print(f"failure: {brief}")
-        _format_payload_block("error_details", error_details, raw=True)
-    prompt_ref = data.get("prompt_ref")
-    if prompt_ref:
-        print(f"prompt_ref: {prompt_ref}")
+    if not (error_details or status == "FAILED"):
+        return
+    brief = format_step_error_brief(error_details if isinstance(error_details, dict) else None)
+    if brief:
+        print(f"failure: {brief}")
+    _format_payload_block("error_details", error_details, raw=True)
+
+
+def _format_step_detail_human(data: dict[str, Any], *, raw: bool) -> None:
+    print(
+        f"step_id={data.get('step_id', '')}  status={data.get('status', '')}  "
+        f"forward_seq={data.get('forward_seq', '')}  order_index={data.get('order_index', '')}  "
+        f"step_span_id={data.get('step_span_id', '')}  kind={data.get('step_kind', '')}"
+    )
+    loop_id = data.get("loop_id") or ""
+    iteration = data.get("iteration")
+    if loop_id or iteration is not None:
+        print(f"loop_id={loop_id or '-'}  iteration={iteration if iteration is not None else '-'}")
+    _print_step_failure_section(data)
+    if data.get("prompt_ref"):
+        print(f"prompt_ref: {data['prompt_ref']}")
     _format_payload_block("resolved_arguments", data.get("resolved_arguments"), raw=raw)
     _format_payload_block("output_payload", data.get("output_payload"), raw=raw)
-    timing = data.get("timing")
-    if timing:
-        _format_payload_block("timing", timing, raw=raw)
-    usage = data.get("usage")
-    if usage:
-        _format_payload_block("usage", usage, raw=raw)
+    if data.get("timing"):
+        _format_payload_block("timing", data.get("timing"), raw=raw)
+    if data.get("usage"):
+        _format_payload_block("usage", data.get("usage"), raw=raw)
 
 
 def _parse_started_at(value: Any) -> datetime:
@@ -595,7 +609,11 @@ def _pick_step_span_id_for_step_id(
     pool = forward if forward else matches
     pool_sorted = sorted(
         pool,
-        key=lambda it: (_parse_started_at(it.get("started_at")), str(it.get("step_span_id", ""))),
+        key=lambda it: (
+            int(it.get("forward_seq") or 0),
+            _parse_started_at(it.get("started_at")),
+            str(it.get("step_span_id", "")),
+        ),
         reverse=True,
     )
     chosen = pool_sorted[0]
@@ -994,7 +1012,7 @@ def list_sagas(
 
 @list_app.command(
     "steps",
-    help="List step instances for one saga (ordered by step order_index).",
+    help="List step instances for one saga (ordered by forward_seq).",
     epilog=(
         "Requires `--trace-id`. Optional `--namespace` must match the saga row. "
         "Repeat `--status` to filter step rows. "

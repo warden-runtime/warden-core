@@ -183,3 +183,136 @@ def test_reason_step_rejects_duplicate_facts_into() -> None:
                 ],
             }
         )
+
+
+def test_blueprint_parses_loop_block() -> None:
+    from common.schemas.saga import LoopSagaStep
+
+    bp = SagaBlueprint.model_validate(
+        {
+            "kind": "saga",
+            "name": "with-loop",
+            "version": "1",
+            "description": "d",
+            "steps": [
+                {
+                    "id": "refine",
+                    "kind": "loop",
+                    "max_iterations": 1,
+                    "until": {"cel": "true"},
+                    "steps": [
+                        {
+                            "id": "attempt",
+                            "name": "Attempt",
+                            "kind": "reason",
+                            "worker": "w",
+                            "worker_version": "1.0.0",
+                            "with": {},
+                            "prompt": "p.j2",
+                        }
+                    ],
+                },
+                {
+                    "id": "done",
+                    "name": "Done",
+                    "kind": "commit",
+                    "worker": "w",
+                    "worker_version": "1.0.0",
+                    "with": {},
+                    "tools": {"allow": [{"name": "t1"}]},
+                },
+            ],
+        }
+    )
+    assert isinstance(bp.steps[0], LoopSagaStep)
+    assert bp.steps[0].max_iterations == 1
+    assert bp.steps[0].until.cel == "true"
+    assert bp.steps[0].steps[0].id == "attempt"
+
+
+def test_loop_requires_max_iterations_and_until() -> None:
+    with pytest.raises(ValidationError):
+        SagaBlueprint.model_validate(
+            {
+                "kind": "saga",
+                "name": "bad",
+                "version": "1",
+                "description": "d",
+                "steps": [
+                    {
+                        "id": "refine",
+                        "kind": "loop",
+                        "until": {"cel": "true"},
+                        "steps": [
+                            {
+                                "id": "a",
+                                "name": "A",
+                                "kind": "reason",
+                                "worker": "w",
+                                "worker_version": "1.0.0",
+                                "prompt": "p.j2",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+
+def test_loop_rejects_empty_body() -> None:
+    with pytest.raises(ValidationError, match="non-empty"):
+        SagaBlueprint.model_validate(
+            {
+                "kind": "saga",
+                "name": "bad",
+                "version": "1",
+                "description": "d",
+                "steps": [
+                    {
+                        "id": "refine",
+                        "kind": "loop",
+                        "max_iterations": 1,
+                        "until": {"cel": "true"},
+                        "steps": [],
+                    }
+                ],
+            }
+        )
+
+
+def test_loop_rejects_duplicate_body_step_ids() -> None:
+    with pytest.raises(ValidationError, match="unique"):
+        SagaBlueprint.model_validate(
+            {
+                "kind": "saga",
+                "name": "bad",
+                "version": "1",
+                "description": "d",
+                "steps": [
+                    {
+                        "id": "refine",
+                        "kind": "loop",
+                        "max_iterations": 1,
+                        "until": {"cel": "true"},
+                        "steps": [
+                            {
+                                "id": "same",
+                                "name": "A",
+                                "kind": "reason",
+                                "worker": "w",
+                                "worker_version": "1.0.0",
+                                "prompt": "p.j2",
+                            },
+                            {
+                                "id": "same",
+                                "name": "B",
+                                "kind": "reason",
+                                "worker": "w",
+                                "worker_version": "1.0.0",
+                                "prompt": "p.j2",
+                            },
+                        ],
+                    }
+                ],
+            }
+        )

@@ -37,9 +37,13 @@ def step_when_binding(*, saga: SagaInstance, step: SagaStepInstance) -> dict[str
     steps_ctx = ctx.get("steps")
     if not isinstance(steps_ctx, dict):
         steps_ctx = {}
-    return {
+    loops_ctx = ctx.get("loops")
+    if not isinstance(loops_ctx, dict):
+        loops_ctx = {}
+    binding: dict[str, Any] = {
         "input": coerce_dict(ctx.get("input")),
         "steps": steps_ctx,
+        "loops": loops_ctx,
         "saga": {
             "trace_id": saga.trace_id,
             "namespace": saga.namespace,
@@ -50,8 +54,16 @@ def step_when_binding(*, saga: SagaInstance, step: SagaStepInstance) -> dict[str
             "name": step.step_name,
             "kind": step.step_kind,
             "order_index": step.order_index,
+            "forward_seq": step.forward_seq,
         },
     }
+    if step.loop_id:
+        binding["loop"] = {
+            "id": step.loop_id,
+            "iteration": step.iteration,
+            "max_iterations": (loops_ctx.get(step.loop_id) or {}).get("max_iterations"),
+        }
+    return binding
 
 
 def evaluate_step_when(*, cel_source: str, binding: dict[str, Any]) -> bool:

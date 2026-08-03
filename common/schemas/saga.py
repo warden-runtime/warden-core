@@ -319,10 +319,78 @@ class CommitSagaStep(_SagaStepBase):
         return self
 
 
+class LoopUntilSpec(BaseModel):
+    """Exit condition for a loop block: evaluated after each successful body pass."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cel: str
+
+    @field_validator("cel")
+    @classmethod
+    def cel_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("until.cel must be non-empty")
+        return stripped
+
+
+class LoopSagaStep(BaseModel):
+    """Bounded do-while loop over nested reason/commit steps (single nesting level)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["loop"]
+    id: str
+    name: str | None = None
+    max_iterations: int = Field(..., ge=1, description="Hard ceiling on body passes; required.")
+    until: LoopUntilSpec
+    steps: list[Annotated[ReasonSagaStep | CommitSagaStep, Field(discriminator="kind")]]
+
+    @field_validator("id")
+    @classmethod
+    def id_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("loop id must be non-empty")
+        return stripped
+
+    @field_validator("steps")
+    @classmethod
+    def body_non_empty(
+        cls, v: list[ReasonSagaStep | CommitSagaStep]
+    ) -> list[ReasonSagaStep | CommitSagaStep]:
+        if not v:
+            raise ValueError("loop body steps must be non-empty")
+        return v
+
+
+# Executable forward steps (reason/commit). Loop containers are top-level only.
 SagaStep = Annotated[
     ReasonSagaStep | CommitSagaStep,
     Field(discriminator="kind"),
 ]
+
+TopLevelSagaStep = Annotated[
+    ReasonSagaStep | CommitSagaStep | LoopSagaStep,
+    Field(discriminator="kind"),
+]
+
+
+def iter_executable_step_ids(steps: list[TopLevelSagaStep]) -> list[str]:
+    """Collect reason/commit step ids across top-level steps and loop bodies."""
+    ids: list[str] = []
+    for step in steps:
+        if isinstance(step, LoopSagaStep):
+            ids.extend(body.id for body in step.steps)
+        else:
+            ids.append(step.id)
+    return ids
+
+
+def iter_loop_ids(steps: list[TopLevelSagaStep]) -> list[str]:
+    """Collect loop container ids from a blueprint steps list."""
+    return [step.id for step in steps if isinstance(step, LoopSagaStep)]
 
 
 class SagaBlueprint(BaseModel):
@@ -333,12 +401,20 @@ class SagaBlueprint(BaseModel):
     namespace: str = "default"
     version: str
     description: str
-    steps: list[SagaStep]
+    steps: list[TopLevelSagaStep]
 
     @field_validator("steps")
     @classmethod
-    def ensure_unique_step_ids(cls, v: list[SagaStep]) -> list[SagaStep]:
-        ids = [s.id for s in v]
-        if len(ids) != len(set(ids)):
+    def ensure_unique_ids_and_no_nested_loops(
+        cls, v: list[TopLevelSagaStep]
+    ) -> list[TopLevelSagaStep]:
+        executable_ids = iter_executable_step_ids(v)
+        if len(executable_ids) != len(set(executable_ids)):
             raise ValueError("All step IDs in a blueprint must be unique.")
+        loop_ids = iter_loop_ids(v)
+        if len(loop_ids) != len(set(loop_ids)):
+            raise ValueError("All loop IDs in a blueprint must be unique.")
+        overlap = set(executable_ids) & set(loop_ids)
+        if overlap:
+            raise ValueError(f"Loop IDs must not collide with step IDs: {sorted(overlap)}")
         return v

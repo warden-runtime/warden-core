@@ -33,6 +33,9 @@ class StepDataFactory(factory.Factory):
     step_id = factory.Sequence(lambda n: f"step_{n}")
     step_name = factory.Sequence(lambda n: f"step_{n}")
     order_index = factory.Sequence(lambda n: n)
+    forward_seq = factory.Sequence(lambda n: n)
+    loop_id = None
+    iteration = None
     idempotency_key = factory.LazyFunction(lambda: uuid.uuid4().hex)
     status = StepStatus.PENDING
 
@@ -87,6 +90,7 @@ async def create_saga_with_steps(
             saga_trace_id=saga.trace_id,
             namespace=saga.namespace,  # Must match parent!
             order_index=i,
+            forward_seq=i,
             step_id=f"step_{i}",
             step_name=f"step_{i}",
         )

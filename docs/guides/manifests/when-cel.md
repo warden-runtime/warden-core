@@ -1,7 +1,7 @@
 ---
 sidebar_position: 6
 pagination_prev: guides/manifests/mcp-and-tools
-pagination_next: guides/manifests/policies
+pagination_next: guides/manifests/loops
 ---
 
 # Conditional branching (`when.cel`)

@@ -328,7 +328,7 @@ async def _execute_step_retry(
         await _reset_step_for_worker_retry(saga, step, saga.trace_id, db_conn=conn)
         await trigger_step(
             saga,
-            step.order_index,
+            step.forward_seq,
             conn,
             allow_retry_in_progress=True,
         )

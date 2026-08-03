@@ -37,7 +37,7 @@ async def _ingest_step_completed(
     )
 
 
-async def _schedule_after(saga, after_order: int) -> None:
+async def _schedule_after(saga, after_seq: int) -> None:
     async with in_transaction() as conn:
         locked = (
             await type(saga)
@@ -48,7 +48,7 @@ async def _schedule_after(saga, after_order: int) -> None:
         )
         assert locked is not None
         with patch("engine.logic.assert_prompt_file_exists"):
-            await _schedule_next_forward_step(locked, after_order, db_conn=conn)
+            await _schedule_next_forward_step(locked, after_seq, db_conn=conn)
 
 
 @pytest.mark.asyncio
@@ -99,7 +99,7 @@ async def test_when_skips_commit_when_facts_absent() -> None:
     await step0.save()
     await step1.save()
 
-    await _schedule_after(saga, after_order=0)
+    await _schedule_after(saga, after_seq=0)
 
     await step1.refresh_from_db()
     await saga.refresh_from_db()
@@ -131,7 +131,7 @@ async def test_when_skips_commit_when_total_count_zero() -> None:
     await step0.save()
     await step1.save()
 
-    await _schedule_after(saga, after_order=0)
+    await _schedule_after(saga, after_seq=0)
 
     await step1.refresh_from_db()
     assert step1.status == StepStatus.SKIPPED
@@ -167,7 +167,7 @@ async def test_when_runs_commit_when_total_count_positive() -> None:
     await step0.save()
     await step1.save()
 
-    await _schedule_after(saga, after_order=0)
+    await _schedule_after(saga, after_seq=0)
 
     await step1.refresh_from_db()
     await saga.refresh_from_db()

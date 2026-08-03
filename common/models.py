@@ -83,7 +83,22 @@ class SagaStepInstance(models.Model):
 
     step_id = fields.CharField(max_length=128)
     step_name = fields.CharField(max_length=128)
-    order_index = fields.IntField()
+    order_index = fields.IntField(
+        description="Blueprint-relative display index (stable across loop iterations).",
+    )
+    forward_seq = fields.IntField(
+        default=0,
+        description="Monotonic execution sequence for schedule ASC / compensation DESC.",
+    )
+    loop_id = fields.CharField(
+        max_length=128,
+        null=True,
+        description="Loop container id when this forward row belongs to a loop body.",
+    )
+    iteration = fields.IntField(
+        null=True,
+        description="1-based loop iteration for this forward row; null outside loops.",
+    )
     idempotency_key = fields.CharField(max_length=128, unique=True)
     started_at = fields.DatetimeField(auto_now_add=True, db_index=True)
     end_time = fields.DatetimeField(
@@ -214,6 +229,18 @@ class SagaInstance(models.Model):
     status = fields.CharEnumField(SagaStatus, default=SagaStatus.PENDING, max_length=50)
 
     context = fields.JSONField(default=dict)
+    frozen_steps = fields.JSONField(
+        null=True,
+        description="Saga steps snapshot at start (delay-tail materialization source of truth).",
+    )
+    loop_definitions = fields.JSONField(
+        null=True,
+        description="Frozen loop metadata keyed by loop id (until.cel, body, max_iterations).",
+    )
+    loop_state = fields.JSONField(
+        null=True,
+        description="Orchestration cursor: next_blueprint_index, active_loop_id.",
+    )
     start_idempotency_key = fields.CharField(max_length=256, null=True)
     started_at = fields.DatetimeField(auto_now_add=True, db_index=True)
 

@@ -21,6 +21,14 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
         "execution_timing",
         "pending_engine_timing",
         "execution_usage",
+        "forward_seq",
+        "loop_id",
+        "iteration",
+    ),
+    "saga_instances": (
+        "frozen_steps",
+        "loop_definitions",
+        "loop_state",
     ),
 }
 

@@ -1,6 +1,6 @@
 ---
 sidebar_position: 7
-pagination_prev: guides/manifests/when-cel
+pagination_prev: guides/manifests/loops
 pagination_next: guides/manifests/compensation
 ---
 

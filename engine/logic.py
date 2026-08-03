@@ -96,7 +96,7 @@ if TYPE_CHECKING:
 
 
 async def _forward_step_count(*, saga_trace_id: str, db_conn: BaseDBAsyncClient) -> int:
-    """Number of forward (blueprint) step rows for this saga."""
+    """Number of forward (non-compensation) step rows for this saga."""
     return await (
         SagaStepInstance.filter(saga_trace_id=saga_trace_id, compensates_span_id__isnull=True)
         .using_db(db_conn)
@@ -154,33 +154,29 @@ async def _notify_when_skipped_summary(
 
 async def _schedule_next_forward_step(
     saga: SagaInstance,
-    after_order: int,
+    after_seq: int,
     *,
     db_conn: BaseDBAsyncClient,
     trace_context: dict[str, Any] | None = None,
 ) -> None:
-    """Schedule the next eligible forward step, skipping rows whose ``when.cel`` is false."""
-    forward_count = await _forward_step_count(saga_trace_id=saga.trace_id, db_conn=db_conn)
-    skipped_count = 0
-    for order in range(after_order + 1, forward_count):
-        step = (
-            await SagaStepInstance.filter(
-                saga_trace_id=saga.trace_id,
-                order_index=order,
-                compensates_span_id__isnull=True,
-            )
-            .using_db(db_conn)
-            .select_for_update()
-            .first()
-        )
-        if not step:
-            logger.error(
-                "Saga %s missing forward step at order %s during schedule.",
-                saga.trace_id,
-                order,
-            )
-            return
+    """Schedule the next eligible forward step by ``forward_seq`` ASC after ``after_seq``.
 
+    Skips rows whose ``when.cel`` is false. When no remaining forward rows exist,
+    completes the saga (delay-tail may still mint more rows via loop control before
+    this path is used).
+    """
+    candidates = (
+        await SagaStepInstance.filter(
+            saga_trace_id=saga.trace_id,
+            compensates_span_id__isnull=True,
+            forward_seq__gt=after_seq,
+        )
+        .using_db(db_conn)
+        .select_for_update()
+        .order_by("forward_seq")
+    )
+    skipped_count = 0
+    for step in candidates:
         when_cel = (step.when_cel or "").strip()
         when_ms = 0
         if when_cel:
@@ -225,6 +221,25 @@ async def _schedule_next_forward_step(
                     when_cel_ms=when_ms,
                 )
                 skipped_count += 1
+                # SKIPPED is clean completion — may end a loop body.
+                from engine.loop_control import handle_possible_loop_boundary
+
+                handled = await handle_possible_loop_boundary(
+                    saga,
+                    step,
+                    db_conn=db_conn,
+                    trace_context=trace_context,
+                    schedule_next=_schedule_next_forward_step,
+                    apply_step_failure=_apply_step_failure_lifecycle,
+                )
+                if handled:
+                    await _notify_when_skipped_summary(
+                        saga,
+                        skipped_count=skipped_count,
+                        db_conn=db_conn,
+                        trace_context=trace_context,
+                    )
+                    return
                 continue
 
         schedule_acc = EngineTimingAccumulator()
@@ -238,7 +253,7 @@ async def _schedule_next_forward_step(
         )
         await trigger_step(
             saga,
-            order,
+            step.forward_seq,
             db_conn=db_conn,
             trace_context=trace_context,
             schedule_engine_add=schedule_acc.to_dict() if schedule_acc.to_dict() else None,
@@ -421,6 +436,7 @@ def _policy_binding(
             "name": step.step_name,
             "kind": step.step_kind,
             "order_index": step.order_index,
+            "forward_seq": step.forward_seq,
         },
         "worker": {"name": step.worker, "version": step.worker_version},
         "tool": {"name": _first_tool_name(tool_specs)},
@@ -488,7 +504,7 @@ async def process_saga_event(event_data: dict) -> None:
                         queryset=SagaStepInstance.filter(
                             saga_trace_id=event.saga_trace_id,
                             compensates_span_id__isnull=True,
-                        ).order_by("order_index"),
+                        ).order_by("forward_seq"),
                     )
                 )
                 .first()
@@ -707,7 +723,7 @@ async def handle_saga_started(
 
     await _schedule_next_forward_step(
         saga,
-        after_order=-1,
+        after_seq=-1,
         db_conn=db_conn,
         trace_context=_ingest_trace_context(event),
     )
@@ -754,9 +770,22 @@ async def _finalize_step_output_and_advance(
     )
     await saga.save(using_db=db_conn)
 
+    from engine.loop_control import handle_possible_loop_boundary
+
+    handled = await handle_possible_loop_boundary(
+        saga,
+        step,
+        db_conn=db_conn,
+        trace_context=trace_context,
+        schedule_next=_schedule_next_forward_step,
+        apply_step_failure=_apply_step_failure_lifecycle,
+    )
+    if handled:
+        return
+
     await _schedule_next_forward_step(
         saga,
-        after_order=step.order_index,
+        after_seq=step.forward_seq,
         db_conn=db_conn,
         trace_context=trace_context,
     )
@@ -1276,7 +1305,7 @@ async def handle_human_retry(
 
     await trigger_step(
         saga,
-        step.order_index,
+        step.forward_seq,
         db_conn=db_conn,
         trace_context=trace_ctx,
         step_start_from_status=StepStatus.AWAITING_HUMAN,
@@ -1312,7 +1341,7 @@ async def _apply_step_failure_lifecycle(
     await merge_step_usage_if_needed(step, worker_usage=event.usage, conn=db_conn)
     reaper_pre_timed_out = step.status == StepStatus.TIMED_OUT
 
-    logger.warning("Saga %s failed at step %s.", saga.trace_id, step.order_index)
+    logger.warning("Saga %s failed at step forward_seq=%s.", saga.trace_id, step.forward_seq)
     from_status = StepStatus.IN_PROGRESS if reaper_pre_timed_out else status_value(step.status)
 
     is_payload_timeout = _payload_indicates_timeout(raw_payload)
@@ -1355,9 +1384,9 @@ async def _apply_step_failure_lifecycle(
     )
 
     is_dirty_failure = step.status == StepStatus.TIMED_OUT or code == "SYSTEM_CRASH"
-    start_compensation_index = step.order_index if is_dirty_failure else step.order_index - 1
+    start_compensation_seq = step.forward_seq if is_dirty_failure else step.forward_seq - 1
 
-    if start_compensation_index < 0:
+    if start_compensation_seq < 0:
         logger.info("Saga %s failed cleanly at start. No compensation needed.", saga.trace_id)
         prior_saga_status = saga.status
         saga.status = SagaStatus.FAILED
@@ -1386,6 +1415,7 @@ async def _apply_step_failure_lifecycle(
                 "reason": "step_failed_at_start",
                 "step_span_id": event.step_span_id,
                 "step_order": step.order_index,
+                "forward_seq": step.forward_seq,
                 "error_details": raw_payload,
                 "failed_at": str(datetime.now(UTC)),
             },
@@ -1398,7 +1428,7 @@ async def _apply_step_failure_lifecycle(
         )
         return
 
-    logger.info("Triggering compensation starting at index %s", start_compensation_index)
+    logger.info("Triggering compensation starting at forward_seq %s", start_compensation_seq)
     prior_saga_status = saga.status
     saga.status = SagaStatus.COMPENSATING
     await saga.save(using_db=db_conn)
@@ -1412,7 +1442,7 @@ async def _apply_step_failure_lifecycle(
     )
     await trigger_compensation(
         saga,
-        step_order=start_compensation_index,
+        forward_seq=start_compensation_seq,
         db_conn=db_conn,
         trace_context=trace_ctx,
     )
@@ -1565,14 +1595,14 @@ async def handle_compensation_completed(
     )
 
     logger.info(
-        "Step %s (%s) compensated successfully.",
-        step.order_index,
+        "Step forward_seq=%s (%s) compensated successfully.",
+        step.forward_seq,
         step.step_name,
     )
 
     await _advance_lifo_compensation(
         saga,
-        step.order_index - 1,
+        step.forward_seq - 1,
         db_conn=db_conn,
         trace_context=trace_ctx,
     )
@@ -1927,7 +1957,7 @@ async def _build_forward_worker_command(
 @trace_step()
 async def trigger_step(
     saga: SagaInstance,
-    step_order: int,
+    forward_seq: int,
     db_conn: BaseDBAsyncClient,
     *,
     trace_context: dict[str, Any] | None = None,
@@ -1944,7 +1974,7 @@ async def trigger_step(
 
     Args:
         saga: Saga instance (locked).
-        step_order: Order index of the step to run.
+        forward_seq: Monotonic execution sequence of the step to run.
         db_conn: Transaction connection.
 
     Returns:
@@ -1957,7 +1987,7 @@ async def trigger_step(
     step_to_run = (
         await SagaStepInstance.filter(
             saga_trace_id=saga.trace_id,
-            order_index=step_order,
+            forward_seq=forward_seq,
             compensates_span_id__isnull=True,
         )
         .using_db(db_conn)
@@ -1967,16 +1997,16 @@ async def trigger_step(
 
     if not step_to_run:
         logger.error(
-            "Saga %s tried to trigger non-existing step order: %s",
+            "Saga %s tried to trigger non-existing step forward_seq: %s",
             saga.trace_id,
-            step_order,
+            forward_seq,
         )
         return
 
     if step_to_run.status == StepStatus.COMPLETED:
         logger.warning(
-            "Step %s is already %s. Ignoring trigger.",
-            step_order,
+            "Step forward_seq=%s is already %s. Ignoring trigger.",
+            forward_seq,
             step_to_run.status,
         )
         return
@@ -1984,15 +2014,15 @@ async def trigger_step(
         allow_from_awaiting_human or allow_retry_in_progress
     ):
         logger.warning(
-            "Step %s is already %s. Ignoring trigger.",
-            step_order,
+            "Step forward_seq=%s is already %s. Ignoring trigger.",
+            forward_seq,
             step_to_run.status,
         )
         return
     if step_to_run.status == StepStatus.AWAITING_HUMAN and not allow_from_awaiting_human:
         logger.warning(
-            "Step %s is AWAITING_HUMAN. Ignoring trigger (use HUMAN_RETRY).",
-            step_order,
+            "Step forward_seq=%s is AWAITING_HUMAN. Ignoring trigger (use HUMAN_RETRY).",
+            forward_seq,
         )
         return
 
@@ -2053,8 +2083,8 @@ async def trigger_step(
         log_cmd = event_type
     except (ValidationError, ValueError) as e:
         logger.exception(
-            "Failed to create worker command for step %s: %s",
-            step_order,
+            "Failed to create worker command for step forward_seq=%s: %s",
+            forward_seq,
             e,
         )
         synthetic = StepFailedEvent(
@@ -2067,7 +2097,7 @@ async def trigger_step(
         await _apply_step_failure_lifecycle(saga, step_to_run, synthetic, db_conn)
         return
 
-    logger.info("Queuing %s command for step %s", log_cmd, step_order)
+    logger.info("Queuing %s command for step forward_seq=%s", log_cmd, forward_seq)
     await emit_saga_event(
         topic=TOPIC_WORKER_COMMANDS,
         event_type=event_type,
@@ -2193,13 +2223,13 @@ async def _emit_saga_failed_from_compensation(
 
 async def _load_forward_step_for_compensation(
     saga: SagaInstance,
-    order: int,
+    forward_seq: int,
     db_conn: BaseDBAsyncClient,
 ) -> SagaStepInstance | None:
     return (
         await SagaStepInstance.filter(
             saga_trace_id=saga.trace_id,
-            order_index=order,
+            forward_seq=forward_seq,
             compensates_span_id__isnull=True,
         )
         .using_db(db_conn)
@@ -2281,9 +2311,9 @@ async def _schedule_compensation_for_forward(
         )
     except ValidationError as exc:
         logger.exception(
-            "Failed to create CompensationCommand for saga %s step order %s: %s",
+            "Failed to create CompensationCommand for saga %s forward_seq %s: %s",
             saga.trace_id,
-            forward.order_index,
+            forward.forward_seq,
             exc,
         )
         forward_from_status = status_value(forward.status)
@@ -2320,6 +2350,9 @@ async def _schedule_compensation_for_forward(
         step_id=forward.step_id,
         step_name=forward.step_name,
         order_index=forward.order_index,
+        forward_seq=forward.forward_seq,
+        loop_id=forward.loop_id,
+        iteration=forward.iteration,
         idempotency_key=cmd_idempotency_key,
         timeout_seconds=forward.timeout_seconds,
         max_turns=undo_max_turns,
@@ -2355,7 +2388,7 @@ async def _schedule_compensation_for_forward(
         compensation_span_id=new_span,
     )
 
-    logger.info("Queuing compensation command for step %s", forward.order_index)
+    logger.info("Queuing compensation command for forward_seq=%s", forward.forward_seq)
 
     schedule_acc.stop("comp_schedule", bucket="schedule_ms")
     await emit_saga_event(
@@ -2374,46 +2407,42 @@ async def _schedule_compensation_for_forward(
 
 async def _advance_lifo_compensation(
     saga: SagaInstance,
-    from_order: int,
+    from_seq: int,
     db_conn: BaseDBAsyncClient,
     *,
     trace_context: dict[str, Any] | None = None,
 ) -> None:
-    order = from_order
-    while order >= 0:
-        forward = await _load_forward_step_for_compensation(saga, order, db_conn)
+    """Walk compensatable forward rows by ``forward_seq`` DESC starting at ``from_seq``."""
+    seq = from_seq
+    while seq >= 0:
+        forward = await _load_forward_step_for_compensation(saga, seq, db_conn)
         if forward is None:
-            logger.error(
-                "Saga %s missing forward step at order %s during compensation walk.",
+            # Gaps should not exist for contiguous minting; skip missing seq.
+            logger.warning(
+                "Saga %s missing forward step at forward_seq %s during compensation walk.",
                 saga.trace_id,
-                order,
+                seq,
             )
-            await _emit_saga_failed_from_compensation(
-                saga,
-                db_conn=db_conn,
-                trace_context=trace_context,
-                reason="compensation_failed",
-                error_details={"code": "MISSING_FORWARD_STEP", "order_index": order},
-            )
-            return
+            seq -= 1
+            continue
 
         if not forward_step_has_compensation(forward):
             logger.info(
-                "Saga %s skipping compensation for order %s (no compensation declared).",
+                "Saga %s skipping compensation for forward_seq %s (no compensation declared).",
                 saga.trace_id,
-                order,
+                seq,
             )
-            order -= 1
+            seq -= 1
             continue
 
         if not forward_eligible_for_compensation(forward):
             logger.info(
-                "Saga %s skipping compensation for order %s (status=%s not eligible).",
+                "Saga %s skipping compensation for forward_seq %s (status=%s not eligible).",
                 saga.trace_id,
-                order,
+                seq,
                 forward.status,
             )
-            order -= 1
+            seq -= 1
             continue
 
         if await _undo_row_status_exists(saga, forward.span_id, StepStatus.COMPENSATED, db_conn):
@@ -2422,7 +2451,7 @@ async def _advance_lifo_compensation(
                 saga.trace_id,
                 forward.span_id,
             )
-            order -= 1
+            seq -= 1
             continue
 
         if await _undo_row_status_exists(saga, forward.span_id, StepStatus.COMPENSATING, db_conn):
@@ -2447,29 +2476,19 @@ async def _advance_lifo_compensation(
 @trace_step()
 async def trigger_compensation(
     saga: SagaInstance,
-    step_order: int,
-    db_conn: BaseDBAsyncClient,
     *,
+    forward_seq: int,
+    db_conn: BaseDBAsyncClient,
     trace_context: dict[str, Any] | None = None,
 ):
-    """Walk the LIFO compensation cursor from ``step_order`` and schedule or finalize.
+    """Walk the LIFO compensation cursor from ``forward_seq`` and schedule or finalize.
 
-    The forward row for each order is left unchanged; undo work is recorded on child rows
+    The forward row for each seq is left unchanged; undo work is recorded on child rows
     with ``compensates_span_id`` referencing that forward row's ``span_id``.
-
-    Args:
-        saga: Saga instance (locked).
-        step_order: Order index to start or continue the LIFO walk.
-        db_conn: Transaction connection.
-        trace_context: Optional trace context for hooks.
-
-    Returns:
-        None. Schedules one undo command, waits on in-flight undo, finalizes ``COMPENSATED``,
-        or transitions saga to ``FAILED`` on unrecoverable schedule errors.
     """
     await _advance_lifo_compensation(
         saga,
-        step_order,
+        forward_seq,
         db_conn,
         trace_context=trace_context,
     )

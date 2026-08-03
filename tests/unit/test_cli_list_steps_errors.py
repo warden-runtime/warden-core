@@ -14,6 +14,9 @@ def _failed_step_items() -> dict:
         "items": [
             {
                 "order_index": 0,
+                "forward_seq": 0,
+                "loop_id": None,
+                "iteration": None,
                 "step_id": "triage",
                 "status": "FAILED",
                 "step_kind": "reason",
@@ -41,6 +44,8 @@ def test_list_steps_marks_failed_with_asterisk(monkeypatch):
     assert result.exit_code == 0
     assert "FAILED*" in result.stdout
     assert "--errors" in result.stdout
+    assert "seq" in result.stdout
+    assert "loop" in result.stdout
 
 
 def test_list_steps_errors_prints_briefs(monkeypatch):
@@ -50,9 +55,35 @@ def test_list_steps_errors_prints_briefs(monkeypatch):
     )
     result = _runner.invoke(app, ["list", "steps", "--trace-id", _TRACE, "--errors"])
     assert result.exit_code == 0
-    assert "triage (order 0):" in result.stdout
+    assert "triage (seq 0):" in result.stdout
     assert "no_submit_call" in result.stdout
     assert "failed to list issues" in result.stdout
+
+
+def test_list_steps_shows_loop_columns(monkeypatch):
+    monkeypatch.setattr(
+        "cli._fetch_engine_get_json",
+        lambda path, *, params=None: {
+            "items": [
+                {
+                    "order_index": 0,
+                    "forward_seq": 0,
+                    "loop_id": "refine",
+                    "iteration": 1,
+                    "step_id": "attempt",
+                    "status": "COMPLETED",
+                    "step_kind": "reason",
+                    "step_span_id": "1" * 16,
+                    "worker": "w",
+                    "compensates_span_id": None,
+                }
+            ]
+        },
+    )
+    result = _runner.invoke(app, ["list", "steps", "--trace-id", _TRACE])
+    assert result.exit_code == 0
+    assert "refine" in result.stdout
+    assert "attempt" in result.stdout
 
 
 def test_list_steps_errors_rejects_json():
