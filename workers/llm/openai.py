@@ -35,6 +35,7 @@ class OpenAIChatAdapter(ChatModelPort):
         temperature: float = 0.0,
         *,
         base_url: str | None = None,
+        max_tokens: int | None = None,
         _llm: Any = None,
     ) -> None:
         """
@@ -43,9 +44,11 @@ class OpenAIChatAdapter(ChatModelPort):
             api_key: OpenAI API key.
             temperature: Sampling temperature.
             base_url: Optional OpenAI-compatible API base (e.g. local Ollama/vLLM).
+            max_tokens: Optional per-call completion cap.
             _llm: Optional pre-bound LLM (used by bind_tools).
         """
         self._base_url = base_url
+        self._max_tokens = max_tokens
         self._llm: Any
         if _llm is not None:
             self._llm = _llm
@@ -58,6 +61,8 @@ class OpenAIChatAdapter(ChatModelPort):
             }
             if base_url:
                 llm_kwargs["base_url"] = base_url
+            if max_tokens is not None:
+                llm_kwargs["max_tokens"] = max_tokens
             self._llm = ChatOpenAI(**llm_kwargs)
 
     def get_underlying_model(self) -> Any:
@@ -81,6 +86,7 @@ class OpenAIChatAdapter(ChatModelPort):
             api_key=getattr(self._llm, "api_key", "") or "",
             temperature=0.0 if llm_temperature is None else float(llm_temperature),
             base_url=self._base_url,
+            max_tokens=self._max_tokens,
             _llm=bound,
         )
 

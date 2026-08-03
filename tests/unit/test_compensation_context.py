@@ -20,6 +20,9 @@ def test_build_compensation_metadata_blind_cleanup_on_timeout():
     forward.span_id = "a" * 16
     forward.step_id = "step-1"
     forward.order_index = 1
+    forward.forward_seq = 1
+    forward.loop_id = None
+    forward.iteration = None
     forward.status = StepStatus.TIMED_OUT
     forward.output_payload = None
     forward.pending_review_payload = None
@@ -43,9 +46,13 @@ def test_compensation_parameter_context_includes_metadata_when_scheduled():
     forward.span_id = "f" * 16
     forward.step_id = "s1"
     forward.order_index = 0
+    forward.forward_seq = 0
+    forward.loop_id = None
+    forward.iteration = None
     forward.status = StepStatus.COMPLETED
     forward.output_payload = {"data": {"id": "42"}}
     forward.pending_review_payload = None
+    forward.resolved_arguments = {}
     forward.error_details = None
 
     ctx = compensation_parameter_context(
@@ -66,9 +73,13 @@ def test_compensation_parameter_context_empty_output_layer_on_dirty_step():
     forward.span_id = "f" * 16
     forward.step_id = "s1"
     forward.order_index = 1
+    forward.forward_seq = 1
+    forward.loop_id = None
+    forward.iteration = None
     forward.status = StepStatus.TIMED_OUT
     forward.output_payload = None
     forward.pending_review_payload = None
+    forward.resolved_arguments = {}
     forward.error_details = {"code": "TIMEOUT"}
 
     ctx = compensation_parameter_context(
@@ -90,3 +101,32 @@ def test_compensation_parameter_context_empty_output_layer_on_dirty_step():
 )
 def test_merge_compensation_tool_arguments(llm, original, key, expected):
     assert merge_compensation_tool_arguments(llm, original, idempotency_key=key) == expected
+
+
+def test_compensation_parameter_context_isolates_live_steps():
+    saga = MagicMock()
+    saga.context = {
+        "input": {"x": 1},
+        "steps": {"s1": {"output": {"data": {"id": "LIVE"}}}},
+    }
+    forward = MagicMock()
+    forward.span_id = "f" * 16
+    forward.step_id = "s1"
+    forward.order_index = 0
+    forward.forward_seq = 0
+    forward.loop_id = None
+    forward.iteration = None
+    forward.status = StepStatus.COMPLETED
+    forward.output_payload = {"data": {"id": "ROW"}}
+    forward.pending_review_payload = None
+    forward.resolved_arguments = {}
+    forward.error_details = None
+
+    ctx = compensation_parameter_context(
+        saga,
+        forward,
+        undo_span_id="u" * 16,
+        idempotency_key="comp-t-u",
+    )
+    assert ctx["steps"]["s1"]["output"]["data"]["id"] == "ROW"
+    assert list(ctx["steps"].keys()) == ["s1"]

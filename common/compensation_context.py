@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 from common.models import StepStatus
 from common.step_output import business_data_from_step_output, wrap_step_output_data
+from common.utils import coerce_dict
 
 # JSONPath / saga context key for rollback metadata (safe defaults on dirty failures).
 COMPENSATION_METADATA_KEY = "_compensation"
@@ -70,6 +71,9 @@ def build_compensation_metadata(
         "forward_span_id": forward.span_id,
         "forward_step_id": forward.step_id,
         "forward_order_index": forward.order_index,
+        "forward_seq": forward.forward_seq,
+        "forward_loop_id": forward.loop_id,
+        "forward_iteration": forward.iteration,
         "forward_status": str(forward.status),
         "idempotency_key": idempotency_key,
         "has_forward_output": has_output,
@@ -89,6 +93,8 @@ def _attach_forward_step_output_layer(
     steps_layer: dict[str, Any] = dict(ctx.get("steps") or {})
     entry: dict[str, Any] = dict(steps_layer.get(step.step_id) or {})
     entry["output"] = step_output_for_saga_context(merged if isinstance(merged, dict) else None)
+    if isinstance(merged, dict) and isinstance(merged.get("facts"), dict):
+        entry["facts"] = dict(merged["facts"])
     steps_layer[step.step_id] = entry
     ctx["steps"] = steps_layer
 
@@ -100,8 +106,18 @@ def compensation_parameter_context(
     undo_span_id: str | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Build saga-like context for resolving compensation ``with`` JSONPaths."""
-    ctx: dict[str, Any] = dict(saga.context or {})
+    """Build saga-like context for resolving compensation ``with`` JSONPaths.
+
+    Uses the forward row's saved ``output_payload`` / ``resolved_arguments`` for the
+    compensated ``step_id`` so loop iterations do not bleed live ``context.steps``.
+    """
+    base_input = coerce_dict((saga.context or {}).get("input")) if saga.context else {}
+    ctx: dict[str, Any] = {
+        "input": base_input,
+        "steps": {},
+    }
+    if isinstance(step.resolved_arguments, dict) and step.resolved_arguments:
+        ctx["arguments"] = dict(step.resolved_arguments)
     _attach_forward_step_output_layer(ctx, step)
     if undo_span_id and idempotency_key:
         ctx[COMPENSATION_METADATA_KEY] = build_compensation_metadata(

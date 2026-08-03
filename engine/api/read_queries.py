@@ -101,7 +101,7 @@ async def list_saga_step_instances(
         q = q.filter(namespace=namespace)
     if statuses is not None:
         q = q.filter(status__in=statuses)
-    q = q.order_by("order_index", "span_id")
+    q = q.order_by("forward_seq", "span_id")
     return await q.offset(offset).limit(limit)
 
 

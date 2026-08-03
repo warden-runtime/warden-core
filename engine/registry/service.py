@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 from common.config import get_settings
+from common.loops import validate_until_cel_compile
 from common.models import SagaDefinition, WorkerDefinition
 from common.plugins.registry import get_registry
 from common.policy.cel_eval import PolicyEvaluationError, compile_cel_program
@@ -13,7 +14,7 @@ from common.saga_assets import (
     assert_output_schema_readable,
     load_compensation_definition,
 )
-from common.schemas.saga import ReasonSagaStep, SagaBlueprint, SagaStep
+from common.schemas.saga import LoopSagaStep, ReasonSagaStep, SagaBlueprint, SagaStep
 from common.schemas.worker import WorkerBlueprint
 from common.step_facts import validate_facts_extractors
 from common.step_when import validate_when_cel_compile
@@ -32,25 +33,51 @@ def _saga_definition_body_payload(blueprint: SagaBlueprint) -> dict[str, Any]:
     return json.loads(blueprint.model_dump_json(by_alias=True, exclude_none=True))
 
 
+async def _embed_compensation_on_step_dict(
+    *,
+    step_dict: dict[str, Any],
+    step: SagaStep,
+    compensations_root: str | None,
+) -> None:
+    comp = await _validate_step_compensation(
+        compensations_root=compensations_root,
+        step=step,
+    )
+    if comp:
+        step_dict["compensation_definition"] = comp
+
+
 async def _embed_resolved_compensation_definitions(
     *,
     blueprint: SagaBlueprint,
     body_payload: dict[str, Any],
     compensations_root: str | None,
 ) -> None:
-    """Attach frozen compensation blocks to each step in the registry body payload."""
+    """Attach frozen compensation blocks to each executable step in the registry body."""
     steps_body = body_payload.get("steps")
     if not isinstance(steps_body, list):
         return
     for index, step in enumerate(blueprint.steps):
         if index >= len(steps_body) or not isinstance(steps_body[index], dict):
             continue
-        comp = await _validate_step_compensation(
-            compensations_root=compensations_root,
+        if isinstance(step, LoopSagaStep):
+            body_list = steps_body[index].get("steps")
+            if not isinstance(body_list, list):
+                continue
+            for body_i, body_step in enumerate(step.steps):
+                if body_i >= len(body_list) or not isinstance(body_list[body_i], dict):
+                    continue
+                await _embed_compensation_on_step_dict(
+                    step_dict=body_list[body_i],
+                    step=body_step,
+                    compensations_root=compensations_root,
+                )
+            continue
+        await _embed_compensation_on_step_dict(
+            step_dict=steps_body[index],
             step=step,
+            compensations_root=compensations_root,
         )
-        if comp:
-            steps_body[index]["compensation_definition"] = comp
 
 
 def _worker_definition_fields(blueprint: WorkerBlueprint) -> dict[str, Any]:
@@ -203,7 +230,7 @@ async def _validate_step_policy(
 
 async def _validate_one_saga_step_at_registration(
     *,
-    index: int,
+    index: int | str,
     step: SagaStep,
     settings: Any,
     legacy_policy_warned: set[str],
@@ -252,13 +279,13 @@ async def _collect_saga_registration_workers(
     blueprint: SagaBlueprint,
     settings: Any,
 ) -> set[WorkerIdentity]:
-    required_workers: set[WorkerIdentity] = {
-        (step.worker, step.worker_version) for step in blueprint.steps
-    }
+    required_workers: set[WorkerIdentity] = set()
     legacy_policy_warned: set[str] = set()
-    for i, step in enumerate(blueprint.steps):
+
+    async def _register_executable(index_label: str, step: SagaStep) -> None:
+        required_workers.add((step.worker, step.worker_version))
         comp_d = await _validate_one_saga_step_at_registration(
-            index=i,
+            index=index_label,
             step=step,
             settings=settings,
             legacy_policy_warned=legacy_policy_warned,
@@ -271,6 +298,19 @@ async def _collect_saga_registration_workers(
                     forward_worker_version=step.worker_version,
                 )
             )
+
+    for i, step in enumerate(blueprint.steps):
+        if isinstance(step, LoopSagaStep):
+            try:
+                validate_until_cel_compile(step.until.cel)
+            except PolicyEvaluationError as e:
+                raise ValueError(
+                    f"Saga step {i} (loop id={step.id!r}) until.cel is invalid: {e}"
+                ) from e
+            for j, body in enumerate(step.steps):
+                await _register_executable(f"{i}.body[{j}]", body)
+            continue
+        await _register_executable(str(i), step)
     return required_workers
 
 

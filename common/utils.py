@@ -162,13 +162,97 @@ _COERCE_NULL_UNCHANGED = object()
 _JSON_TYPE_PRIORITY = ("boolean", "integer", "number", "array", "object", "string")
 
 
+def _split_nullable_json_type(json_type: Any) -> tuple[Any, bool]:
+    """Return (non-null type token, is_nullable) for a JSON Schema ``type`` value."""
+    if isinstance(json_type, list):
+        non_null = [t for t in json_type if t != "null"]
+        nullable = any(t == "null" for t in json_type)
+        if len(non_null) == 1:
+            return non_null[0], nullable
+        # Multi-type unions are not bindable as Pydantic unions; fall back to str.
+        return "string", nullable
+    return json_type, False
+
+
+_JSON_NULL_TYPE = "null"
+
+
+def _union_branch_type_token(branch: dict[str, Any]) -> tuple[str | None, bool] | None:
+    """Return ``(non_null_token | None, branch_allows_null)`` or None if unparseable."""
+    raw_type = branch.get("type")
+    if raw_type is None:
+        return None
+    type_name, branch_null = _split_nullable_json_type(raw_type)
+    if type_name == _JSON_NULL_TYPE:
+        return None, True
+    if not isinstance(type_name, str):
+        return None
+    return type_name, branch_null
+
+
+def peel_simple_nullable_union(field_schema: dict[str, Any]) -> tuple[str, bool] | None:
+    """Peel ``anyOf`` / ``oneOf`` of the form ``[T, null]`` into ``(type_token, nullable)``.
+
+    Returns None when the schema has no such union, or when more than one non-null
+    branch is present (full unions are not supported).
+    """
+    for key in ("anyOf", "oneOf"):
+        branches = field_schema.get(key)
+        if not isinstance(branches, list) or not branches:
+            continue
+        nullable = False
+        non_null_tokens: list[str] = []
+        for branch in branches:
+            if not isinstance(branch, dict):
+                return None
+            parsed = _union_branch_type_token(branch)
+            if parsed is None:
+                return None
+            type_name, branch_null = parsed
+            if branch_null:
+                nullable = True
+            if type_name is None:
+                continue
+            non_null_tokens.append(type_name)
+        if len(non_null_tokens) == 1:
+            return non_null_tokens[0], nullable
+        return None
+    return None
+
+
+def resolve_bindable_json_type(field_schema: dict[str, Any]) -> tuple[str, bool]:
+    """Resolve a JSON Schema field to ``(type_token, is_nullable)`` for bind layers.
+
+    Understands ``type`` strings/lists and simple ``anyOf``/``oneOf`` ``[T, null]``.
+    Falls back to ``("string", False)`` when the shape is not bindable.
+    """
+    if "type" in field_schema:
+        token, nullable = _split_nullable_json_type(field_schema.get("type"))
+        if isinstance(token, str):
+            return token, nullable
+        return "string", nullable
+    peeled = peel_simple_nullable_union(field_schema)
+    if peeled is not None:
+        return peeled
+    return "string", False
+
+
 def _schema_type_names(field_schema: dict[str, Any]) -> frozenset[str]:
-    raw_type = field_schema.get("type", "string")
-    if isinstance(raw_type, str):
-        return frozenset({raw_type})
-    if isinstance(raw_type, list):
-        names = {item for item in raw_type if isinstance(item, str)}
-        return frozenset(names) if names else frozenset({"string"})
+    if "type" in field_schema:
+        raw_type = field_schema["type"]
+        if isinstance(raw_type, str):
+            return frozenset({raw_type})
+        if isinstance(raw_type, list):
+            names = {item for item in raw_type if isinstance(item, str)}
+            return frozenset(names) if names else frozenset({"string"})
+        return frozenset({"string"})
+    peeled = peel_simple_nullable_union(field_schema)
+    if peeled is not None:
+        token, nullable = peeled
+        names = {token}
+        if nullable:
+            names.add("null")
+        return frozenset(names)
     return frozenset({"string"})
 
 
@@ -255,6 +339,58 @@ def _coerce_value_for_schema(
     return value
 
 
+def _omit_null_key_if_disallowed(
+    result: dict[str, Any],
+    field_name: str,
+    field_schema: dict[str, Any],
+) -> bool:
+    """Drop ``field_name`` when value is null and schema disallows null. Return True if dropped."""
+    if result.get(field_name) is not None:
+        return False
+    if field_name not in result:
+        return False
+    if _schema_allows_null(_schema_type_names(field_schema)):
+        return False
+    del result[field_name]
+    return True
+
+
+def _omit_disallowed_nulls(
+    data: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    depth: int,
+    max_depth: int,
+) -> dict[str, Any]:
+    """Drop object keys whose value is null when the field schema does not allow null."""
+    properties = schema.get("properties", {})
+    if not isinstance(properties, dict) or not properties:
+        return data
+
+    result = dict(data)
+    for field_name, field_schema in properties.items():
+        if field_name not in result:
+            continue
+        if not isinstance(field_schema, dict):
+            field_schema = {}
+        if _omit_null_key_if_disallowed(result, field_name, field_schema):
+            continue
+        value = result[field_name]
+        type_names = _schema_type_names(field_schema)
+        if (
+            isinstance(value, dict)
+            and depth < max_depth
+            and _primary_json_type(type_names) == "object"
+        ):
+            result[field_name] = _omit_disallowed_nulls(
+                value,
+                field_schema,
+                depth=depth + 1,
+                max_depth=max_depth,
+            )
+    return result
+
+
 def coerce_llm_json_from_schema(
     args: dict[str, Any],
     input_schema: dict[str, Any],
@@ -265,10 +401,11 @@ def coerce_llm_json_from_schema(
 
     Coerces stringified JSON arrays/objects and ambiguous scalar strings when the
     declared JSON Schema type expects a non-string value. ``string`` fields are
-    never JSON-parsed. Recursion is limited to *max_depth* levels (default 2:
-    top-level fields plus one nested level inside arrays/objects). Best-effort:
-    values that cannot be coerced are left unchanged. Used for MCP tool args and
-    reason-step ``output_schema`` admission.
+    never JSON-parsed. Drops present ``null`` on fields whose schema does not
+    allow null (treat as absent). Recursion is limited to *max_depth* levels
+    (default 2: top-level fields plus one nested level inside arrays/objects).
+    Best-effort: values that cannot be coerced are left unchanged. Used for MCP
+    tool args and reason-step ``output_schema`` admission.
     """
     if not isinstance(args, dict):
         return {}
@@ -288,7 +425,7 @@ def coerce_llm_json_from_schema(
             depth=0,
             max_depth=max_depth,
         )
-    return result
+    return _omit_disallowed_nulls(result, input_schema, depth=0, max_depth=max_depth)
 
 
 coerce_tool_args_from_schema = coerce_llm_json_from_schema
@@ -306,25 +443,59 @@ def hash_canonical_dict(data: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _field_type_from_json_schema(field_info: dict[str, Any]) -> type[Any]:
-    json_type = field_info.get("type", "string")
-    if json_type == "integer":
-        return int
-    if json_type == "number":
-        return float
-    if json_type == "boolean":
-        return bool
-    if json_type == "array":
-        items_info = field_info.get("items", {})
-        items_type = items_info.get("type", "string") if isinstance(items_info, dict) else "string"
-        if items_type == "integer":
-            return list[int]
-        if items_type == "number":
-            return list[float]
-        if items_type == "boolean":
-            return list[bool]
-        return list[str]
-    return str
+def _sanitize_model_name(name: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
+    if not cleaned or cleaned[0].isdigit():
+        cleaned = f"M_{cleaned}"
+    return cleaned
+
+
+_PRIMITIVE_JSON_TYPES: dict[str, type[Any]] = {
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "string": str,
+}
+
+
+def _object_field_type(field_info: dict[str, Any], *, model_name: str) -> type[Any]:
+    properties = field_info.get("properties")
+    if isinstance(properties, dict) and properties:
+        return create_pydantic_model_from_schema(field_info, model_name=model_name)
+    return dict[str, Any]
+
+
+def _array_field_type(field_info: dict[str, Any], *, model_name: str) -> type[Any]:
+    items_info = field_info.get("items", {})
+    if not isinstance(items_info, dict):
+        items_info = {}
+    items_type, _ = _split_nullable_json_type(items_info.get("type", "string"))
+    if items_type == "object" and isinstance(items_info.get("properties"), dict):
+        item_model = create_pydantic_model_from_schema(items_info, model_name=f"{model_name}Item")
+        return list[item_model]  # type: ignore[valid-type]
+    item_primitive = _PRIMITIVE_JSON_TYPES.get(
+        items_type if isinstance(items_type, str) else "", str
+    )
+    return list[item_primitive]  # type: ignore[valid-type]
+
+
+def _field_type_from_json_schema(
+    field_info: dict[str, Any],
+    *,
+    model_name: str,
+) -> Any:
+    json_type, nullable = _split_nullable_json_type(field_info.get("type", "string"))
+    if json_type == "object":
+        base: Any = _object_field_type(field_info, model_name=model_name)
+    elif json_type == "array":
+        base = _array_field_type(field_info, model_name=model_name)
+    elif isinstance(json_type, str) and json_type in _PRIMITIVE_JSON_TYPES:
+        base = _PRIMITIVE_JSON_TYPES[json_type]
+    else:
+        base = str
+    if nullable:
+        return base | None
+    return base
 
 
 def create_pydantic_model_from_schema(
@@ -332,19 +503,22 @@ def create_pydantic_model_from_schema(
 ) -> type[BaseModel]:
     """Dynamically creates a Pydantic model from a simplified JSON Schema subset.
 
-    Used for structured LLM output and dynamic tool arguments. Supports types:
-    string, integer, number, boolean, and arrays of those primitives. Optional
-    fields use default None. Unknown top-level keys are rejected (extra=forbid).
+    Used for structured LLM output. Supports: string, integer, number, boolean,
+    nested objects (``type: object`` with ``properties``), arrays of primitives or
+    objects, and nullable unions via ``type: ["T", "null"]``. Optional fields use
+    default None. Unknown top-level keys are rejected (extra=forbid).
 
     Args:
         schema: Dict with "properties" (and optional "required"). Each
-            property may have "type", "items" (for arrays), and "description".
+            property may have "type", "items" (for arrays), "properties" (for
+            nested objects), and "description".
         model_name: Name of the generated model class.
 
     Returns:
         A Pydantic BaseModel subclass with fields derived from schema.
     """
     fields: dict[str, Any] = {}
+    safe_root = _sanitize_model_name(model_name)
 
     properties = schema.get("properties", {})
     required_fields = set(schema.get("required", []))
@@ -352,7 +526,8 @@ def create_pydantic_model_from_schema(
     for field_name, field_info in properties.items():
         if not isinstance(field_info, dict):
             field_info = {}
-        field_type = _field_type_from_json_schema(field_info)
+        nested_name = _sanitize_model_name(f"{safe_root}_{field_name}")
+        field_type = _field_type_from_json_schema(field_info, model_name=nested_name)
         description = field_info.get("description", "")
 
         if field_name in required_fields:
@@ -361,7 +536,45 @@ def create_pydantic_model_from_schema(
             fields[field_name] = (field_type | None, Field(None, description=description))
 
     return create_model(
-        model_name,
+        safe_root,
         __config__=ConfigDict(extra="forbid"),
         **fields,
     )
+
+
+_OUTPUT_SCHEMA_UNSUPPORTED_KEYWORDS = frozenset(
+    {
+        "if",
+        "then",
+        "else",
+        "allOf",
+        "anyOf",
+        "oneOf",
+        "$ref",
+        "$defs",
+        "definitions",
+    }
+)
+
+
+def assert_output_schema_bind_supported(schema: dict[str, Any], *, path: str = "$") -> None:
+    """Reject composition/conditional keywords that silently no-op at Pydantic bind.
+
+    Validation-only constraints (``minLength``, ``enum``, ``additionalProperties``,
+    ``type: ["T","null"]``, etc.) are allowed. Raises ``ValueError`` with the JSON
+    path of the first unsupported keyword.
+    """
+    for key, value in schema.items():
+        child_path = f"{path}.{key}"
+        if key in _OUTPUT_SCHEMA_UNSUPPORTED_KEYWORDS:
+            raise ValueError(
+                f"output_schema uses unsupported keyword {key!r} at {child_path}; "
+                "flatten conditionals / inline $ref before deploy "
+                f"(unsupported: {', '.join(sorted(_OUTPUT_SCHEMA_UNSUPPORTED_KEYWORDS))})"
+            )
+        if isinstance(value, dict):
+            assert_output_schema_bind_supported(value, path=child_path)
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                if isinstance(item, dict):
+                    assert_output_schema_bind_supported(item, path=f"{child_path}[{i}]")

@@ -67,7 +67,7 @@ def recording_hooks():
 
 async def _schedule_after(
     saga: SagaInstance,
-    after_order: int,
+    after_seq: int,
     *,
     recording_hooks: _RecordingEngineHooks | None = None,
 ) -> SagaInstance:
@@ -81,7 +81,7 @@ async def _schedule_after(
         )
         assert locked is not None
         with patch("engine.logic.assert_prompt_file_exists"):
-            await _schedule_next_forward_step(locked, after_order, db_conn=conn)
+            await _schedule_next_forward_step(locked, after_seq, db_conn=conn)
         return locked
 
 
@@ -132,7 +132,7 @@ async def test_schedule_skips_step_when_cel_false(recording_hooks):
     step1.when_cel = "steps.step_0.output.data.action == 'comment'"
     await step1.save()
 
-    await _schedule_after(saga, after_order=0, recording_hooks=recording_hooks)
+    await _schedule_after(saga, after_seq=0, recording_hooks=recording_hooks)
 
     await step1.refresh_from_db()
     await saga.refresh_from_db()
@@ -164,7 +164,7 @@ async def test_schedule_runs_step_when_cel_true():
     step1.when_cel = "steps.step_0.output.data.action == 'comment'"
     await step1.save()
 
-    await _schedule_after(saga, after_order=0)
+    await _schedule_after(saga, after_seq=0)
 
     await step1.refresh_from_db()
     await saga.refresh_from_db()
@@ -185,7 +185,7 @@ async def test_schedule_runs_step_when_omitted():
     await step0.save()
     assert step1.when_cel is None
 
-    await _schedule_after(saga, after_order=0)
+    await _schedule_after(saga, after_seq=0)
 
     await step1.refresh_from_db()
     assert step1.status == StepStatus.IN_PROGRESS
@@ -207,7 +207,7 @@ async def test_schedule_fails_step_on_when_eval_error():
     step1.when_cel = "steps.step_0.output.data.count / 0 == 1"
     await step1.save()
 
-    await _schedule_after(saga, after_order=0)
+    await _schedule_after(saga, after_seq=0)
 
     await step1.refresh_from_db()
     await saga.refresh_from_db()
@@ -227,7 +227,7 @@ async def test_schedule_skips_first_step_when_cel_false():
     step0.when_cel = "input.run == true"
     await step0.save()
 
-    await _schedule_after(saga, after_order=-1)
+    await _schedule_after(saga, after_seq=-1)
 
     await step0.refresh_from_db()
     await step1.refresh_from_db()
@@ -248,7 +248,7 @@ async def test_schedule_completes_when_all_remaining_steps_skipped(recording_hoo
     await step0.save()
     await step1.save()
 
-    await _schedule_after(saga, after_order=-1, recording_hooks=recording_hooks)
+    await _schedule_after(saga, after_seq=-1, recording_hooks=recording_hooks)
 
     await saga.refresh_from_db()
     await step0.refresh_from_db()

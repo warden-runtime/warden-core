@@ -29,7 +29,11 @@ from common.contracts import (
     coerce_worker_command_dict,
 )
 from common.execution_timing import WorkerTimingAccumulator
-from common.execution_usage import WorkerUsageAccumulator, effective_max_step_tokens
+from common.execution_usage import (
+    WorkerUsageAccumulator,
+    effective_max_completion_tokens,
+    effective_max_step_tokens,
+)
 from common.models import ProcessedCommand, ProviderSecret, WorkerDefinition
 from common.outbox import emit_saga_event
 from common.plugins.context import ExecutionScope
@@ -79,6 +83,7 @@ class _HydratedExecution:
     saga_vars: dict[str, Any]
     max_turns: int
     max_step_tokens: int | None
+    max_completion_tokens: int | None
     facts_extractors: list[dict[str, Any]]
     agent_adapter: str
 
@@ -117,6 +122,7 @@ async def _hydrate_compensation_command(
         saga_vars=dict(context_snapshot),
         max_turns=comp_step.max_turns,
         max_step_tokens=None,
+        max_completion_tokens=None,
         facts_extractors=[],
         agent_adapter="react",
     )
@@ -159,6 +165,7 @@ async def _hydrate_forward_command(
         saga_vars=dict(cmd.arguments or {}),
         max_turns=step.max_turns,
         max_step_tokens=getattr(step, "max_step_tokens", None),
+        max_completion_tokens=getattr(step, "max_completion_tokens", None),
         facts_extractors=facts_extractors,
         agent_adapter=str(getattr(step, "agent_adapter", None) or "react"),
     )
@@ -818,6 +825,8 @@ async def _prepare_worker_command_execution(
         "timing": timing_acc,
         "usage": usage_acc,
     }
+    if isinstance(cmd, DoStepCommand) and getattr(cmd, "prompt_ref", None):
+        injection_context["prompt_ref"] = cmd.prompt_ref
 
     try:
         adapter = resolve_adapter(
@@ -917,6 +926,9 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
                 output_schema=execution.hydrated.output_schema,
                 max_turns=execution.hydrated.max_turns,
                 max_step_tokens=effective_max_step_tokens(execution.hydrated.max_step_tokens),
+                max_completion_tokens=effective_max_completion_tokens(
+                    execution.hydrated.max_completion_tokens
+                ),
                 facts_extractors=execution.hydrated.facts_extractors or None,
                 agent_adapter=execution.hydrated.agent_adapter,  # type: ignore[arg-type]
             ),

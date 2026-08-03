@@ -206,6 +206,23 @@ def test_effective_max_step_tokens_env_zero_means_unlimited(monkeypatch):
     assert effective_max_step_tokens(None) is None
 
 
+def test_effective_max_completion_tokens_prefers_step_value(monkeypatch):
+    from common.execution_usage import effective_max_completion_tokens
+
+    monkeypatch.setenv("WARDEN_MAX_COMPLETION_TOKENS", "999")
+    assert effective_max_completion_tokens(50) == 50
+    assert effective_max_completion_tokens(None) == 999
+
+
+def test_effective_max_completion_tokens_env_zero_means_unlimited(monkeypatch):
+    from common.execution_usage import effective_max_completion_tokens
+
+    monkeypatch.setenv("WARDEN_MAX_COMPLETION_TOKENS", "0")
+    assert effective_max_completion_tokens(None) is None
+    monkeypatch.delenv("WARDEN_MAX_COMPLETION_TOKENS", raising=False)
+    assert effective_max_completion_tokens(None) is None
+
+
 def test_enforce_step_token_budget_raises_with_forensics():
     from common.agent_adapter import ExecutionStepError
     from common.execution_usage import WorkerUsageAccumulator, enforce_step_token_budget

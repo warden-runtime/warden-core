@@ -67,3 +67,52 @@ def test_commit_step_rejects_max_step_tokens():
                 "tools": {"allow": [{"name": "do_thing"}]},
             }
         )
+
+
+def test_reason_step_accepts_max_completion_tokens():
+    step = ReasonSagaStep.model_validate(
+        {
+            "id": "s1",
+            "kind": "reason",
+            "name": "Step",
+            "worker": "w",
+            "worker_version": "1.0.0",
+            "with": {},
+            "prompt": "p.j2",
+            "max_completion_tokens": 8192,
+        }
+    )
+    assert step.max_completion_tokens == 8192
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_reason_step_rejects_non_positive_max_completion_tokens(bad: int):
+    with pytest.raises(ValidationError):
+        ReasonSagaStep.model_validate(
+            {
+                "id": "s1",
+                "kind": "reason",
+                "name": "Step",
+                "worker": "w",
+                "worker_version": "1.0.0",
+                "with": {},
+                "prompt": "p.j2",
+                "max_completion_tokens": bad,
+            }
+        )
+
+
+def test_commit_step_rejects_max_completion_tokens():
+    with pytest.raises(ValidationError):
+        CommitSagaStep.model_validate(
+            {
+                "id": "c1",
+                "kind": "commit",
+                "name": "Commit",
+                "worker": "w",
+                "worker_version": "1.0.0",
+                "with": {},
+                "max_completion_tokens": 1000,
+                "tools": {"allow": [{"name": "do_thing"}]},
+            }
+        )

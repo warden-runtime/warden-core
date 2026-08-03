@@ -359,18 +359,21 @@ There is no built-in reviewer UI — the kernel exposes CLI and HTTP only. For c
 
 ## Step budgets
 
-`reason` steps accept two independent caps:
+`reason` steps accept independent caps:
 
 | Field | Applies to | Default | Meaning |
 |-------|------------|---------|---------|
 | `max_turns` | **`react` only** | **10** (max **200**) | Cap on back-and-forth tool/LLM rounds. **`simple`** ignores it (always one LLM call). |
 | `max_step_tokens` | **`react` and `simple`** | unlimited (omit / null) | Financial guardrail: abort when accumulated provider-reported **`total_tokens`** (prompt + completion across the step) exceed this budget. |
+| `max_completion_tokens` | **`react` and `simple`** | no Warden override (omit / null) | Per-call generation cap passed to the provider as `max_tokens`. Distinct from `max_step_tokens`. |
 
 `max_step_tokens` counts **gross physical tokens** from the provider usage metadata — not cache-discounted billed tokens. Prompt caching can make the invoice much smaller than the counted total; the budget still uses the raw counter. Compensation loops **never** enforce this budget (hydrate always passes unlimited) so rollbacks are not cut short mid-cleanup.
 
-Optional process-wide fallback: set worker env `WARDEN_MAX_STEP_TOKENS` (see [Configuration](../../getting-started/configuration.md)). It applies only when the step omits `max_step_tokens`. Unset or `0` means no fallback.
+`max_completion_tokens` limits how much the model may generate **on each LLM call** (every ReAct turn shares the same cap). Omit it to leave the provider default (Anthropic via LangChain may still default to 8192). Compensation does not set a completion cap.
 
-When the budget is exceeded, the step fails with `error_details.code: STEP_TOKEN_LIMIT_EXCEEDED` (includes `tokens_used`, `max_step_tokens`, `prompt_tokens`, `completion_tokens`). Usage from completed LLM turns is still written to `execution_usage` on `STEP_FAILED`.
+Optional process-wide fallbacks: set worker env `WARDEN_MAX_STEP_TOKENS` / `WARDEN_MAX_COMPLETION_TOKENS` (see [Configuration](../../getting-started/configuration.md)). Each applies only when the step omits the matching field. Unset or `0` means no fallback.
+
+When the step budget is exceeded, the step fails with `error_details.code: STEP_TOKEN_LIMIT_EXCEEDED` (includes `tokens_used`, `max_step_tokens`, `prompt_tokens`, `completion_tokens`). Usage from completed LLM turns is still written to `execution_usage` on `STEP_FAILED`.
 
 `timeout_seconds` is a safety clock for step execution (default **600** seconds). If a worker claims a step and then crashes or hangs, Warden waits for this window to expire, marks the step `FAILED`, and can trigger compensation — it won't auto-retry a stuck step. See [Saga recovery](../cli/saga-recovery.md) for how the open kernel vs enterprise handle timeouts and stale claims.
 
@@ -384,6 +387,7 @@ On `triage`:
     prompt: triage.j2
     max_turns: 15
     max_step_tokens: 50000
+    max_completion_tokens: 8192
     timeout_seconds: 600
     tools:
       allow:
@@ -401,6 +405,16 @@ Reason steps can require a fixed JSON shape for worker output in `output.data`. 
 |-----------------|---------------------|
 | `react` | `_submit` payload after the ReAct loop |
 | `simple` | Structured completion from the single LLM turn |
+
+### Supported schema subset
+
+Warden binds `output_schema` for **`simple`** structured output via a Pydantic subset, then validates with JSON Schema for both adapters. Supported structural pieces:
+
+- `type`: `object`, `string`, `integer`, `number`, `boolean`, `array`, and nullable unions like `["string","null"]`
+- `properties`, `required`, `items`, `description`
+- Validation-only constraints such as `minLength`, `enum`, `minimum`, `additionalProperties`
+
+**Rejected at deploy / saga start** (silent no-ops at the structured-output binder): `if`, `then`, `else`, `allOf`, `anyOf`, `oneOf`, `$ref`, `$defs`, `definitions`. Flatten conditionals into always-required fields or split steps; inline `$ref` targets.
 
 On `triage` (`react`):
 
@@ -433,9 +447,9 @@ Use [tool facts](#tool-facts-facts) when you need structured data from MCP tool 
 |---------|---------|----------|
 | Valid structured JSON | Proceeds (policy, optional HITL, context merge) | Same |
 | Missing / empty output | `no_submit_call` / `empty_submit_result` | `structured_output_failed` / `empty_structured_result` |
-| Schema mismatch | `STEP_FAILED` with validation error in `error_details` | Same |
+| Schema mismatch | Soft-retry with validation feedback (`WARDEN_LLM_SCHEMA_RETRY_*`), then `STEP_FAILED` if still invalid | Same |
 
-`max_turns` bounds ReAct iterations on **`react`** only. It does **not** grant extra attempts when schema validation fails — an invalid payload fails the step on that run.
+`max_turns` bounds ReAct tool/LLM iterations on **`react`** only. Schema soft-retries (`WARDEN_LLM_SCHEMA_RETRY_*`) are a separate attempt budget for validation failures — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback).
 
 Commit steps can also attach `output_schema` for tool result validation.
 
@@ -458,7 +472,7 @@ Each extractor has three parts:
 
 | Key | What it is | What it does |
 |-----|------------|--------------|
-| `tool` | MCP tool id | Which tool call to read from. Must match a name in `tools.allow` **and** a call the agent made during this step. If the agent never called that tool, this extractor is skipped entirely. |
+| `tool` | MCP tool id | Which tool call to read from. Must be the **original MCP tool id** (not the sanitized LLM wire name) **and** match a call the agent made during this step. If the agent never called that tool, this extractor is skipped entirely. `tools.allow` may list either the raw MCP id or its sanitized form. |
 | `into` | Bucket name you choose | Groups the extracted fields under `steps.<step_id>.facts.<into>`. Use a short, stable id (e.g. `triage_metrics`) — this is your saga-context name, not the MCP tool name. |
 | `fields` | Map of saga key → JSONPath | For each entry, the **left** key is the name you use in `when.cel` and `with` (`total_count`). The **right** value is JSONPath into the tool's JSON response (`$.totalCount`). |
 

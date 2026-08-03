@@ -191,6 +191,9 @@ class SagaStepInstanceItem(BaseModel):
     step_name: str
     step_kind: str
     order_index: int
+    forward_seq: int = 0
+    loop_id: str | None = None
+    iteration: int | None = None
     status: str
     worker: str
     worker_version: str

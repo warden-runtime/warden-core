@@ -244,6 +244,7 @@ ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **to
 | `WARDEN_REACT_CONTEXT_HEADROOM` | `0.9` | Fraction of `WARDEN_REACT_CONTEXT_LIMIT` used for φ budgets (absorbs EMA estimator lag); clamped to `(0, 1]` |
 | `WARDEN_REACT_SUBMIT_TEXT_RETRIES` | `1` | On `react` submit steps, how many soft recoveries to attempt when the model exits with prose instead of `_submit` (`0` = fail immediately) |
 | `WARDEN_MAX_STEP_TOKENS` | unset / `0` | Process-wide fallback token budget for reason steps that omit `max_step_tokens`; `0` or unset = no fallback |
+| `WARDEN_MAX_COMPLETION_TOKENS` | unset / `0` | Process-wide fallback per-call generation cap for reason steps that omit `max_completion_tokens`; `0` or unset = no Warden override |
 
 ### LLM JSON admission
 
@@ -260,7 +261,8 @@ Does **not** apply to commit-step tool `output.data` (MCP/server JSON) or non-LL
 |----------|--------|
 | Depth | Two levels: top-level fields, plus one nested level inside arrays and objects |
 | Coercions | Stringified JSON arrays/objects; scalar strings → `integer`, `number`, or `boolean` when unambiguous |
-| Nullable unions | Union `type` arrays (e.g. `["string", "null"]`) supported; string `"null"` / `"none"` (case-insensitive, trimmed) coerces to JSON `null` when the schema allows it |
+| Nullable unions | Union `type` arrays (e.g. `["string", "null"]`) and simple `anyOf`/`oneOf` `[T, null]` supported; string `"null"` / `"none"` (case-insensitive, trimmed) coerces to JSON `null` when the schema allows it |
+| Omit nulls | Present JSON `null` on a field whose schema does **not** allow null is dropped (treated as absent) before validation; intentional nulls on nullable fields are kept |
 | `string` fields | Never JSON-parsed (a string value that looks like JSON stays a string) |
 | Best-effort | Values that cannot be coerced are left unchanged; validation may still fail downstream |
 | Limitation | Schemas deeper than two levels are not recursively coerced; deeply nested mistakes may still fail |
@@ -330,9 +332,19 @@ For compliance-grade capabilities—forensic audit history, extended operational
 | `WARDEN_LLM_RETRY_BASE_DELAY_S` | `1.0` | Initial backoff delay (seconds) |
 | `WARDEN_LLM_RETRY_MAX_DELAY_S` | `60.0` | Hard cap on sleep (backoff and provider wait hints) |
 
+## LLM schema soft-retries (validation feedback)
+
+`WARDEN_LLM_SCHEMA_RETRY_*` configures a **separate** recovery path: when reason-step structured output or `_submit` fails `output_schema` validation, the worker re-invokes the LLM with the validation error in the transcript (up to N attempts, including the first). This is not the same as transient HTTP backoff above — schema soft-retries only apply to `OUTPUT_SCHEMA_VALIDATION_FAILED`, not parse failures, missing `_submit`, or MCP tool errors. Soft-retry usage still accumulates toward `max_step_tokens`.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WARDEN_LLM_SCHEMA_RETRY_ENABLED` | `true` | Toggle schema soft-retries on reason steps |
+| `WARDEN_LLM_SCHEMA_RETRY_MAX_ATTEMPTS` | `3` | Max validation attempts per step (including the first) |
+
 | If you need… | Use… |
 |--------------|------|
 | Backoff on a transient provider error during execution | `WARDEN_LLM_RETRY_*` (above) |
+| Re-invoke after bad JSON shape / schema mismatch | `WARDEN_LLM_SCHEMA_RETRY_*` (above) |
 | An operator to re-run a paused human-gated step | `warden review retry` — see [HITL review](../guides/cli/hitl-review.md) |
 | Recovery after a forward step is stuck `IN_PROGRESS` | `warden saga retry-step` — see [Saga recovery](../guides/cli/saga-recovery.md) |
 | Recovery after compensation failed or stalled | `warden saga retry-compensation` |

@@ -112,7 +112,7 @@ async def get_saga_steps(
     limit: Annotated[int | None, Query()] = None,
     offset: Annotated[int | None, Query()] = None,
 ) -> SagaStepInstanceListResponse:
-    """List step instances for one saga, ordered by order_index."""
+    """List step instances for one saga, ordered by forward_seq."""
     validate_trace_id(trace_id)
     if namespace is not None:
         validate_namespace(namespace)

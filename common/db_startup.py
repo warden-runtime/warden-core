@@ -17,9 +17,18 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
     "saga_step_instances": (
         "max_turns",
         "max_step_tokens",
+        "max_completion_tokens",
         "execution_timing",
         "pending_engine_timing",
         "execution_usage",
+        "forward_seq",
+        "loop_id",
+        "iteration",
+    ),
+    "saga_instances": (
+        "frozen_steps",
+        "loop_definitions",
+        "loop_state",
     ),
 }
 
