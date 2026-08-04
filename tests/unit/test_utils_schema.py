@@ -19,13 +19,44 @@ def test_create_pydantic_model_from_schema_integer_array() -> None:
     assert parsed.scores == [1, 2, 3]
 
 
-def test_create_pydantic_model_from_schema_rejects_extra_keys() -> None:
+def test_create_pydantic_model_from_schema_rejects_extra_keys_when_additional_properties_false() -> (
+    None
+):
     model = create_pydantic_model_from_schema(
-        {"properties": {"name": {"type": "string"}}, "required": ["name"]},
+        {
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
         "NamedOutput",
     )
     with pytest.raises(ValidationError):
         model(name="ok", unexpected=True)
+
+
+def test_create_pydantic_model_from_schema_allows_extra_keys_by_default() -> None:
+    model = create_pydantic_model_from_schema(
+        {"properties": {"name": {"type": "string"}}, "required": ["name"]},
+        "NamedOutputLoose",
+    )
+    parsed = model(name="ok", unexpected=True)
+    assert parsed.name == "ok"
+    assert parsed.model_extra == {"unexpected": True}
+
+
+def test_create_pydantic_model_from_schema_allows_extra_keys_when_additional_properties_true() -> (
+    None
+):
+    model = create_pydantic_model_from_schema(
+        {
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": True,
+        },
+        "NamedOutputAllow",
+    )
+    parsed = model(name="ok", unexpected="x")
+    assert parsed.model_extra == {"unexpected": "x"}
 
 
 def test_create_pydantic_model_from_schema_number_array() -> None:
@@ -47,10 +78,12 @@ def test_create_pydantic_model_from_schema_nested_object() -> None:
         {
             "type": "object",
             "required": ["activity"],
+            "additionalProperties": False,
             "properties": {
                 "activity": {
                     "type": "object",
                     "required": ["title", "minutes"],
+                    "additionalProperties": False,
                     "properties": {
                         "title": {"type": "string"},
                         "minutes": {"type": "integer"},

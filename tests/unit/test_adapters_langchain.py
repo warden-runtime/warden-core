@@ -14,6 +14,7 @@ from common.compensation_context import (
 from common.llm import ChatResponse, ToolCall
 from workers.adapters.langchain import (
     LangChainAdapter,
+    _build_submit_tool,
     _validate_structured_payload,
     _validate_submit_payload,
 )
@@ -382,6 +383,30 @@ async def test_run_step_raises_when_output_schema_validation_fails(mocker, monke
     finally:
         monkeypatch.delenv("WARDEN_LLM_SCHEMA_RETRY_ENABLED", raising=False)
         get_settings.cache_clear()
+
+
+def test_build_submit_tool_args_schema_matches_output_schema():
+    """_submit tool schema properties/required match step output_schema (not generic result: dict)."""
+    output_schema = {
+        "type": "object",
+        "required": ["summary", "count"],
+        "properties": {
+            "summary": {"type": "string", "description": "A summary"},
+            "count": {"type": "integer"},
+            "optional_note": {"type": "string"},
+        },
+    }
+    tool = _build_submit_tool(output_schema)
+    js = tool.args_schema.model_json_schema()
+    assert set(js["properties"]) == set(output_schema["properties"])
+    assert set(js.get("required", [])) == set(output_schema["required"])
+    assert "result" not in js["properties"]
+
+
+def test_build_submit_tool_without_output_schema_keeps_result_dict():
+    tool = _build_submit_tool(None)
+    js = tool.args_schema.model_json_schema()
+    assert set(js["properties"]) == {"result"}
 
 
 def test_validate_submit_payload_admits_stringified_boolean_and_array():

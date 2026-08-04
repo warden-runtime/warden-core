@@ -506,7 +506,9 @@ def create_pydantic_model_from_schema(
     Used for structured LLM output. Supports: string, integer, number, boolean,
     nested objects (``type: object`` with ``properties``), arrays of primitives or
     objects, and nullable unions via ``type: ["T", "null"]``. Optional fields use
-    default None. Unknown top-level keys are rejected (extra=forbid).
+    default None. Extra keys use ``extra="forbid"`` only when the schema sets
+    ``additionalProperties: false``; otherwise extras are allowed (aligned with
+    typical JSON Schema defaults).
 
     Args:
         schema: Dict with "properties" (and optional "required"). Each
@@ -522,6 +524,7 @@ def create_pydantic_model_from_schema(
 
     properties = schema.get("properties", {})
     required_fields = set(schema.get("required", []))
+    extra = "forbid" if schema.get("additionalProperties") is False else "allow"
 
     for field_name, field_info in properties.items():
         if not isinstance(field_info, dict):
@@ -537,7 +540,7 @@ def create_pydantic_model_from_schema(
 
     return create_model(
         safe_root,
-        __config__=ConfigDict(extra="forbid"),
+        __config__=ConfigDict(extra=extra),
         **fields,
     )
 

@@ -334,7 +334,9 @@ For compliance-grade capabilities—forensic audit history, extended operational
 
 ## LLM schema soft-retries (validation feedback)
 
-`WARDEN_LLM_SCHEMA_RETRY_*` configures a **separate** recovery path: when reason-step structured output or `_submit` fails `output_schema` validation, the worker re-invokes the LLM with the validation error in the transcript (up to N attempts, including the first). This is not the same as transient HTTP backoff above — schema soft-retries only apply to `OUTPUT_SCHEMA_VALIDATION_FAILED`, not parse failures, missing `_submit`, or MCP tool errors. Soft-retry usage still accumulates toward `max_step_tokens`.
+`WARDEN_LLM_SCHEMA_RETRY_*` configures a **separate attempt counter** for validation recovery: when reason-step structured output or `_submit` fails `output_schema` validation, the worker re-invokes the LLM with the validation error in the transcript (up to N attempts, including the first). This is not the same as transient HTTP backoff above — schema soft-retries only apply to `OUTPUT_SCHEMA_VALIDATION_FAILED`, not parse failures, missing `_submit`, or MCP tool errors. Soft-retry usage still accumulates toward `max_step_tokens`.
+
+On **`react`** steps, each soft-retry continues the same transcript and draws remaining iterations from the step’s `max_turns` budget (`remaining = max_turns − assistant turns already used`). A late invalid `_submit` can leave little room to recover — size `max_turns` with a bad-submit retry in mind. **`simple`** ignores `max_turns`; each soft-retry is a fresh structured completion with feedback in the message list.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
