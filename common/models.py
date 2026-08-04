@@ -84,7 +84,7 @@ class SagaStepInstance(models.Model):
     step_id = fields.CharField(max_length=128)
     step_name = fields.CharField(max_length=128)
     order_index = fields.IntField(
-        description="Blueprint-relative display index (stable across loop iterations).",
+        description="Display/execution index; minted with forward_seq (not a stable blueprint id across loop iterations).",
     )
     forward_seq = fields.IntField(
         default=0,

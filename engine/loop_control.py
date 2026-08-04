@@ -227,13 +227,16 @@ async def _evaluate_until_or_fail(
             ),
         )
     except PolicyEvaluationError as e:
+        ctx = dict(saga.context) if saga.context else {"input": {}, "steps": {}, "loops": {}}
         set_loop_context_status(
-            dict(saga.context) if saga.context else {},
+            ctx,
             loop_id,
             iteration=iteration,
             status=LOOP_STATUS_EXHAUSTED,
             max_iterations=max_iterations,
         )
+        saga.context = ctx
+        await saga.save(using_db=db_conn)
         await _fail_saga_after_successful_body(
             saga,
             step,

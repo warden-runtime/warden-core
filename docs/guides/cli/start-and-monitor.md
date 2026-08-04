@@ -69,7 +69,7 @@ warden list steps --trace-id <trace_id> [--namespace default]
 | `--watch` | Poll until every returned step is terminal (interactive terminal only) |
 | `--interval` | Seconds between polls with `--watch` (default 0.5) |
 
-Steps are ordered by `forward_seq` (execution order). The table includes `seq`, `order` (blueprint display index), `loop`, and `iter` when a row belongs to a loop body. Compensation rows show which forward step they undo in the `compensates` column.
+Steps are ordered by `forward_seq` (execution order). The table includes `seq`, `order` (display/execution index, minted alongside `forward_seq`), `loop`, and `iter` when a row belongs to a loop body. Compensation rows show which forward step they undo in the `compensates` column.
 
 Add `--json` for machine-readable output — use it to inspect `error_details` on failed steps.
 
