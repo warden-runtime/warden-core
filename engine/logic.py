@@ -121,6 +121,15 @@ async def _mark_step_skipped_when_false(
 
         step.execution_timing = merge_execution_timing(engine={"when_cel_ms": when_cel_ms})
     await step.save(using_db=db_conn)
+    # Loop body reuse of step ids: clear latest-wins so until.cel cannot see a
+    # prior iteration's output after this iteration skipped the step.
+    if step.loop_id:
+        context = dict(saga.context) if saga.context else {"input": {}, "steps": {}, "loops": {}}
+        steps_map = dict(context.get("steps") or {})
+        steps_map[step.step_id] = step_context_entry_for_saga(None)
+        context["steps"] = steps_map
+        saga.context = context
+        await saga.save(using_db=db_conn)
     await get_registry().engine.on_step_transition(
         saga=saga,
         step=step,

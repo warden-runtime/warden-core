@@ -37,13 +37,13 @@ Rules:
 - Loop bodies may contain `reason` / `commit` only (no nested loops in v1).
 - Multiple sibling loops in one saga are allowed; each has an isolated `context.loops.<id>` bucket.
 - Step ids must be unique across the whole blueprint, including every loop body.
-- `when.cel` inside a body is allowed; `SKIPPED` counts as a clean step completion.
+- `when.cel` inside a body is allowed; `SKIPPED` counts as a clean step completion and clears that step’s latest-wins `context.steps.<id>` entry for the current body pass (so `until.cel` cannot see a prior iteration’s output).
 
 ## Runtime model
 
 1. **Delay-tail materialization:** saga start creates only `[prefix] → [first loop iteration 1 body]`. Steps after the active loop are minted when `until.cel` becomes true (or when entering the next sibling loop).
 2. **`forward_seq`:** every forward row gets a monotonic execution sequence. Scheduling walks `forward_seq` ASC; compensation walks `forward_seq` DESC.
-3. **Latest-wins context:** `context.steps.<id>` reflects the latest iteration. History lives on `SagaStepInstance` rows (`loop_id`, `iteration`, `forward_seq`).
+3. **Latest-wins context:** `context.steps.<id>` reflects the latest iteration’s outcome (including an empty shell after `SKIPPED`). History lives on `SagaStepInstance` rows (`loop_id`, `iteration`, `forward_seq`).
 4. **Hard fail:** any body step failure or policy/HITL reject aborts the saga (no further iterations).
 5. **Exhaustion:** if `until` stays false after `max_iterations`, the saga fails with `LOOP_EXHAUSTED` and compensates.
 

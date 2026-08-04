@@ -6,7 +6,7 @@ pagination_next: guides/manifests/loops
 
 # Conditional branching (`when.cel`)
 
-`when.cel` is an optional [CEL](https://cel.dev/) expression on a saga step. Before Warden schedules a step to run, it evaluates this expression. If the result is **true**, the step runs normally. If **false**, Warden skips the step (`SKIPPED`) and moves on to the **next forward step** in your manifest — the next blueprint step by `order_index`, not a compensation undo row. Use it for optional paths and guards on prior output or tool facts — not for blocking a commit after arguments are resolved (that is a [Policy](policies.md) gate).
+`when.cel` is an optional [CEL](https://cel.dev/) expression on a saga step. Before Warden schedules a step to run, it evaluates this expression. If the result is **true**, the step runs normally. If **false**, Warden skips the step (`SKIPPED`) and moves on to the **next forward step** by `forward_seq` — not a compensation undo row. Use it for optional paths and guards on prior output or tool facts — not for blocking a commit after arguments are resolved (that is a [Policy](policies.md) gate).
 
 End-to-end example: [GitHub MCP demo](../../getting-started/demo-github-mcp.md) skips `post-comment` when the repo has no open issues.
 
@@ -30,7 +30,7 @@ Add a `when` block with a `cel` string on any forward step:
 |--------|----------------|
 | No `when` block | Step always runs when reached in manifest order |
 | `true` | Step scheduled (worker or commit tool runs) |
-| `false` | Step `SKIPPED`; engine advances to the next blueprint step by `order_index` |
+| `false` | Step `SKIPPED`; engine advances to the next forward step by `forward_seq` |
 | Expression error at runtime | Step `FAILED` with `WHEN_EVALUATION_FAILED` in status; saga may compensate |
 
 Invalid `when.cel` syntax is **caught when you deploy the saga** — deploy fails before any instance runs.
@@ -71,7 +71,7 @@ Both use CEL, but they are different gates:
 |--|----------------------|---------------------|
 | Question | Should this step run at all? | May this step proceed past the gate? |
 | Evaluated when | Before scheduling | `after_reason` or `before_commit` |
-| If false | Step `SKIPPED`; saga advances to next blueprint step by `order_index` | Step `FAILED`; compensation if configured |
+| If false | Step `SKIPPED`; saga advances to next forward step by `forward_seq` | Step `FAILED`; compensation if configured |
 | `steps` in binding? | Yes — full `context.steps` | No — exposes `phase`, `input`, `arguments`, `output`, `saga`, `step`, `worker`, and `tool` only ([Policies → CEL evaluation context](policies.md#cel-evaluation-context)); no `steps` |
 
 Policy CEL never receives `steps.*`. Gate on prior-step values via `with` into `arguments` (commit) or the current reason step's `output` (`after_reason`). Full policy reference: [Policies](policies.md).
