@@ -21,6 +21,11 @@ class OpenAIChatAdapter(ChatModelPort):
 
     Holds a ChatOpenAI instance; bind_tools returns a new adapter wrapping
     the bound model. ainvoke accepts our ChatMessage list and returns ChatResponse.
+
+    Prompt caching is automatic on supported models (identical prefix, ≥~1024
+    tokens). This adapter does not force the Responses API or mutate message
+    prefixes — keep system + tool schemas stable across ReAct turns (saga
+    allowlists + per-step transcripts already do that).
     """
 
     def __init__(

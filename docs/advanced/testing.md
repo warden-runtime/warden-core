@@ -46,12 +46,17 @@ WARDEN_LIVE_LLM=1 ANTHROPIC_API_KEY=sk-ant-... \
 WARDEN_LIVE_LLM=1 OPENAI_API_KEY=sk-... \
   uv run --extra worker --extra dev pytest tests/live/test_openai_live.py -q -s
 
-# Both (each file still skips if its own key is missing)
+# Azure OpenAI / Foundry
+WARDEN_LIVE_LLM=1 AZURE_OPENAI_API_KEY=... AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/ \
+  uv run --extra worker --extra dev pytest tests/live/test_azure_live.py -q -s
+
+# All live providers (each file still skips if its own credentials are missing)
 WARDEN_LIVE_LLM=1 ANTHROPIC_API_KEY=sk-ant-... OPENAI_API_KEY=sk-... \
+  AZURE_OPENAI_API_KEY=... AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/ \
   uv run --extra worker --extra dev pytest tests/live -q -s
 ```
 
-Optional model overrides: `WARDEN_ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`), `WARDEN_OPENAI_MODEL` (default `gpt-4o-mini`).
+Optional model overrides: `WARDEN_ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`), `WARDEN_OPENAI_MODEL` (default `gpt-4o-mini`), `WARDEN_AZURE_MODEL` (default `gpt-5.4-mini-1`).
 
 **While iterating** — narrow to the area you are changing:
 

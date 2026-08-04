@@ -28,7 +28,7 @@ Warden uses the word **adapter** in three places — they are not interchangeabl
 
 | Layer | Interface | Selected by | Shipped today |
 |-------|-----------|-------------|---------------|
-| **LLM adapter** | `ChatModelPort` | Worker manifest `provider` → `build_llm()` | `openai`, `anthropic`, `local`, `mock` |
+| **LLM adapter** | `ChatModelPort` | Worker manifest `provider` → `build_llm()` | `openai`, `anthropic`, `azure`, `local`, `mock` |
 | **Agent adapter** | `AgentAdapterPort` | Worker manifest `adapter` (optional, default `langchain`) → `resolve_adapter()` | `langchain` only |
 | **Reason strategy** | Inside `AgentAdapterPort` | Saga step `agent-adapter: react \| simple` (default `react`) | `react`, `simple` on `langchain` |
 | **Adapter hooks** | `AdapterHooks` (registry `adapter` slot) | `register_adapter_hooks()` at plugin install | NoOp default |

@@ -12,3 +12,11 @@ _step_create_fields
 run_step
 run_commit
 LangChainAdapter
+# ReAct memory compression + execution usage merge (golden-ratio / token guardrails)
+_normalize_worker_usage_dict
+merge_execution_usage
+_react_loop_turn
+run_react_loop
+partition_messages
+_tier1_redact
+_digest_bullets_for_group

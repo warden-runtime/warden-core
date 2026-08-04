@@ -31,12 +31,13 @@ system_prompt: |
 
 ## Providers
 
-Warden currently supports four inference providers:
+Warden currently supports five inference providers:
 
 | Provider | Credentials | Notes |
 |----------|-------------|-------|
 | `openai` | `OPENAI_API_KEY` (or `provider_secrets` row) | Any OpenAI-compatible cloud model |
 | `anthropic` | `ANTHROPIC_API_KEY` (or `provider_secrets` row) | Claude models via LangChain |
+| `azure` | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` (or `provider_secrets` for the key) | Azure OpenAI / Microsoft Foundry via OpenAI-compatible `/openai/v1/` (Chat Completions by default for prompt caching; optional Responses via `WARDEN_AZURE_USE_RESPONSES_API`); copy host+key from the deployment Code sample; `model_name` is the deployment name |
 | `local` | None — optional `WARDEN_LOCAL_LLM_BASE_URL` | OpenAI-compatible local endpoint (Ollama, vLLM, etc.). Under Compose, see [Configuration → Local LLM under Docker (Ollama)](../../getting-started/configuration.md#local-llm-under-docker-ollama) |
 | `mock` | None | Credential-free demo — [Demo: Mock LLM and MCP](../../getting-started/demo-mock-llm-and-mcp.md) |
 

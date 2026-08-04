@@ -7,6 +7,7 @@ import os
 
 from common.llm import ChatModelPort
 from workers.llm.anthropic import AnthropicChatAdapter
+from workers.llm.azure import AzureChatAdapter
 from workers.llm.mock import MockChatAdapter
 from workers.llm.openai import OpenAIChatAdapter
 from workers.llm.retrying import wrap_llm_with_retry
@@ -29,8 +30,8 @@ def build_llm(
     Build a chat model port implementation for the given provider.
 
     Args:
-        provider: Provider identifier (e.g. "openai", "local", "anthropic").
-        model_name: Model name (e.g. gpt-4o).
+        provider: Provider identifier (e.g. "openai", "local", "anthropic", "azure").
+        model_name: Model name (e.g. gpt-4o) or Azure Foundry deployment name.
         api_key: Provider API key.
         temperature: Sampling temperature.
         max_tokens: Optional per-call completion cap (provider max_tokens).
@@ -81,7 +82,15 @@ def build_llm(
                 max_tokens=max_tokens,
             )
         )
+    if normalized == "azure":
+        return wrap_llm_with_retry(
+            AzureChatAdapter(
+                model_name=model_name,
+                api_key=api_key,
+                temperature=temperature,
+            )
+        )
     logger.error("Unknown LLM provider: %s", provider)
     raise ValueError(
-        f"Unknown LLM provider: {provider!r}. Supported: openai, local, anthropic, mock."
+        f"Unknown LLM provider: {provider!r}. Supported: openai, local, anthropic, azure, mock."
     )

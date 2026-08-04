@@ -5,6 +5,7 @@ from common.config import get_settings
 from common.llm import ChatModelPort
 from workers.llm import build_llm
 from workers.llm.anthropic import AnthropicChatAdapter
+from workers.llm.azure import AzureChatAdapter, azure_v1_base_url
 from workers.llm.mock import MockChatAdapter
 from workers.llm.openai import OpenAIChatAdapter
 from workers.llm.retrying import RetryingChatModelPort
@@ -32,6 +33,15 @@ def _inner_anthropic(llm: ChatModelPort) -> AnthropicChatAdapter:
         assert isinstance(inner, AnthropicChatAdapter)
         return inner
     assert isinstance(llm, AnthropicChatAdapter)
+    return llm
+
+
+def _inner_azure(llm: ChatModelPort) -> AzureChatAdapter:
+    if isinstance(llm, RetryingChatModelPort):
+        inner = llm._inner
+        assert isinstance(inner, AzureChatAdapter)
+        return inner
+    assert isinstance(llm, AzureChatAdapter)
     return llm
 
 
@@ -161,4 +171,114 @@ def test_build_llm_anthropic_passes_max_tokens(monkeypatch):
     assert isinstance(llm, AnthropicChatAdapter)
     assert llm._max_tokens == 8192
     assert llm._llm.max_tokens == 8192
+    assert not isinstance(llm, RetryingChatModelPort)
+
+
+def test_azure_v1_base_url_appends_openai_v1():
+    assert (
+        azure_v1_base_url("https://my-resource.openai.azure.com/")
+        == "https://my-resource.openai.azure.com/openai/v1/"
+    )
+    assert (
+        azure_v1_base_url("https://my-resource.openai.azure.com")
+        == "https://my-resource.openai.azure.com/openai/v1/"
+    )
+    assert (
+        azure_v1_base_url("https://my-resource.openai.azure.com/openai/v1")
+        == "https://my-resource.openai.azure.com/openai/v1/"
+    )
+
+
+def test_azure_v1_base_url_foundry_services_ai():
+    assert (
+        azure_v1_base_url("https://my-project-resource.services.ai.azure.com")
+        == "https://my-project-resource.services.ai.azure.com/openai/v1/"
+    )
+    assert (
+        azure_v1_base_url("https://my-project-resource.services.ai.azure.com/openai/v1")
+        == "https://my-project-resource.services.ai.azure.com/openai/v1/"
+    )
+    assert (
+        azure_v1_base_url(
+            "https://my-project-resource.services.ai.azure.com/api/projects/my-project"
+        )
+        == "https://my-project-resource.services.ai.azure.com/openai/v1/"
+    )
+
+
+def test_azure_v1_base_url_empty_raises():
+    with pytest.raises(ValueError, match="AZURE_OPENAI_ENDPOINT"):
+        azure_v1_base_url("  ")
+
+
+def test_build_llm_azure_returns_retrying_wrapper_by_default(monkeypatch):
+    """build_llm('azure', ...) wraps AzureChatAdapter in RetryingChatModelPort."""
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com/")
+    monkeypatch.delenv("WARDEN_AZURE_USE_RESPONSES_API", raising=False)
+    llm = build_llm(
+        provider="azure",
+        model_name="gpt-5.4-mini-1",
+        api_key="azure-fake-key",
+    )
+    assert isinstance(llm, RetryingChatModelPort)
+    assert isinstance(llm, ChatModelPort)
+    adapter = _inner_azure(llm)
+    assert isinstance(adapter, AzureChatAdapter)
+    assert adapter._base_url == "https://example.openai.azure.com/openai/v1/"
+    # Chat Completions by default — better Azure prompt-cache behavior than Responses.
+    assert adapter._llm.use_responses_api is not True
+
+
+def test_build_llm_azure_responses_api_opt_in(monkeypatch):
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com/")
+    monkeypatch.setenv("WARDEN_AZURE_USE_RESPONSES_API", "1")
+    llm = build_llm(
+        provider="azure",
+        model_name="gpt-5.4-mini-1",
+        api_key="azure-fake-key",
+    )
+    assert _inner_azure(llm)._llm.use_responses_api is True
+
+
+def test_build_llm_azure_prompt_cache_retention(monkeypatch):
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com/")
+    monkeypatch.setenv("WARDEN_AZURE_PROMPT_CACHE_RETENTION", "24h")
+    llm = build_llm(
+        provider="azure",
+        model_name="gpt-5.4-mini-1",
+        api_key="azure-fake-key",
+    )
+    assert _inner_azure(llm)._llm.model_kwargs.get("prompt_cache_retention") == "24h"
+
+
+def test_build_llm_azure_normalizes_provider(monkeypatch):
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com/")
+    llm = build_llm(
+        provider="AZURE",
+        model_name="gpt-5.4-mini-1",
+        api_key="azure-fake-key",
+    )
+    assert isinstance(llm, RetryingChatModelPort)
+    assert isinstance(_inner_azure(llm), AzureChatAdapter)
+
+
+def test_build_llm_azure_missing_endpoint_raises(monkeypatch):
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    with pytest.raises(ValueError, match="AZURE_OPENAI_ENDPOINT"):
+        build_llm(
+            provider="azure",
+            model_name="gpt-5.4-mini-1",
+            api_key="azure-fake-key",
+        )
+
+
+def test_build_llm_azure_retry_disabled_returns_bare_adapter(monkeypatch):
+    monkeypatch.setenv("WARDEN_LLM_RETRY_ENABLED", "false")
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com/")
+    llm = build_llm(
+        provider="azure",
+        model_name="gpt-5.4-mini-1",
+        api_key="azure-fake-key",
+    )
+    assert isinstance(llm, AzureChatAdapter)
     assert not isinstance(llm, RetryingChatModelPort)

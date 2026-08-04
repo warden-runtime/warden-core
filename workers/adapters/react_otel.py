@@ -82,6 +82,16 @@ def mark_llm_response(span: trace.Span, response: ChatResponse) -> None:
     _set_usage_attrs(span, response.usage)
 
 
+def mark_memory_compression(span: trace.Span, stats: Any) -> None:
+    """Attach ``warden.memory.*`` attrs from a CompressionStats-like object."""
+    to_otel = getattr(stats, "to_otel_attrs", None)
+    attrs = to_otel() if callable(to_otel) else None
+    if not isinstance(attrs, dict):
+        return
+    for key, val in attrs.items():
+        span.set_attribute(key, val)
+
+
 @contextmanager
 def react_tool_span(*, tool_call: ToolCall, turn_index: int) -> Iterator[trace.Span]:
     tracer = trace.get_tracer("warden.react")

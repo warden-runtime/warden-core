@@ -1016,6 +1016,8 @@ def _env_var_for_provider(provider: str) -> str | None:
         return "OPENAI_API_KEY"
     if normalized == "anthropic":
         return "ANTHROPIC_API_KEY"
+    if normalized == "azure":
+        return "AZURE_OPENAI_API_KEY"
     return None
 
 

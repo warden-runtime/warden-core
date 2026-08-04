@@ -35,6 +35,68 @@ class _ScriptedLLM:
 
 
 @pytest.mark.asyncio
+async def test_memory_compression_toggle_skips_compress(monkeypatch):
+    """WARDEN_REACT_MEMORY_COMPRESSION=0 must not call compress_if_needed."""
+    calls: list[int] = []
+
+    def _track(messages, **kwargs):
+        from workers.adapters.react_memory import CompressionStats
+
+        calls.append(len(messages))
+        return list(messages), CompressionStats()
+
+    monkeypatch.setattr("workers.adapters.react_loop.compress_if_needed", _track)
+    monkeypatch.setenv("WARDEN_REACT_MEMORY_COMPRESSION", "0")
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"ok": True}},
+                        id="1",
+                    )
+                ]
+            )
+        ]
+    )
+    await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[],
+        allowed_tool_names=[],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert calls == []
+
+    monkeypatch.setenv("WARDEN_REACT_MEMORY_COMPRESSION", "1")
+    llm2 = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"ok": True}},
+                        id="2",
+                    )
+                ]
+            )
+        ]
+    )
+    await run_react_loop(
+        llm=llm2,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[],
+        allowed_tool_names=[],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_submit_mode_returns_payload_on_submit_call():
     llm = _ScriptedLLM(
         [
@@ -62,8 +124,15 @@ async def test_submit_mode_returns_payload_on_submit_call():
 
 
 @pytest.mark.asyncio
-async def test_submit_mode_raises_when_no_submit():
-    llm = _ScriptedLLM([ChatResponse(content='{"summary": "nope"}')])
+async def test_submit_mode_raises_when_no_submit(monkeypatch):
+    """After one soft retry, a second text-only exit still fails closed."""
+    monkeypatch.setenv("WARDEN_REACT_SUBMIT_TEXT_RETRIES", "1")
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(content='{"summary": "nope"}'),
+            ChatResponse(content="still no tool call"),
+        ]
+    )
     with pytest.raises(ExecutionStepError) as exc_info:
         await run_react_loop(
             llm=llm,
@@ -78,11 +147,104 @@ async def test_submit_mode_raises_when_no_submit():
     assert details.get("code") == "no_submit_call"
     assert details.get("reason") == "model_text_exit"
     assert details.get("message")
+    assert "still no tool call" in str(details.get("last_assistant_content") or "")
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_text_exit_soft_retry_then_submit(monkeypatch):
+    monkeypatch.setenv("WARDEN_REACT_SUBMIT_TEXT_RETRIES", "1")
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(content="**Bug**: I forgot to call the tool."),
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"summary": "recovered", "feasible": True}},
+                        id="1",
+                    )
+                ]
+            ),
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[],
+        allowed_tool_names=[],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert result.submit_payload == {"summary": "recovered", "feasible": True}
+    # human nudge injected between prose assistant turn and successful _submit
+    assert any(
+        m.role == "human" and "_submit" in (m.content or "") and "plain text" in (m.content or "")
+        for m in result.transcript
+    )
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_text_exit_soft_retry_disabled(monkeypatch):
+    monkeypatch.setenv("WARDEN_REACT_SUBMIT_TEXT_RETRIES", "0")
+    llm = _ScriptedLLM([ChatResponse(content='{"summary": "nope"}')])
+    with pytest.raises(ExecutionStepError) as exc_info:
+        await run_react_loop(
+            llm=llm,
+            initial_messages=[ChatMessage(role="human", content="go")],
+            mcp_tools=[],
+            allowed_tool_names=[],
+            completion_mode="submit",
+            max_turns=5,
+        )
+    details = exc_info.value.error_details or {}
+    assert details.get("reason") == "model_text_exit"
     assert '{"summary": "nope"}' in str(details.get("last_assistant_content") or "")
 
 
 @pytest.mark.asyncio
-async def test_submit_mode_model_text_exit_ignores_plain_text_tool_success():
+async def test_submit_mode_text_exit_soft_retry_on_final_turn(monkeypatch):
+    """Prose exit on the last scheduled turn still gets one bonus recovery call."""
+    monkeypatch.setenv("WARDEN_REACT_SUBMIT_TEXT_RETRIES", "1")
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(tool_calls=[ToolCall(name="_submit", args={"result": {"n": 1}}, id="1")]),
+        ]
+    )
+    # Warm path sanity: max_turns=1 with immediate submit still works
+    ok = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[],
+        allowed_tool_names=[],
+        completion_mode="submit",
+        max_turns=1,
+    )
+    assert ok.submit_payload == {"n": 1}
+
+    llm2 = _ScriptedLLM(
+        [
+            ChatResponse(content="narrating instead of submitting"),
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(name="_submit", args={"result": {"n": 2}}, id="2"),
+                ]
+            ),
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm2,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[],
+        allowed_tool_names=[],
+        completion_mode="submit",
+        max_turns=1,
+    )
+    assert result.submit_payload == {"n": 2}
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_model_text_exit_ignores_plain_text_tool_success(monkeypatch):
+    monkeypatch.setenv("WARDEN_REACT_SUBMIT_TEXT_RETRIES", "1")
     mock_tool = MagicMock()
     mock_tool.name = "sandbox_write"
     mock_tool.ainvoke = AsyncMock(return_value="Successfully wrote file to /tmp/foo")
@@ -91,6 +253,7 @@ async def test_submit_mode_model_text_exit_ignores_plain_text_tool_success():
         [
             ChatResponse(tool_calls=[ToolCall(name="sandbox_write", args={}, id="1")]),
             ChatResponse(content="I completed the sandbox work but forgot _submit."),
+            ChatResponse(content="still forgot _submit after nudge"),
         ]
     )
     with pytest.raises(ExecutionStepError) as exc_info:
@@ -105,7 +268,7 @@ async def test_submit_mode_model_text_exit_ignores_plain_text_tool_success():
     details = exc_info.value.error_details or {}
     assert details.get("reason") == "model_text_exit"
     assert not details.get("last_tool_errors")
-    assert "forgot _submit" in str(details.get("last_assistant_content") or "")
+    assert "still forgot _submit" in str(details.get("last_assistant_content") or "")
 
 
 def test_collect_last_tool_errors_skips_plain_text_success():

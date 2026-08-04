@@ -123,12 +123,16 @@ You normally do not run `make migrate` for a first boot — the one-shot **migra
 | `ENGINE_URL` | **host CLI only** | `http://127.0.0.1:8000` from your machine (published port). Engine and worker containers do **not** use this variable—they coordinate through Postgres. If you run the CLI inside the Compose network, use `http://engine:8000` instead of loopback |
 | `OPENAI_API_KEY` | worker | when `provider: openai` — not required for `provider: local` or `provider: mock`. Checked at **step runtime**, not at deploy |
 | `ANTHROPIC_API_KEY` | worker | when `provider: anthropic` — Claude via LangChain. Checked at **step runtime**, not at deploy |
+| `AZURE_OPENAI_API_KEY` | worker | when `provider: azure` — Azure OpenAI / Foundry API key. Checked at **step runtime**, not at deploy |
+| `AZURE_OPENAI_ENDPOINT` | worker | when `provider: azure` — Foundry / Azure OpenAI host from the deployment Code sample (e.g. `https://YOUR-RESOURCE.services.ai.azure.com` or `https://YOUR-RESOURCE.openai.azure.com/`). Project portal URLs (`…/api/projects/…`) are normalized. Warden uses `/openai/v1/`. Required at step runtime |
+| `WARDEN_AZURE_USE_RESPONSES_API` | worker | when `provider: azure` — set `1`/`true` to use the Responses API; default is Chat Completions (preferred for Azure prompt-cache hits) |
+| `WARDEN_AZURE_PROMPT_CACHE_RETENTION` | worker | when `provider: azure` — optional `in_memory` or `24h` passed as `prompt_cache_retention` (Azure has no Anthropic-style cache breakpoints) |
 | `LOGGING_LEVEL` | engine, worker | Root JSON log level (`INFO` default; use `DEBUG` for ReAct transcript lines on `warden.react.transcript`) |
 | `WARDEN_LOCAL_LLM_BASE_URL` | worker | OpenAI-compatible local endpoint (optional; defaults to `http://localhost:11434/v1`) |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | worker | GitHub MCP demo only (stdio `env_inherit`) |
 | `${ENV:…}` in worker manifest | worker | SSE MCP auth — names like `COMPANY_MCP_TOKEN` referenced in `tool_sources[].headers`; set on worker, not in YAML |
 
-Under Compose, `.env` is injected when a container **starts**. After you add or change worker-scoped variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `WARDEN_LOCAL_LLM_BASE_URL`, MCP tokens), restart the worker — not the engine: `docker compose up -d worker`. A step that already failed with missing credentials stays failed until you retry it or start a new saga instance.
+Under Compose, `.env` is injected when a container **starts**. After you add or change worker-scoped variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `WARDEN_LOCAL_LLM_BASE_URL`, MCP tokens), restart the worker — not the engine: `docker compose up -d worker`. A step that already failed with missing credentials stays failed until you retry it or start a new saga instance.
 
 For **hosted SSE MCP**, declare headers in the worker manifest with `${ENV:VAR}` placeholders and set `VAR` on the worker process. Example worker manifest:
 
@@ -234,7 +238,11 @@ ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **to
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WORKER_MAX_IN_FLIGHT` | `1` | Max concurrent step commands handled by **one worker process** (outbox consumer semaphore) |
-| `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping |
+| `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping. Also used as the Tier 1 memory-redaction threshold |
+| `WARDEN_REACT_MEMORY_COMPRESSION` | `1` | Master switch for golden-ratio ReAct memory compression; set `0` / `false` / `off` to disable (A/B vs unbounded transcript) |
+| `WARDEN_REACT_CONTEXT_LIMIT` | unset / `0` | Optional token-axis budget for golden-ratio ReAct memory compression; `0` or unset = turn-axis only (when compression is on) |
+| `WARDEN_REACT_CONTEXT_HEADROOM` | `0.9` | Fraction of `WARDEN_REACT_CONTEXT_LIMIT` used for φ budgets (absorbs EMA estimator lag); clamped to `(0, 1]` |
+| `WARDEN_REACT_SUBMIT_TEXT_RETRIES` | `1` | On `react` submit steps, how many soft recoveries to attempt when the model exits with prose instead of `_submit` (`0` = fail immediately) |
 | `WARDEN_MAX_STEP_TOKENS` | unset / `0` | Process-wide fallback token budget for reason steps that omit `max_step_tokens`; `0` or unset = no fallback |
 | `WARDEN_MAX_COMPLETION_TOKENS` | unset / `0` | Process-wide fallback per-call generation cap for reason steps that omit `max_completion_tokens`; `0` or unset = no Warden override |
 

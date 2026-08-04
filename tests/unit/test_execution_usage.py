@@ -111,6 +111,39 @@ def test_worker_usage_accumulator_sums_turns(memory_span_exporter):
     assert spans[-1].attributes["usage.worker.llm_calls"] == 2
 
 
+def test_worker_usage_accumulator_memory_stats():
+    from workers.adapters.react_memory import CompressionStats
+
+    acc = WorkerUsageAccumulator()
+    acc.add_memory_stats(
+        CompressionStats(
+            compressed=True,
+            deepest_tier=2,
+            groups_evicted=3,
+            estimated_tokens_saved=100,
+            tier1_redactions=1,
+        )
+    )
+    acc.add_memory_stats(
+        CompressionStats(
+            compressed=True,
+            deepest_tier=3,
+            groups_evicted=1,
+            estimated_tokens_saved=50,
+        )
+    )
+    wire = acc.to_wire()
+    assert wire["worker"]["memory"] == {
+        "compressions": 2,
+        "groups_evicted": 4,
+        "estimated_tokens_saved": 150,
+        "max_tier": 3,
+        "tier1_redactions": 1,
+    }
+    merged = merge_execution_usage(worker=wire["worker"])
+    assert merged["worker"]["memory"]["max_tier"] == 3
+
+
 def test_worker_usage_from_event_and_merge():
     assert worker_usage_from_event(None) == {}
     assert worker_usage_from_event({"prompt_tokens": 3, "total_tokens": 3})["prompt_tokens"] == 3

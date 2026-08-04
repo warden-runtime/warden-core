@@ -101,7 +101,7 @@ Contrast with the GitHub triage step (default `react`, tools + `_submit`):
 
 | `agent-adapter` | Typical `error_details` | Meaning |
 |-----------------|---------------------------|---------|
-| `react` | `no_submit_call` | Model finished with text only — no `_submit` |
+| `react` | `no_submit_call` | Model finished with text only — no `_submit` (after optional soft text-exit retry; see `WARDEN_REACT_SUBMIT_TEXT_RETRIES`) |
 | `react` | `empty_submit_result` | `_submit` called with `{}` |
 | `simple` | `structured_output_failed` | Model response was not parseable JSON (common on weak local models) |
 | `simple` | `empty_structured_result` | Parsed JSON object was empty |

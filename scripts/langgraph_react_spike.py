@@ -12,13 +12,17 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # LangGraph and LangChain (spike is self-contained; no workers/engine imports)
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
 
 # Optional: real LLM for full exploration
 try:
@@ -34,7 +38,6 @@ def _create_llm():
         return ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)
 
     # Mock: minimal chat model that returns one AIMessage with _submit tool_call then content-only
-    from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.outputs import ChatGeneration, ChatResult
 
