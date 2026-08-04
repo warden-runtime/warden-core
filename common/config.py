@@ -134,6 +134,25 @@ class Settings(BaseSettings):
         validation_alias="OUTBOX_REAP_BATCH_SIZE",
         description="Max outbox rows reaped per maintenance tick per topic.",
     )
+    outbox_poll_interval_s: float = Field(
+        default=1.0,
+        gt=0,
+        validation_alias="OUTBOX_POLL_INTERVAL_S",
+        description=(
+            "Postgres outbox consumer idle wait / safety-poll interval seconds. "
+            "When OUTBOX_WAKE_ENABLED is false, sleep this long after an empty poll; "
+            "when wake is on, this is the max wait for LISTEN/NOTIFY before polling again."
+        ),
+    )
+    outbox_wake_enabled: bool = Field(
+        default=False,
+        validation_alias="OUTBOX_WAKE_ENABLED",
+        description=(
+            "When true, Postgres outbox consumers LISTEN for topic-scoped NOTIFY wakes "
+            "instead of only sleeping between empty polls (safety poll still uses "
+            "OUTBOX_POLL_INTERVAL_S)."
+        ),
+    )
     worker_max_in_flight: int = Field(
         default=1,
         ge=1,

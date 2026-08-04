@@ -199,11 +199,16 @@ class DefaultMessagingFactory:
         *,
         max_in_flight: int = 1,
     ) -> MessageQueueConsumer:
+        from common.config import get_settings
+
+        settings = get_settings()
         return PostgresQueueConsumer(
             topic=topic,
             group_id=group_id,
             handler=handler,
             max_in_flight=max_in_flight,
+            poll_interval=settings.outbox_poll_interval_s,
+            wake_enabled=settings.outbox_wake_enabled,
         )
 
 

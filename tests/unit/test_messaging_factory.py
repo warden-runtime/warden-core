@@ -75,3 +75,17 @@ def test_custom_factory_create_consumer_records_args():
 def test_default_factory_passes_max_in_flight_to_consumer():
     consumer = get_registry().messaging.create_consumer("t", "g", _noop_handler, max_in_flight=3)
     assert consumer._max_in_flight == 3
+
+
+def test_default_factory_passes_poll_and_wake_from_settings(monkeypatch):
+    monkeypatch.setenv("OUTBOX_POLL_INTERVAL_S", "0.5")
+    monkeypatch.setenv("OUTBOX_WAKE_ENABLED", "true")
+    from common.config import get_settings
+
+    get_settings.cache_clear()
+    reset_registry()
+    consumer = get_registry().messaging.create_consumer("t", "g", _noop_handler)
+    assert isinstance(consumer, PostgresQueueConsumer)
+    assert consumer._poll_interval == 0.5
+    assert consumer._wake_enabled is True
+    get_settings.cache_clear()

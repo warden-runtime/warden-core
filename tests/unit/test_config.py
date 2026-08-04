@@ -33,3 +33,18 @@ def test_llm_schema_retry_settings_from_env(monkeypatch):
     s = Settings()
     assert s.llm_schema_retry_enabled is False
     assert s.llm_schema_retry_max_attempts == 2
+
+
+def test_outbox_poll_and_wake_settings_defaults():
+    get_settings.cache_clear()
+    s = Settings()
+    assert s.outbox_poll_interval_s == 1.0
+    assert s.outbox_wake_enabled is False
+
+
+def test_outbox_poll_and_wake_settings_from_env(monkeypatch):
+    monkeypatch.setenv("OUTBOX_POLL_INTERVAL_S", "0.25")
+    monkeypatch.setenv("OUTBOX_WAKE_ENABLED", "true")
+    s = Settings()
+    assert s.outbox_poll_interval_s == 0.25
+    assert s.outbox_wake_enabled is True

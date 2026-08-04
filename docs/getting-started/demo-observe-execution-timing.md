@@ -69,7 +69,9 @@ On reason steps with live inference, the envelope grows with LLM + tool time plu
 
 :::note
 
-The default Postgres outbox consumer polls every second between reads. Even when the worker finishes in a few milliseconds, `dispatch_to_ingest_ms` still counts the **whole step** — worker claim and execution, the worker writing its result to the outbox, and the engine picking that result up. On fast mock or commit steps that total often lands between a few hundred milliseconds and about two seconds because of poll jitter, not because the worker was slow.
+With `OUTBOX_WAKE_ENABLED=true` (default in `.env.example` for local compose), the Postgres outbox consumer waits on topic-scoped `LISTEN/NOTIFY` after an empty poll, with `OUTBOX_POLL_INTERVAL_S` (default 1s) as a **safety** timeout. Under load, claim latency is roughly DB RTT — not half a poll interval. When wake is off, the consumer sleeps `OUTBOX_POLL_INTERVAL_S` after every empty poll (legacy behavior).
+
+Even on a fast mock step, `dispatch_to_ingest_ms` still counts the **whole step** — worker claim and execution, the worker writing its result to the outbox, and the engine picking that result up. With wake enabled that handoff is usually tens of milliseconds locally; with wake off, poll jitter often lands between a few hundred milliseconds and about two seconds.
 
 :::
 
@@ -77,7 +79,7 @@ The default Postgres outbox consumer polls every second between reads. Even when
 
 | Observation | Likely cause | What to do |
 |-------------|--------------|------------|
-| `dispatch_to_ingest_ms` a few seconds on mock/commit steps; `llm_ms` absent or ~0 | Poll jitter + empty envelope (normal floor) | Expected on dev stack — see [outbox note](#outbox-polling-on-the-dev-stack). |
+| `dispatch_to_ingest_ms` a few seconds on mock/commit steps; `llm_ms` absent or ~0 | Poll jitter + empty envelope (wake off or safety-poll tail) | Expected when wake is off — see [outbox note](#outbox-polling-on-the-dev-stack). With wake on, expect much lower handoff. |
 | `dispatch_to_ingest_ms` seconds to tens of seconds on reason steps; `llm_ms` / `tool_ms` explain most of it | Envelope includes live inference and MCP (normal) | Expected on [Quickstart](demo-quickstart.md) and [GitHub MCP](demo-github-mcp.md). The envelope roughly tracks worker buckets plus poll jitter — 5s, 10s, and 15s are all normal on heavy ReAct steps. Tune using `worker.llm_ms` and `worker.tool_ms`. |
 | `dispatch_to_ingest_ms` high but **out of proportion** to worker buckets (e.g. 30s+ envelope while `llm_ms` / `tool_ms` are absent or ~0), or step stuck `IN_PROGRESS` | Worker down, outbox not consumed, or hung step — not slow inference | `make doctor`; worker/engine logs; see [Troubleshooting → Local stack diagnostics](troubleshooting.md#local-stack-diagnostics). |
 | `llm_ms` absent or ~0 on a live-worker run | Mock provider still deployed, or sub-ms work dropped | Redeploy live worker from Quickstart; re-read timing. |

@@ -1,17 +1,26 @@
 """
-Postgres adapter: write to OutboxEvent (status=PENDING), poll with SKIP LOCKED.
+Postgres adapter: write to OutboxEvent (status=PENDING), claim with SKIP LOCKED,
+optional LISTEN/NOTIFY idle wake.
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
+import asyncpg
 from tortoise import connections
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.exceptions import IntegrityError
+from tortoise.transactions import in_transaction
 
+from common.config import get_settings
+from common.messaging.notify import topic_to_notify_channel
 from common.messaging.protocols import MessageQueueConsumer, MessageQueueProducer
 from common.models import OutboxEvent, OutboxStatus
 from common.outbox_timestamps import utc_now
@@ -50,6 +59,15 @@ def _assemble_consumer_payload(row: dict[str, Any]) -> dict[str, Any]:
         payload = {**payload, "trace_context": trace_context}
 
     return payload
+
+
+def _asyncpg_dsn(db_url: str) -> str:
+    """Normalize Tortoise-style postgres URLs for asyncpg.connect."""
+    parsed = urlparse(db_url)
+    scheme = parsed.scheme.split("+", 1)[0].lower()
+    if scheme in ("postgres", "postgresql"):
+        return urlunparse(parsed._replace(scheme="postgresql"))
+    return db_url
 
 
 class PostgresQueueProducer(MessageQueueProducer):
@@ -112,7 +130,11 @@ class PostgresQueueProducer(MessageQueueProducer):
 
 
 class PostgresQueueConsumer(MessageQueueConsumer):
-    """Polls outbox with SKIP LOCKED, marks IN_PROGRESS, invokes handler, then COMPLETED/FAILED."""
+    """Claim outbox with SKIP LOCKED, invoke handler, then COMPLETED/FAILED.
+
+    Idle wait uses a fixed poll interval, or (when wake_enabled) LISTEN/NOTIFY on a
+    dedicated asyncpg connection with the poll interval as a safety timeout.
+    """
 
     def __init__(
         self,
@@ -123,6 +145,7 @@ class PostgresQueueConsumer(MessageQueueConsumer):
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         batch_size: int = DEFAULT_BATCH_SIZE,
         max_in_flight: int = 1,
+        wake_enabled: bool = False,
     ) -> None:
         if max_in_flight < 1:
             raise ValueError("max_in_flight must be >= 1")
@@ -130,9 +153,14 @@ class PostgresQueueConsumer(MessageQueueConsumer):
         self._poll_interval = poll_interval
         self._batch_size = batch_size
         self._max_in_flight = max_in_flight
+        self._wake_enabled = wake_enabled
         self._semaphore = asyncio.Semaphore(max_in_flight)
         self._in_flight: set[asyncio.Task[None]] = set()
         self._shutdown = asyncio.Event()
+        self._notify_event = asyncio.Event()
+        self._listen_conn: asyncpg.Connection | None = None
+        self._listen_channel: str | None = None
+        self._listen_callback: Any | None = None
 
     def _track_task(self, task: asyncio.Task[None]) -> None:
         self._in_flight.add(task)
@@ -150,26 +178,36 @@ class PostgresQueueConsumer(MessageQueueConsumer):
     async def start(self) -> None:
         self._shutdown.clear()
         logger.info(
-            "Postgres consumer started topic=%s group_id=%s max_in_flight=%d",
+            "Postgres consumer started topic=%s group_id=%s max_in_flight=%d wake_enabled=%s",
             self.topic,
             self.group_id,
             self._max_in_flight,
+            self._wake_enabled,
         )
         try:
+            if self._wake_enabled:
+                await self._ensure_listen()
             while not self._shutdown.is_set():
                 try:
-                    await self._poll_and_dispatch()
+                    claimed = await self._poll_and_dispatch()
                 except asyncio.CancelledError:
-                    break
+                    raise
                 except Exception as e:
                     logger.exception("Consumer loop error: %s", e)
+                    claimed = 0
+                if claimed > 0:
+                    continue
                 try:
-                    await asyncio.wait_for(self._shutdown.wait(), timeout=self._poll_interval)
-                except TimeoutError:
-                    pass
+                    await self._idle_wait()
+                except asyncio.CancelledError:
+                    raise
+        except asyncio.CancelledError:
+            self._shutdown.set()
+            raise
         finally:
+            await self._close_listen()
             await self._drain_in_flight()
-        logger.info("Postgres consumer stopped topic=%s", self.topic)
+            logger.info("Postgres consumer stopped topic=%s", self.topic)
 
     async def stop(self) -> None:
         self._shutdown.set()
@@ -181,6 +219,106 @@ class PostgresQueueConsumer(MessageQueueConsumer):
         for result in results:
             if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
                 logger.exception("In-flight handler error during drain: %s", result)
+
+    async def _ensure_listen(self) -> None:
+        if not self._wake_enabled:
+            return
+        if self._listen_conn is not None and not self._listen_conn.is_closed():
+            return
+        try:
+            await self._open_listen()
+        except Exception:
+            logger.warning(
+                "Outbox LISTEN setup failed topic=%s; falling back to poll-only idle wait",
+                self.topic,
+                exc_info=True,
+            )
+            await self._close_listen()
+
+    async def _open_listen(self) -> None:
+        await self._close_listen()
+        dsn = _asyncpg_dsn(get_settings().db_url)
+        channel = topic_to_notify_channel(self.topic)
+        conn = await asyncpg.connect(dsn)
+        notify_event = self._notify_event
+
+        def _on_notify(
+            _connection: asyncpg.Connection,
+            _pid: int,
+            _chan: str,
+            _payload: str,
+        ) -> None:
+            notify_event.set()
+
+        await conn.add_listener(channel, _on_notify)
+        self._listen_conn = conn
+        self._listen_channel = channel
+        self._listen_callback = _on_notify
+        logger.info(
+            "Outbox LISTEN enabled channel=%s topic=%s",
+            channel,
+            self.topic,
+        )
+
+    async def _close_listen(self) -> None:
+        conn = self._listen_conn
+        channel = self._listen_channel
+        callback = self._listen_callback
+        self._listen_conn = None
+        self._listen_channel = None
+        self._listen_callback = None
+        if conn is None:
+            return
+        try:
+            if channel is not None and callback is not None and not conn.is_closed():
+                with suppress(Exception):
+                    await conn.remove_listener(channel, callback)
+        finally:
+            if not conn.is_closed():
+                with suppress(Exception):
+                    await conn.close()
+
+    async def _idle_wait(self) -> None:
+        """Wait for shutdown, optional NOTIFY, or safety-poll timeout."""
+        if self._shutdown.is_set():
+            return
+
+        if self._wake_enabled:
+            await self._ensure_listen()
+
+        listeners_ok = (
+            self._wake_enabled
+            and self._listen_conn is not None
+            and not self._listen_conn.is_closed()
+        )
+        if listeners_ok:
+            self._notify_event.clear()
+
+        waiters: list[asyncio.Task[bool]] = [
+            asyncio.create_task(self._shutdown.wait(), name="outbox-shutdown-wait"),
+        ]
+        if listeners_ok:
+            waiters.append(
+                asyncio.create_task(self._notify_event.wait(), name="outbox-notify-wait"),
+            )
+        try:
+            done, pending = await asyncio.wait(
+                waiters,
+                timeout=self._poll_interval,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                with suppress(asyncio.CancelledError, Exception):
+                    task.result()
+        except asyncio.CancelledError:
+            for task in waiters:
+                task.cancel()
+            await asyncio.gather(*waiters, return_exceptions=True)
+            raise
 
     async def _set_outbox_status(
         self,
@@ -196,11 +334,10 @@ class PostgresQueueConsumer(MessageQueueConsumer):
         return await q.update(status=status, updated_at=now)
 
     async def _process_row(self, row: dict[str, Any]) -> None:
+        """Handle a row already claimed (status IN_PROGRESS)."""
         async with self._semaphore:
             outbox_id = row["id"]
             payload = await asyncio.to_thread(_assemble_consumer_payload, row)
-
-            await self._set_outbox_status(outbox_id, status=OutboxStatus.IN_PROGRESS)
 
             try:
                 await self.handler(payload)
@@ -227,25 +364,38 @@ class PostgresQueueConsumer(MessageQueueConsumer):
                         outbox_id,
                     )
 
-    async def _poll_and_dispatch(self) -> None:
-        connection = connections.get("default")
-        sql = """
-            SELECT id, payload, trace_context, namespace, saga_trace_id, step_span_id, event_type
-            FROM outbox_events
-            WHERE destination_topic = $1 AND status = $2
-            ORDER BY created_at
-            LIMIT $3
-            FOR UPDATE SKIP LOCKED
+    async def _poll_and_dispatch(self) -> int:
+        """Atomically claim PENDING rows (→ IN_PROGRESS) and spawn handlers.
+
+        Returns the number of claimed rows. Claim and status flip share one
+        transaction so drain-on-claim cannot double-dispatch the same row.
         """
-        rows = await connection.execute_query_dict(
-            sql,
-            [self.topic, OutboxStatus.PENDING.value, self._batch_size],
-        )
-        if not rows:
-            return
+        async with in_transaction() as conn:
+            sql = """
+                SELECT id, payload, trace_context, namespace, saga_trace_id, step_span_id, event_type
+                FROM outbox_events
+                WHERE destination_topic = $1 AND status = $2
+                ORDER BY created_at
+                LIMIT $3
+                FOR UPDATE SKIP LOCKED
+            """
+            rows = await conn.execute_query_dict(
+                sql,
+                [self.topic, OutboxStatus.PENDING.value, self._batch_size],
+            )
+            if not rows:
+                return 0
+            ids = [row["id"] for row in rows]
+            now = utc_now()
+            await (
+                OutboxEvent.filter(id__in=ids)
+                .using_db(conn)
+                .update(status=OutboxStatus.IN_PROGRESS, updated_at=now)
+            )
 
         for row in rows:
             if self._shutdown.is_set():
                 break
             task = asyncio.create_task(self._process_row(row))
             self._track_task(task)
+        return len(rows)

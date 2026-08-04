@@ -25,7 +25,7 @@ async def _seed_pending_rows(count: int) -> None:
 
 
 async def _dispatch_pending_rows(consumer: PostgresQueueConsumer) -> None:
-    """Spawn handler tasks for pending rows (ORM fetch; avoids Postgres-only SKIP LOCKED)."""
+    """Spawn handler tasks for pending rows (ORM claim; avoids Postgres-only SKIP LOCKED)."""
     events = (
         await OutboxEvent.filter(
             destination_topic=consumer.topic,
@@ -37,6 +37,8 @@ async def _dispatch_pending_rows(consumer: PostgresQueueConsumer) -> None:
     for event in events:
         if consumer._shutdown.is_set():
             break
+        # Mirror atomic claim: handlers expect rows already IN_PROGRESS.
+        await OutboxEvent.filter(id=event.id).update(status=OutboxStatus.IN_PROGRESS)
         row = {
             "id": event.id,
             "payload": event.payload,
@@ -152,9 +154,10 @@ async def test_start_drains_in_flight_on_stop(monkeypatch: pytest.MonkeyPatch) -
     )
     await _seed_pending_rows(2)
 
-    async def _poll_once_then_stop(self: PostgresQueueConsumer) -> None:
+    async def _poll_once_then_stop(self: PostgresQueueConsumer) -> int:
         await _dispatch_pending_rows(self)
         self._shutdown.set()
+        return 0
 
     monkeypatch.setattr(PostgresQueueConsumer, "_poll_and_dispatch", _poll_once_then_stop)
     await consumer.start()

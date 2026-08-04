@@ -147,7 +147,9 @@ graph LR
 
 Default topics: `engine-events` (worker → engine) and `worker-commands` (engine → worker).
 
-The consumer processes **`PENDING` rows only**. A handler exception marks the row `FAILED` in one pass — there is no infinite retry on a single row. If a process crashes after claiming a row but before finishing, the row stays **`IN_PROGRESS`** until background outbox reap resets it ([Configuration — recovery timeouts](../getting-started/configuration.md#recovery-timeouts)) or an operator runs recovery commands. Full ladder: [Saga recovery](../guides/cli/saga-recovery.md).
+The consumer processes **`PENDING` rows only**. Claim flips matching rows to **`IN_PROGRESS` in the same transaction** as `SELECT … FOR UPDATE SKIP LOCKED`, then runs the handler. A handler exception marks the row `FAILED` in one pass — there is no infinite retry on a single row. If a process crashes after claiming a row but before finishing, the row stays **`IN_PROGRESS`** until background outbox reap resets it ([Configuration — recovery timeouts](../getting-started/configuration.md#recovery-timeouts)) or an operator runs recovery commands. Full ladder: [Saga recovery](../guides/cli/saga-recovery.md).
+
+Optional **LISTEN/NOTIFY** idle wake (`OUTBOX_WAKE_ENABLED`): a DB trigger notifies a topic-scoped channel when rows become `PENDING` (insert or requeue). Consumers hold a **dedicated** asyncpg connection for `LISTEN` only; claim/update stay on the Tortoise pool. NOTIFY is a hint — delivery remains at-least-once via the outbox table and a safety poll (`OUTBOX_POLL_INTERVAL_S`). See [Configuration → Recovery timeouts](../getting-started/configuration.md#recovery-timeouts).
 
 Schema is **migration-only** — services do not auto-generate tables at runtime. The engine and worker verify required tables at startup and fail fast if migrations are missing. Apply order and backfill notes: [Migrations and schema](migrations-and-schema.md).
 

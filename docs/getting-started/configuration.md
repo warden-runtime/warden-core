@@ -295,6 +295,8 @@ Background loops in the worker and engine processes recover from worker crashes 
 | `OUTBOX_STALE_IN_PROGRESS_SECONDS` | `1800` | engine, worker | Reap outbox rows stuck `IN_PROGRESS` |
 | `OUTBOX_REAP_INTERVAL_SECONDS` | `60` | engine, worker | Outbox reap tick interval |
 | `OUTBOX_REAP_BATCH_SIZE` | `20` | engine, worker | Max rows reaped per tick per topic |
+| `OUTBOX_POLL_INTERVAL_S` | `1.0` | engine, worker | Idle wait / safety-poll interval for the Postgres outbox consumer |
+| `OUTBOX_WAKE_ENABLED` | `false` | engine, worker | When `true`, wake on topic-scoped `LISTEN/NOTIFY` after empty polls (payload still in `outbox_events`) |
 
 Workers use `claim_token` fencing: superseded handlers log `claim_superseded` with `execution_duration_s` instead of emitting duplicate results. Frequent supersession within a few seconds means these timeouts are too low.
 
