@@ -6,7 +6,8 @@ COMPOSE ?= docker compose
 .PHONY: help sync-dev up up-db stop down clean reset \
 	build rebuild logs ps doctor migrate migrate-compose \
 	run-engine \
-	check check-boundary lint ruff radon typecheck audit-deps audit-semgrep audit tests upgrade docs-api
+	check check-boundary lint ruff radon typecheck audit-deps audit-semgrep audit tests upgrade \
+	docs-api docs-check
 
 .DEFAULT_GOAL := help
 
@@ -114,7 +115,7 @@ lint: ruff radon typecheck
 check-boundary:
 	@./scripts/check_open_core_boundary.sh
 
-check: lint check-boundary
+check: lint check-boundary docs-check
 
 PIP_AUDIT_CACHE ?= .pip-audit-cache
 
@@ -132,6 +133,10 @@ audit: audit-deps audit-semgrep
 docs-api: ## Export OpenAPI JSON and generate docs/api reference MDX (requires website npm install)
 	uv run --extra engine python scripts/export_openapi.py
 	cd website && npm run gen-api-docs -- engine
+
+docs-check: ## Verify docs deploy gates (OpenAPI drift + Docusaurus build)
+	uv run --extra engine python scripts/export_openapi.py --check
+	cd website && npm ci && npm run build
 
 tests: ## Run OSS tests with coverage (requires Docker for Postgres tests, or WARDEN_TEST_POSTGRES_URL)
 	@echo "Running test suite with coverage (includes Postgres tests via Docker testcontainers)..."

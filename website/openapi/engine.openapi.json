@@ -495,6 +495,33 @@
             "description": "Structured failure metadata (code, message, tool) when the step errors.",
             "title": "Error Details"
           },
+          "forward_seq": {
+            "default": 0,
+            "title": "Forward Seq",
+            "type": "integer"
+          },
+          "iteration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration"
+          },
+          "loop_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loop Id"
+          },
           "namespace": {
             "title": "Namespace",
             "type": "string"
@@ -659,6 +686,33 @@
             ],
             "description": "Structured failure metadata (code, message, tool) when the step errors.",
             "title": "Error Details"
+          },
+          "forward_seq": {
+            "default": 0,
+            "title": "Forward Seq",
+            "type": "integer"
+          },
+          "iteration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration"
+          },
+          "loop_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loop Id"
           },
           "namespace": {
             "title": "Namespace",
@@ -1571,7 +1625,7 @@
     },
     "/v1/sagas/steps": {
       "get": {
-        "description": "List step instances for one saga, ordered by order_index.",
+        "description": "List step instances for one saga, ordered by forward_seq.",
         "operationId": "get_saga_steps_v1_sagas_steps_get",
         "parameters": [
           {
