@@ -114,7 +114,7 @@ Even with a custom prompt, the engine's core safety rules still apply — your a
 
 This setting actually lives on each individual **`kind: reason` step** inside your saga YAML — not here on the worker manifest.
 
-For a standard **`react`** step, your agent will keep calling tools and talking to the LLM until it decides to run the special `_submit` tool. `max_turns` acts as a safety valve to cap those back-and-forth rounds (default is **10**, max is **200**). If you use a **`simple`** step, it only makes a single LLM call and ignores this cap entirely.
+For a standard **`react`** step, your agent will keep calling tools and talking to the LLM until it decides to run the special `_submit` tool. `max_turns` acts as a safety valve to cap those back-and-forth rounds (default is **10**, max is **200**). Invalid `_submit` payloads that trigger schema soft-retries still draw from this same turn budget — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback). If you use a **`simple`** step, it only makes a single LLM call and ignores this cap entirely.
 
 Most of your undo paths will just call a single MCP tool without any agent logic at all. But if you have a complex, multi-tool undo sequence that needs a short reasoning loop, you can set a custom `max_turns` value inside your compensation YAML file too.
 

@@ -412,7 +412,8 @@ Warden binds `output_schema` for **`simple`** structured output via a Pydantic s
 
 - `type`: `object`, `string`, `integer`, `number`, `boolean`, `array`, and nullable unions like `["string","null"]`
 - `properties`, `required`, `items`, `description`
-- Validation-only constraints such as `minLength`, `enum`, `minimum`, `additionalProperties`
+- Validation-only constraints such as `minLength`, `enum`, `minimum`
+- `additionalProperties: false` — also applied at bind (`extra="forbid"` on the Pydantic model for `simple` / `_submit`); omit it or set `true` and bind allows extra keys (JSON Schema gate still follows the keyword)
 
 **Rejected at deploy / saga start** (silent no-ops at the structured-output binder): `if`, `then`, `else`, `allOf`, `anyOf`, `oneOf`, `$ref`, `$defs`, `definitions`. Flatten conditionals into always-required fields or split steps; inline `$ref` targets.
 
@@ -449,7 +450,7 @@ Use [tool facts](#tool-facts-facts) when you need structured data from MCP tool 
 | Missing / empty output | `no_submit_call` / `empty_submit_result` | `structured_output_failed` / `empty_structured_result` |
 | Schema mismatch | Soft-retry with validation feedback (`WARDEN_LLM_SCHEMA_RETRY_*`), then `STEP_FAILED` if still invalid | Same |
 
-`max_turns` bounds ReAct tool/LLM iterations on **`react`** only. Schema soft-retries (`WARDEN_LLM_SCHEMA_RETRY_*`) are a separate attempt budget for validation failures — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback).
+`max_turns` bounds ReAct tool/LLM iterations on **`react`** only. Schema soft-retries (`WARDEN_LLM_SCHEMA_RETRY_*`) are a separate **attempt count**, but on **`react`** each retry still consumes remaining `max_turns` from the same step budget — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback).
 
 Commit steps can also attach `output_schema` for tool result validation.
 

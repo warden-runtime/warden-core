@@ -35,6 +35,7 @@ from common.schemas.saga import DEFAULT_MAX_TURNS
 from common.step_facts import StepFactsExtractionError, extract_step_facts
 from common.step_output import business_data_from_step_output, wrap_step_output_data
 from common.tool_results import clip_tool_text_for_llm, resolve_tool_message_limit
+from common.utils import create_pydantic_model_from_schema
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 from workers.adapters.react_loop import (
@@ -104,17 +105,37 @@ class _SubmitArgs(BaseModel):
     )
 
 
-def _build_submit_tool() -> StructuredTool:
-    """Virtual _submit tool for bind_tools schema; execution is handled in react_loop."""
+def _build_submit_tool(output_schema: dict[str, Any] | None = None) -> StructuredTool:
+    """Virtual _submit tool for bind_tools schema; execution is handled in react_loop.
 
-    def _submit_impl(result: dict[str, Any]) -> str:
+    When ``output_schema`` is set, bind its properties as tool args (same Pydantic path as
+    ``simple`` structured output) so the model sees the real shape instead of ``result: dict``.
+    Post-submit ``admit_and_validate`` remains the hard gate.
+    """
+
+    def _submit_impl(**_kwargs: Any) -> str:
         return "Submitted"
+
+    if output_schema and output_schema.get("properties"):
+        args_schema: type[BaseModel] = create_pydantic_model_from_schema(
+            output_schema, model_name="SubmitStepOutput"
+        )
+        description = (
+            "Call exactly once when the task is complete with the final structured result "
+            "matching the step output schema (required fields and types). No other tool after it."
+        )
+    else:
+        args_schema = _SubmitArgs
+        description = (
+            "Call exactly once when the task is complete with the final structured result "
+            "(e.g. summary and any required keys). No other tool after it."
+        )
 
     return StructuredTool.from_function(
         func=_submit_impl,
         name="_submit",
-        description="Call exactly once when the task is complete with the final structured result (e.g. summary and any required keys). No other tool after it.",
-        args_schema=_SubmitArgs,
+        description=description,
+        args_schema=args_schema,
     )
 
 
@@ -494,7 +515,7 @@ class LangChainAdapter(AgentAdapterPort):
             )
             logger.info("Resolved prompt template: %s", final_input)
 
-            bind_tools = mcp_tools + [_build_submit_tool()]
+            bind_tools = mcp_tools + [_build_submit_tool(output_schema)]
             llm = build_llm(
                 provider=self._worker_definition.model_provider,
                 model_name=self._worker_definition.model_name,
