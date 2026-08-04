@@ -23,6 +23,7 @@ from common.error_details import build_step_error_details
 from common.execution_timing import elapsed_ms
 from common.execution_usage import enforce_step_token_budget
 from common.llm import ChatMessage, ChatModelPort, ChatResponse, ToolCall
+from common.tool_failure import annotate_recoverable_tool_output
 from common.tool_results import clip_tool_text_for_llm, tool_message_limit_from_env
 from common.utils import (
     coerce_llm_json_from_schema,
@@ -247,6 +248,16 @@ def _handle_tool_output_content(
 ) -> None:
     if not state_utils.tool_output_indicates_failure(content):
         return
+    # Recoverable mismatches (e.g. search_replace old_text not found): feed the tool
+    # result into the transcript so the model can re-read and retry. Hard failures
+    # (MCP transport, invalid args) still abort the step in submit mode.
+    if state_utils.tool_output_is_recoverable(content):
+        logger.warning(
+            "Recoverable tool error fed to ReAct transcript (%s): %s",
+            tool_name or "?",
+            content[:500],
+        )
+        return
     logger.error("Tool returned error output in state: %s", content[:500])
     if strict_errors:
         message = content[:1000]
@@ -322,17 +333,20 @@ async def _process_tool_calls(
             tool_name=tool_call.name,
             strict_errors=strict_errors,
         )
+        # Soft mismatches / apply_patch rejects: keep raw for classification above; annotate
+        # the transcript copy so the model gets a one-line recovery hint.
+        recorded = annotate_recoverable_tool_output(output)
         tool_results.append(
             {
                 "tool": _mcp_fact_tool_name(tool_call, mcp_tools),
                 # Full payload for facts/JSONPath; do not truncate execution memory here.
-                "result": output,
+                "result": recorded,
             },
         )
         messages.append(
             ChatMessage(
                 role="tool",
-                content=_llm_tool_content(output, tool_message_limit=tool_message_limit),
+                content=_llm_tool_content(recorded, tool_message_limit=tool_message_limit),
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
             )

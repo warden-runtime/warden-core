@@ -303,6 +303,18 @@ def _coerce_dict_to_string(value: dict[str, Any]) -> Any:
     return value
 
 
+def _coerce_list_to_string(value: list[Any]) -> Any:
+    """Join LLM string lists when schema expects a single string (e.g. constraints)."""
+    if not value or not all(isinstance(item, str) for item in value):
+        return value
+    parts = [item.strip() for item in value if item.strip()]
+    if not parts:
+        return value
+    if len(parts) == 1:
+        return parts[0]
+    return "; ".join(parts)
+
+
 def _coerce_value_for_schema(
     value: Any,
     field_schema: dict[str, Any],
@@ -320,6 +332,8 @@ def _coerce_value_for_schema(
     if primary == "string":
         if isinstance(value, dict):
             return _coerce_dict_to_string(value)
+        if isinstance(value, list):
+            return _coerce_list_to_string(value)
         return value
 
     if isinstance(value, str):

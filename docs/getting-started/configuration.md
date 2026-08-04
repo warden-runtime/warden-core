@@ -246,6 +246,8 @@ ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **to
 | `WARDEN_MAX_STEP_TOKENS` | unset / `0` | Process-wide fallback token budget for reason steps that omit `max_step_tokens`; `0` or unset = no fallback |
 | `WARDEN_MAX_COMPLETION_TOKENS` | unset / `0` | Process-wide fallback per-call generation cap for reason steps that omit `max_completion_tokens`; `0` or unset = no Warden override |
 
+On **`react` submit** steps, tool return text that matches failure heuristics normally raises `TOOL_OUTPUT_ERROR` and fails the step. A narrow set of **recoverable** mismatches (default: `old_text` miss/ambiguous/empty, write “file exists”, missing path, and patch-apply text failures) are instead appended as tool-role messages — with a one-line recovery hint — so the model can re-read and retry within `max_turns`. `apply_patch_sandbox` JSON rejects (`{"ok": false, "phase": ...}`) already stay in-transcript; they get the same hint. `MCP error` / invalid-argument style failures stay hard. Enterprise plugins may override via `ToolLifecycleHooks.tool_output_is_recoverable`.
+
 ### LLM JSON admission
 
 Before strict JSON Schema validation, the worker **admits** sloppy LLM-authored JSON against the declared schema. This is always on (no env var) and helps local OpenAI-compatible models (Ollama, vLLM) that often emit stringified JSON where the schema expects typed values — for example `commands: '["echo ok"]'` when a tool declares `commands` as an `array`, or `feasible: "false"` when `output_schema` requires a boolean.

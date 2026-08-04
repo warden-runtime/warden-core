@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "tool_call_args_to_dict",
     "tool_output_indicates_failure",
+    "tool_output_is_recoverable",
     "extract_submit_payload",
     "check_allowlist_in_state",
     "check_tool_failures_in_state",
@@ -49,6 +50,21 @@ def tool_output_indicates_failure(output: str) -> bool:
     from common.plugins.registry import get_registry
 
     return get_registry().tools.tool_output_indicates_failure(output)
+
+
+def tool_output_is_recoverable(output: str) -> bool:
+    """Delegate recoverable-failure heuristics to the tool plugin registry.
+
+    Falls back to the OSS default when a custom plugin omits the hook.
+    """
+    from common.plugins.registry import get_registry
+    from common.tool_failure import default_tool_output_is_recoverable
+
+    tools = get_registry().tools
+    hook = getattr(tools, "tool_output_is_recoverable", None)
+    if callable(hook):
+        return bool(hook(output))
+    return default_tool_output_is_recoverable(output)
 
 
 def extract_submit_payload(messages: list[Any]) -> dict[str, Any] | None:
