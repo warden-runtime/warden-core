@@ -15,9 +15,24 @@ from common.llm import ChatResponse, ToolCall
 from workers.adapters.langchain import (
     LangChainAdapter,
     _build_submit_tool,
+    _human_message_content,
     _validate_structured_payload,
     _validate_submit_payload,
 )
+
+
+def test_human_message_content_passes_string_prompts_through():
+    text = "# Task\nDo the thing.\n"
+    assert _human_message_content(text) is text
+    assert _human_message_content(text) == text
+
+
+def test_human_message_content_json_encodes_structured_inputs():
+    assert json.loads(_human_message_content({"owner": "acme", "n": 1})) == {
+        "owner": "acme",
+        "n": 1,
+    }
+    assert json.loads(_human_message_content(["a", "b"])) == ["a", "b"]
 
 
 class _ScriptedLLM:
@@ -122,6 +137,60 @@ async def test_run_step_returns_submit_payload_when_agent_calls_submit(mocker):
         context={},
     )
     assert result.output == {"data": {"summary": "Done.", "count": 2}}
+
+
+@pytest.mark.asyncio
+async def test_run_step_sends_string_prompt_as_plain_human_text(mocker):
+    """Jinja/inline string prompts must not be JSON-string-wrapped for the LLM."""
+    captured: list[object] = []
+
+    class _RecordingLLM(_ScriptedLLM):
+        async def ainvoke(self, messages: object) -> ChatResponse:
+            captured.append(messages)
+            return await super().ainvoke(messages)
+
+    mocker.patch(
+        "workers.adapters.langchain.build_llm",
+        return_value=_RecordingLLM(
+            [
+                ChatResponse(
+                    tool_calls=[
+                        ToolCall(
+                            name="_submit",
+                            args={"result": {"summary": "ok"}},
+                            id="1",
+                        )
+                    ]
+                )
+            ]
+        ),
+    )
+    mocker.patch(
+        "workers.adapters.langchain.build_tools_for_worker",
+        new_callable=AsyncMock,
+        return_value=[],
+    )
+
+    prompt = "# Task\nFix the bug in {{repo}}.\n"
+    adapter = LangChainAdapter(
+        worker_definition=_make_worker_def(),
+        secret=_make_secret(),
+    )
+    await adapter.run_step(
+        system_prompt="You are helpful.",
+        prompt_template=prompt,
+        arguments={"repo": "acme/app"},
+        tool_specs=[],
+        context={},
+    )
+
+    assert captured, "expected LLM ainvoke"
+    messages = captured[0]
+    human = next(m for m in messages if getattr(m, "role", None) == "human")
+    assert human.content == "# Task\nFix the bug in acme/app."
+    # Would be '"# Task\\n...' if still json.dumps'd
+    assert not human.content.startswith('"')
+    assert '"# Task' not in human.content
 
 
 @pytest.mark.asyncio

@@ -126,7 +126,7 @@ The worker renders the prompt when the step runs — not when you deploy the sag
 1. Load `{PROMPTS_ROOT}/<prompt>` from disk (fresh read each run) — the step's prompt template file from the saga manifest `prompt` field.
 2. Render that template with resolved `with` values + `allowed_tools`.
 3. Send the worker manifest's **`system_prompt`** as the system message.
-4. Send the **rendered step prompt** (the hydrated `.j2` output from step 2) as the human message. On **`react`** steps it is JSON-encoded for the ReAct loop; on **`simple`** steps it is sent as plain text for a single structured completion.
+4. Send the **rendered step prompt** (the hydrated `.j2` output from step 2) as the human message. String templates (Jinja / inline) are sent as **plain text**. Structured dict/list prompt inputs are JSON-encoded so the model still receives a parseable object.
 
 You can edit prompt files on disk without redeploying the saga manifest. Registration already validated variable names; content changes apply on the next step run for any instance that references that `prompt` filename.
 
