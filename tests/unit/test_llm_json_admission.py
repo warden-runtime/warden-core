@@ -272,7 +272,9 @@ def test_coerce_string_list_to_string_constraints():
         },
         schema,
         "test",
-    )["constraints"] == ("minimal delta; no new dependencies; preserve existing __version__ behavior")
+    )["constraints"] == (
+        "minimal delta; no new dependencies; preserve existing __version__ behavior"
+    )
     # Multiple bullets join
     assert (
         admit_and_validate(

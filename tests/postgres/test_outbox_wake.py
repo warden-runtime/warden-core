@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from common.messaging.postgres import PostgresQueueConsumer
 from common.models import OutboxEvent, OutboxStatus
 from tortoise import Tortoise
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.postgres
 

@@ -133,13 +133,15 @@ def _build_submit_tool(output_schema: dict[str, Any] | None = None) -> Structure
         )
         description = (
             "Call exactly once when the task is complete with the final structured result "
-            "matching the step output schema (required fields and types). No other tool after it."
+            "matching the step output schema (required fields and types). "
+            "Must be the only tool call in that turn — never batch with other tools."
         )
     else:
         args_schema = _SubmitArgs
         description = (
             "Call exactly once when the task is complete with the final structured result "
-            "(e.g. summary and any required keys). No other tool after it."
+            "(e.g. summary and any required keys). "
+            "Must be the only tool call in that turn — never batch with other tools."
         )
 
     return StructuredTool.from_function(

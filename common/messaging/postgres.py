@@ -8,14 +8,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
 
 import asyncpg
-from tortoise import connections
-from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
@@ -24,6 +21,11 @@ from common.messaging.notify import topic_to_notify_channel
 from common.messaging.protocols import MessageQueueConsumer, MessageQueueProducer
 from common.models import OutboxEvent, OutboxStatus
 from common.outbox_timestamps import utc_now
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from tortoise.backends.base.client import BaseDBAsyncClient
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +280,31 @@ class PostgresQueueConsumer(MessageQueueConsumer):
                 with suppress(Exception):
                     await conn.close()
 
+    async def _await_first_or_timeout(
+        self,
+        waiters: list[asyncio.Task[bool]],
+        *,
+        wait_timeout: float,
+    ) -> None:
+        try:
+            done, pending = await asyncio.wait(
+                waiters,
+                timeout=wait_timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                with suppress(asyncio.CancelledError, Exception):
+                    task.result()
+        except asyncio.CancelledError:
+            for task in waiters:
+                task.cancel()
+            await asyncio.gather(*waiters, return_exceptions=True)
+            raise
+
     async def _idle_wait(self) -> None:
         """Wait for shutdown, optional NOTIFY, or safety-poll timeout."""
         if self._shutdown.is_set():
@@ -301,24 +328,7 @@ class PostgresQueueConsumer(MessageQueueConsumer):
             waiters.append(
                 asyncio.create_task(self._notify_event.wait(), name="outbox-notify-wait"),
             )
-        try:
-            done, pending = await asyncio.wait(
-                waiters,
-                timeout=self._poll_interval,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-            for task in done:
-                with suppress(asyncio.CancelledError, Exception):
-                    task.result()
-        except asyncio.CancelledError:
-            for task in waiters:
-                task.cancel()
-            await asyncio.gather(*waiters, return_exceptions=True)
-            raise
+        await self._await_first_or_timeout(waiters, wait_timeout=self._poll_interval)
 
     async def _set_outbox_status(
         self,

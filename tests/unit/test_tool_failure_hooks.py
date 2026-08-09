@@ -52,7 +52,9 @@ def test_default_tool_output_is_recoverable_keeps_transport_hard():
     assert default_tool_output_is_recoverable("Error: permission denied") is False
     assert default_tool_output_is_recoverable("ok wrote file") is False
     assert default_tool_output_is_recoverable("input validation error: foo") is False
-    assert default_tool_output_is_recoverable("Error: failed to create Docker client: boom") is False
+    assert (
+        default_tool_output_is_recoverable("Error: failed to create Docker client: boom") is False
+    )
 
 
 def test_annotate_recoverable_tool_output_adds_old_text_hint():
@@ -64,7 +66,9 @@ def test_annotate_recoverable_tool_output_adds_old_text_hint():
 
 
 def test_annotate_apply_patch_reject_json():
-    raw = json.dumps({"ok": False, "phase": "dry_run", "stdout": "patch does not apply", "stderr": ""})
+    raw = json.dumps(
+        {"ok": False, "phase": "dry_run", "stdout": "patch does not apply", "stderr": ""}
+    )
     assert looks_like_apply_patch_reject(raw) is True
     annotated = annotate_recoverable_tool_output(raw)
     assert "Fall back to search_replace_sandbox" in annotated

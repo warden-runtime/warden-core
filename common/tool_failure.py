@@ -89,6 +89,13 @@ def default_tool_output_is_recoverable(output: str) -> bool:
     return any(marker in lowered for marker in _RECOVERABLE_FAILURE_MARKERS)
 
 
+def _patch_apply_hint_markers(lowered: str) -> bool:
+    return any(
+        marker in lowered
+        for marker in ("patch does not apply", "hunk failed", "corrupt patch", "malformed patch")
+    )
+
+
 def recovery_hint_for_tool_output(output: str) -> str | None:
     """One-line operational hint to append when feeding a recoverable tool error to the LLM."""
     if not output or not isinstance(output, str):
@@ -104,10 +111,7 @@ def recovery_hint_for_tool_output(output: str) -> str | None:
         return _HINT_FILE_EXISTS
     if "no such file" in lowered:
         return _HINT_MISSING_PATH
-    if any(
-        marker in lowered
-        for marker in ("patch does not apply", "hunk failed", "corrupt patch", "malformed patch")
-    ):
+    if _patch_apply_hint_markers(lowered):
         return _HINT_APPLY_PATCH
     return _HINT_GENERIC
 
