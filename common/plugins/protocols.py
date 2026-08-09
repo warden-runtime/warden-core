@@ -510,6 +510,14 @@ class ToolLifecycleHooks(Protocol):
         """Return True when tool return text should be treated as a failed invocation."""
         ...
 
+    def tool_output_is_recoverable(self, output: str) -> bool:
+        """Return True when a failed tool output should be fed to the LLM instead of failing the step.
+
+        Only consulted when ``tool_output_indicates_failure`` is True (e.g. edit mismatches).
+        Transport / MCP / validation failures should remain False.
+        """
+        ...
+
 
 class AdapterHooks(Protocol):
     async def after_reason_step(

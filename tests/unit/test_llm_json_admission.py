@@ -254,3 +254,31 @@ def test_coerce_anyof_nullable_array_peel():
     assert coerce_llm_json_from_schema({"tags": '["a"]'}, schema) == {"tags": ["a"]}
     assert coerce_llm_json_from_schema({"tags": "null"}, schema) == {"tags": None}
     assert coerce_llm_json_from_schema({"tags": None}, schema) == {"tags": None}
+
+
+def test_coerce_string_list_to_string_constraints():
+    """GPT-style string arrays admit into string fields (SWE architect constraints)."""
+    schema = {
+        "type": "object",
+        "properties": {"constraints": {"type": "string", "minLength": 1}},
+        "required": ["constraints"],
+    }
+    # Single wrapped bullet
+    assert admit_and_validate(
+        {
+            "constraints": [
+                "minimal delta; no new dependencies; preserve existing __version__ behavior"
+            ]
+        },
+        schema,
+        "test",
+    )["constraints"] == ("minimal delta; no new dependencies; preserve existing __version__ behavior")
+    # Multiple bullets join
+    assert (
+        admit_and_validate(
+            {"constraints": ["minimal delta", "no new deps"]},
+            schema,
+            "test",
+        )["constraints"]
+        == "minimal delta; no new deps"
+    )

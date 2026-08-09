@@ -123,6 +123,11 @@ class NoOpToolLifecycleHooks:
 
         return default_tool_output_indicates_failure(output)
 
+    def tool_output_is_recoverable(self, output: str) -> bool:
+        from common.tool_failure import default_tool_output_is_recoverable
+
+        return default_tool_output_is_recoverable(output)
+
     async def on_allowlist_passed(self, **kwargs: Any) -> None:
         return None
 

@@ -303,6 +303,58 @@ async def test_submit_mode_tool_failure_raises_before_no_submit():
 
 
 @pytest.mark.asyncio
+async def test_submit_mode_recoverable_edit_mismatch_feeds_back_then_submit():
+    """search_replace-style mismatches must not abort the step; model gets another turn."""
+    mock_tool = MagicMock()
+    mock_tool.name = "search_replace_sandbox"
+    mock_tool.ainvoke = AsyncMock(
+        side_effect=[
+            "Error: old_text not found in /testbed/lib/matplotlib/__init__.py",
+            "ok",
+        ]
+    )
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="search_replace_sandbox",
+                        args={"path": "/x", "old_text": "a", "new_text": "b"},
+                        id="1",
+                    )
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="search_replace_sandbox",
+                        args={"path": "/x", "old_text": "aa", "new_text": "b"},
+                        id="2",
+                    )
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[ToolCall(name="_submit", args={"result": {"ok": True}}, id="3")]
+            ),
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[mock_tool],
+        allowed_tool_names=["search_replace_sandbox"],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert result.submit_payload == {"ok": True}
+    assert mock_tool.ainvoke.await_count == 2
+    tool_msgs = [m for m in result.transcript if m.role == "tool"]
+    assert any("old_text not found" in (m.content or "") for m in tool_msgs)
+    assert any("read_file_sandbox" in (m.content or "") for m in tool_msgs)
+
+
+@pytest.mark.asyncio
 async def test_submit_mode_empty_submit_payload():
     llm = _ScriptedLLM([ChatResponse(tool_calls=[ToolCall(name="_submit", args={}, id="1")])])
     result = await run_react_loop(
