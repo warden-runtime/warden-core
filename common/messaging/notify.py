@@ -22,7 +22,8 @@ def topic_to_notify_channel(topic: str) -> str:
     encoded = channel.encode("utf-8")
     if len(encoded) <= NOTIFY_CHANNEL_MAX_BYTES:
         return channel
-    digest = hashlib.md5(encoded).hexdigest()
+    # Non-cryptographic short fingerprint for NAMEDATALEN; not a security digest.
+    digest = hashlib.md5(encoded, usedforsecurity=False).hexdigest()
     hashed = f"{_CHANNEL_PREFIX}{digest}"
     # md5 hex is 32 chars; with prefix always well under 63.
     return hashed[:NOTIFY_CHANNEL_MAX_BYTES]

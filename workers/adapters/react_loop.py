@@ -303,6 +303,115 @@ def _append_tool_role_message(
     )
 
 
+def _record_submit_must_be_alone(
+    *,
+    messages: list[ChatMessage],
+    tool_call: ToolCall,
+    tool_results: list[dict[str, Any]],
+    tool_message_limit: int | None,
+) -> None:
+    """Reject `_submit` that shares a turn with other tools; keep the loop running."""
+    recorded = _SUBMIT_MUST_BE_ALONE_MESSAGE
+    tool_results.append({"tool": SUBMIT_TOOL_NAME, "result": recorded})
+    _append_tool_role_message(
+        messages,
+        tool_call=tool_call,
+        content=recorded,
+        tool_message_limit=tool_message_limit,
+    )
+
+
+async def _run_one_mcp_tool_call(
+    *,
+    tool_call: ToolCall,
+    messages: list[ChatMessage],
+    mcp_tools: Sequence[Any],
+    merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    merge_context: dict[str, Any],
+    tool_results: list[dict[str, Any]],
+    strict_errors: bool,
+    timing_acc: WorkerTimingAccumulator | None,
+    tool_message_limit: int | None,
+    turn_index: int,
+) -> None:
+    tool_start = time.perf_counter() if timing_acc is not None else None
+    with react_tool_span(tool_call=tool_call, turn_index=turn_index) as tool_span:
+        output = await _invoke_mcp_tool(
+            tool_call=tool_call,
+            mcp_tools=mcp_tools,
+            merge_tool_args=merge_tool_args,
+            merge_context=merge_context,
+            strict_errors=strict_errors,
+        )
+        mark_tool_output(tool_span, output)
+    if timing_acc is not None and tool_start is not None:
+        timing_acc.add_ms("tool_ms", elapsed_ms(tool_start))
+    _handle_tool_output_content(
+        output,
+        tool_name=tool_call.name,
+        strict_errors=strict_errors,
+    )
+    # Soft mismatches / apply_patch rejects: keep raw for classification above; annotate
+    # the transcript copy so the model gets a one-line recovery hint.
+    recorded = annotate_recoverable_tool_output(output)
+    tool_results.append(
+        {
+            "tool": _mcp_fact_tool_name(tool_call, mcp_tools),
+            # Full payload for facts/JSONPath; do not truncate execution memory here.
+            "result": recorded,
+        },
+    )
+    _append_tool_role_message(
+        messages,
+        tool_call=tool_call,
+        content=recorded,
+        tool_message_limit=tool_message_limit,
+    )
+
+
+async def _execute_tool_batch(
+    *,
+    tool_calls: list[ToolCall],
+    messages: list[ChatMessage],
+    mcp_tools: Sequence[Any],
+    merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    merge_context: dict[str, Any],
+    tool_results: list[dict[str, Any]],
+    allow_submit: bool,
+    strict_errors: bool,
+    timing_acc: WorkerTimingAccumulator | None,
+    tool_message_limit: int | None,
+    turn_index: int,
+) -> None:
+    """Run one assistant tool batch; reject mixed ``_submit`` calls, execute the rest."""
+    if allow_submit and any(tc.name == SUBMIT_TOOL_NAME for tc in tool_calls):
+        logger.warning(
+            "ReAct mixed _submit batch deferred (%d tool call(s)); executing non-submit tools",
+            len(tool_calls),
+        )
+    for tool_call in tool_calls:
+        if allow_submit and tool_call.name == SUBMIT_TOOL_NAME:
+            _record_submit_must_be_alone(
+                messages=messages,
+                tool_call=tool_call,
+                tool_results=tool_results,
+                tool_message_limit=tool_message_limit,
+            )
+            continue
+        await _run_one_mcp_tool_call(
+            tool_call=tool_call,
+            messages=messages,
+            mcp_tools=mcp_tools,
+            merge_tool_args=merge_tool_args,
+            merge_context=merge_context,
+            tool_results=tool_results,
+            strict_errors=strict_errors,
+            timing_acc=timing_acc,
+            tool_message_limit=tool_message_limit,
+            turn_index=turn_index,
+        )
+
+
 async def _process_tool_calls(
     *,
     response: ChatResponse,
@@ -332,71 +441,27 @@ async def _process_tool_calls(
         )
     )
     allow_submit = completion_mode == "submit"
-    strict_errors = completion_mode == "submit"
-
     for tool_call in tool_calls:
         _check_allowlist_tool_name(
             tool_call.name,
             allowed_tool_names,
             allow_submit=allow_submit,
         )
-
     if allow_submit and len(tool_calls) == 1 and tool_calls[0].name == SUBMIT_TOOL_NAME:
         return _submit_payload_from_call(tool_calls[0])
-
-    mixed_submit = allow_submit and any(tc.name == SUBMIT_TOOL_NAME for tc in tool_calls)
-    if mixed_submit:
-        logger.warning(
-            "ReAct mixed _submit batch deferred (%d tool call(s)); executing non-submit tools",
-            len(tool_calls),
-        )
-
-    for tool_call in tool_calls:
-        if allow_submit and tool_call.name == SUBMIT_TOOL_NAME:
-            # Mixed batch (or multiple _submit calls): do not exit the loop.
-            recorded = _SUBMIT_MUST_BE_ALONE_MESSAGE
-            tool_results.append({"tool": SUBMIT_TOOL_NAME, "result": recorded})
-            _append_tool_role_message(
-                messages,
-                tool_call=tool_call,
-                content=recorded,
-                tool_message_limit=tool_message_limit,
-            )
-            continue
-
-        tool_start = time.perf_counter() if timing_acc is not None else None
-        with react_tool_span(tool_call=tool_call, turn_index=turn_index) as tool_span:
-            output = await _invoke_mcp_tool(
-                tool_call=tool_call,
-                mcp_tools=mcp_tools,
-                merge_tool_args=merge_tool_args,
-                merge_context=merge_context,
-                strict_errors=strict_errors,
-            )
-            mark_tool_output(tool_span, output)
-        if timing_acc is not None and tool_start is not None:
-            timing_acc.add_ms("tool_ms", elapsed_ms(tool_start))
-        _handle_tool_output_content(
-            output,
-            tool_name=tool_call.name,
-            strict_errors=strict_errors,
-        )
-        # Soft mismatches / apply_patch rejects: keep raw for classification above; annotate
-        # the transcript copy so the model gets a one-line recovery hint.
-        recorded = annotate_recoverable_tool_output(output)
-        tool_results.append(
-            {
-                "tool": _mcp_fact_tool_name(tool_call, mcp_tools),
-                # Full payload for facts/JSONPath; do not truncate execution memory here.
-                "result": recorded,
-            },
-        )
-        _append_tool_role_message(
-            messages,
-            tool_call=tool_call,
-            content=recorded,
-            tool_message_limit=tool_message_limit,
-        )
+    await _execute_tool_batch(
+        tool_calls=tool_calls,
+        messages=messages,
+        mcp_tools=mcp_tools,
+        merge_tool_args=merge_tool_args,
+        merge_context=merge_context,
+        tool_results=tool_results,
+        allow_submit=allow_submit,
+        strict_errors=completion_mode == "submit",
+        timing_acc=timing_acc,
+        tool_message_limit=tool_message_limit,
+        turn_index=turn_index,
+    )
     return None
 
 

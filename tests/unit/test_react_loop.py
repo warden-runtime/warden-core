@@ -247,13 +247,13 @@ async def test_submit_mode_mixed_batch_runs_tools_and_defers_submit():
     """`_submit` with other tools must not exit; non-submit tools still run."""
     mock_tool = MagicMock()
     mock_tool.name = "sandbox_write"
-    mock_tool.ainvoke = AsyncMock(return_value="wrote /tmp/foo")
+    mock_tool.ainvoke = AsyncMock(return_value="wrote /testbed/foo")
 
     llm = _ScriptedLLM(
         [
             ChatResponse(
                 tool_calls=[
-                    ToolCall(name="sandbox_write", args={"path": "/tmp/foo"}, id="1"),
+                    ToolCall(name="sandbox_write", args={"path": "/testbed/foo"}, id="1"),
                     ToolCall(
                         name="_submit",
                         args={"result": {"summary": "premature"}},
@@ -285,7 +285,9 @@ async def test_submit_mode_mixed_batch_runs_tools_and_defers_submit():
     submit_rejects = [
         m
         for m in result.transcript
-        if m.role == "tool" and m.name == "_submit" and "must be the only tool call" in (m.content or "")
+        if m.role == "tool"
+        and m.name == "_submit"
+        and "must be the only tool call" in (m.content or "")
     ]
     assert len(submit_rejects) == 1
 
@@ -294,7 +296,7 @@ async def test_submit_mode_mixed_batch_runs_tools_and_defers_submit():
 async def test_submit_mode_mixed_batch_submit_first_still_runs_other_tools():
     mock_tool = MagicMock()
     mock_tool.name = "sandbox_write"
-    mock_tool.ainvoke = AsyncMock(return_value="wrote /tmp/bar")
+    mock_tool.ainvoke = AsyncMock(return_value="wrote /testbed/bar")
 
     llm = _ScriptedLLM(
         [

@@ -21,5 +21,5 @@ def test_long_topic_stays_within_namedatalen() -> None:
     channel = topic_to_notify_channel(topic)
     assert len(channel.encode("utf-8")) <= NOTIFY_CHANNEL_MAX_BYTES
     full = "warden_" + ("x" * 200)
-    expected = "warden_" + hashlib.md5(full.encode("utf-8")).hexdigest()
+    expected = "warden_" + hashlib.md5(full.encode("utf-8"), usedforsecurity=False).hexdigest()
     assert channel == expected
