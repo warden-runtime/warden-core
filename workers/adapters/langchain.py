@@ -82,6 +82,17 @@ def _react_log_preview_len(context: dict[str, Any]) -> int | None:
         return None
 
 
+def _human_message_content(final_input: Any) -> str:
+    """Content for the human ChatMessage from a resolved step prompt.
+
+    String prompts (Jinja / inline templates) are passed through as plain text.
+    Structured dict/list inputs stay JSON so models still receive a parseable object.
+    """
+    if isinstance(final_input, str):
+        return final_input
+    return json.dumps(final_input, default=str)
+
+
 def _commit_error_details(
     *,
     scope: Any,
@@ -398,7 +409,7 @@ class LangChainAdapter(AgentAdapterPort):
         )
         initial_messages = [
             ChatMessage(role="system", content=system_prompt),
-            ChatMessage(role="human", content=json.dumps(final_input, default=str)),
+            ChatMessage(role="human", content=_human_message_content(final_input)),
         ]
         if timing_acc is not None:
             timing_acc.stop("adapter_setup", bucket="setup_ms")
@@ -525,7 +536,7 @@ class LangChainAdapter(AgentAdapterPort):
             llm_with_tools = llm.bind_tools(cast("list[ToolProtocol]", bind_tools))
             loop_messages = [
                 ChatMessage(role="system", content=system_prompt),
-                ChatMessage(role="human", content=json.dumps(final_input, default=str)),
+                ChatMessage(role="human", content=_human_message_content(final_input)),
             ]
             if timing_acc is not None:
                 timing_acc.stop("adapter_setup", bucket="setup_ms")
@@ -731,7 +742,7 @@ class LangChainAdapter(AgentAdapterPort):
             llm_with_tools = llm.bind_tools(cast("list[ToolProtocol]", tools)) if tools else llm
             initial_messages = [
                 ChatMessage(role="system", content=system_instruction),
-                ChatMessage(role="human", content=json.dumps(final_input, default=str)),
+                ChatMessage(role="human", content=_human_message_content(final_input)),
             ]
             if timing_acc is not None:
                 timing_acc.stop("comp_react_setup", bucket="setup_ms")
