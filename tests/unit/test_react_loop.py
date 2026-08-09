@@ -243,6 +243,95 @@ async def test_submit_mode_text_exit_soft_retry_on_final_turn(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_submit_mode_mixed_batch_runs_tools_and_defers_submit():
+    """`_submit` with other tools must not exit; non-submit tools still run."""
+    mock_tool = MagicMock()
+    mock_tool.name = "sandbox_write"
+    mock_tool.ainvoke = AsyncMock(return_value="wrote /tmp/foo")
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(name="sandbox_write", args={"path": "/tmp/foo"}, id="1"),
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"summary": "premature"}},
+                        id="2",
+                    ),
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"summary": "after review"}},
+                        id="3",
+                    )
+                ]
+            ),
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[mock_tool],
+        allowed_tool_names=["sandbox_write"],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert result.submit_payload == {"summary": "after review"}
+    mock_tool.ainvoke.assert_called_once()
+    submit_rejects = [
+        m
+        for m in result.transcript
+        if m.role == "tool" and m.name == "_submit" and "must be the only tool call" in (m.content or "")
+    ]
+    assert len(submit_rejects) == 1
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_mixed_batch_submit_first_still_runs_other_tools():
+    mock_tool = MagicMock()
+    mock_tool.name = "sandbox_write"
+    mock_tool.ainvoke = AsyncMock(return_value="wrote /tmp/bar")
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"summary": "too early"}},
+                        id="1",
+                    ),
+                    ToolCall(name="sandbox_write", args={}, id="2"),
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="_submit",
+                        args={"result": {"summary": "ok"}},
+                        id="3",
+                    )
+                ]
+            ),
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[mock_tool],
+        allowed_tool_names=["sandbox_write"],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert result.submit_payload == {"summary": "ok"}
+    mock_tool.ainvoke.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_submit_mode_model_text_exit_ignores_plain_text_tool_success(monkeypatch):
     monkeypatch.setenv("WARDEN_REACT_SUBMIT_TEXT_RETRIES", "1")
     mock_tool = MagicMock()

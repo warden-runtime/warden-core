@@ -60,6 +60,8 @@ Reason steps choose **how** the worker completes the step — separate from the 
 
 Multi-turn ReAct loop. The worker binds MCP tools from `tools.allow` plus a virtual **`_submit`** tool (never list `_submit` in the allowlist). The model calls tools until it invokes `_submit` with a non-empty JSON object. Optional `output_schema` validates that payload; without it, any non-empty JSON shape is accepted.
 
+**`_submit` must be alone in its turn.** If the model batches `_submit` with other tools, Warden runs the non-submit tools, returns a tool-role error for `_submit` (`must be the only tool call`), and continues the loop so the model can observe those results before submitting.
+
 Warden admits sloppy LLM JSON against MCP tool `inputSchema` values and against `_submit` `output_schema` (stringified arrays/objects, scalar strings to numbers/booleans) before strict validation. See [Configuration → LLM JSON admission](../../getting-started/configuration.md#llm-json-admission).
 
 ### `simple`

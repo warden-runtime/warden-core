@@ -61,6 +61,11 @@ _SUBMIT_TEXT_EXIT_NUDGE = (
     "This step requires calling the `_submit` tool now with the full result object. "
     "Do not summarize or explain in chat — invoke `_submit` immediately."
 )
+_SUBMIT_MUST_BE_ALONE_MESSAGE = (
+    "Error: `_submit` must be the only tool call in its turn. "
+    "Other tools in this batch were executed; review their results, then call "
+    "`_submit` alone with the final payload."
+)
 
 
 def submit_text_retries_from_env() -> int:
@@ -281,6 +286,23 @@ def _mcp_fact_tool_name(tool_call: ToolCall, mcp_tools: Sequence[Any]) -> str:
     return get_warden_tool_mcp_name(selected) or tool_call.name
 
 
+def _append_tool_role_message(
+    messages: list[ChatMessage],
+    *,
+    tool_call: ToolCall,
+    content: str,
+    tool_message_limit: int | None,
+) -> None:
+    messages.append(
+        ChatMessage(
+            role="tool",
+            content=_llm_tool_content(content, tool_message_limit=tool_message_limit),
+            tool_call_id=tool_call.id,
+            name=tool_call.name,
+        )
+    )
+
+
 async def _process_tool_calls(
     *,
     response: ChatResponse,
@@ -295,7 +317,12 @@ async def _process_tool_calls(
     tool_message_limit: int | None = None,
     turn_index: int = 0,
 ) -> dict[str, Any] | None:
-    """Append assistant message, run tool calls; return submit payload if _submit completes."""
+    """Append assistant message, run tool calls; return submit payload if `_submit` alone completes.
+
+    ``_submit`` is accepted only as a singleton tool batch. Mixed batches run the
+    non-submit tools (in emission order), feed a rejection tool message for each
+    ``_submit``, and continue the ReAct loop so the model can observe results.
+    """
     tool_calls = [_ensure_tool_call_id(tc) for tc in response.tool_calls]
     messages.append(
         ChatMessage(
@@ -313,8 +340,29 @@ async def _process_tool_calls(
             allowed_tool_names,
             allow_submit=allow_submit,
         )
+
+    if allow_submit and len(tool_calls) == 1 and tool_calls[0].name == SUBMIT_TOOL_NAME:
+        return _submit_payload_from_call(tool_calls[0])
+
+    mixed_submit = allow_submit and any(tc.name == SUBMIT_TOOL_NAME for tc in tool_calls)
+    if mixed_submit:
+        logger.warning(
+            "ReAct mixed _submit batch deferred (%d tool call(s)); executing non-submit tools",
+            len(tool_calls),
+        )
+
+    for tool_call in tool_calls:
         if allow_submit and tool_call.name == SUBMIT_TOOL_NAME:
-            return _submit_payload_from_call(tool_call)
+            # Mixed batch (or multiple _submit calls): do not exit the loop.
+            recorded = _SUBMIT_MUST_BE_ALONE_MESSAGE
+            tool_results.append({"tool": SUBMIT_TOOL_NAME, "result": recorded})
+            _append_tool_role_message(
+                messages,
+                tool_call=tool_call,
+                content=recorded,
+                tool_message_limit=tool_message_limit,
+            )
+            continue
 
         tool_start = time.perf_counter() if timing_acc is not None else None
         with react_tool_span(tool_call=tool_call, turn_index=turn_index) as tool_span:
@@ -343,13 +391,11 @@ async def _process_tool_calls(
                 "result": recorded,
             },
         )
-        messages.append(
-            ChatMessage(
-                role="tool",
-                content=_llm_tool_content(recorded, tool_message_limit=tool_message_limit),
-                tool_call_id=tool_call.id,
-                name=tool_call.name,
-            )
+        _append_tool_role_message(
+            messages,
+            tool_call=tool_call,
+            content=recorded,
+            tool_message_limit=tool_message_limit,
         )
     return None
 
