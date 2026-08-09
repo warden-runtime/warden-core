@@ -23,8 +23,8 @@ _RECOVERABLE_FAILURE_MARKERS: tuple[str, ...] = (
 
 _HINT_OLD_TEXT = (
     "[Hint: Use ranged read_file_sandbox on the target lines and copy the exact code "
-    "(including comments and indentation) into old_text before retrying "
-    "search_replace_sandbox.]"
+    "(including comments and indentation) into old_text — strip any N| line prefixes — "
+    "before retrying search_replace_sandbox.]"
 )
 _HINT_FILE_EXISTS = (
     "[Hint: That path already exists — use search_replace_sandbox "
