@@ -318,12 +318,15 @@ def _build_saga_list_params(
     status_vals: list[str],
     limit: int | None,
     offset: int | None,
+    parent_trace_id: str | None = None,
 ) -> list[tuple[str, str]]:
     params: list[tuple[str, str]] = []
     if namespace is not None:
         params.append(("namespace", namespace))
     if trace_id is not None:
         params.append(("trace_id", trace_id))
+    if parent_trace_id is not None:
+        params.append(("parent_trace_id", parent_trace_id))
     if in_flight:
         params.append(("in_flight", "true"))
     elif failed:
@@ -917,7 +920,8 @@ def list_definitions(
     "sagas",
     help="List saga instances (executions): trace id, status, definition, started time.",
     epilog=(
-        "Filters: `--trace-id`, `--in-flight` (PENDING, RUNNING, AWAITING_HUMAN, COMPENSATING), "
+        "Filters: `--trace-id`, `--parent-trace-id` (child sagas of a parent), "
+        "`--in-flight` (PENDING, RUNNING, AWAITING_HUMAN, COMPENSATING), "
         "`--failed` (FAILED), or repeat `--status` for explicit statuses. "
         "Do not combine --in-flight with --status or --failed. "
         "`--watch` polls until the saga is terminal (with `--trace-id`), until no in-flight rows "
@@ -934,6 +938,13 @@ def list_sagas(
     trace_id: Annotated[
         str | None,
         typer.Option("--trace-id", help="Only the saga instance with this trace_id."),
+    ] = None,
+    parent_trace_id: Annotated[
+        str | None,
+        typer.Option(
+            "--parent-trace-id",
+            help="Only child sagas spawned by this parent trace_id.",
+        ),
     ] = None,
     in_flight: Annotated[
         bool,
@@ -985,6 +996,7 @@ def list_sagas(
     params = _build_saga_list_params(
         namespace=namespace,
         trace_id=trace_id,
+        parent_trace_id=parent_trace_id,
         in_flight=in_flight,
         failed=failed,
         status_vals=status_vals,

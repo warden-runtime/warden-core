@@ -1,7 +1,7 @@
 """HITL approval/rejection API routes."""
 
 from common.hitl_retry import HitlRetryLimitError
-from common.schemas.saga import SAGA_STEP_KINDS
+from common.schemas.saga import WORKER_STEP_KINDS
 from fastapi import APIRouter, HTTPException, Query
 
 from engine.api import read_queries
@@ -46,10 +46,10 @@ async def pending_review_steps(
     """List HITL-held steps awaiting human approval/rejection."""
     lim, off = validated_limit_offset(limit=limit, offset=offset)
     step_kind = kind.strip().lower() if kind else None
-    if step_kind is not None and step_kind not in SAGA_STEP_KINDS:
+    if step_kind is not None and step_kind not in WORKER_STEP_KINDS:
         raise HTTPException(
             status_code=422,
-            detail=f"kind must be one of {', '.join(sorted(SAGA_STEP_KINDS))}.",
+            detail=f"kind must be one of {', '.join(sorted(WORKER_STEP_KINDS))}.",
         )
 
     rows = await read_queries.list_pending_review_steps(

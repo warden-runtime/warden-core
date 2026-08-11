@@ -1,14 +1,26 @@
 from typing import Annotated, Any, Literal, TypeAlias
 
+from jsonpath_ng import parse as parse_jsonpath
+from jsonpath_ng.exceptions import JsonPathParserError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SagaStepKind: TypeAlias = Literal["reason", "commit"]
-SAGA_STEP_KINDS: frozenset[str] = frozenset({"reason", "commit"})
+SagaStepKind: TypeAlias = Literal["reason", "commit", "spawn_sagas", "join_sagas"]
+SAGA_STEP_KINDS: frozenset[str] = frozenset({"reason", "commit", "spawn_sagas", "join_sagas"})
+WORKER_STEP_KINDS: frozenset[str] = frozenset({"reason", "commit"})
+ENGINE_NATIVE_STEP_KINDS: frozenset[str] = frozenset({"spawn_sagas", "join_sagas"})
+ENGINE_NATIVE_WORKER = ""
+ENGINE_NATIVE_WORKER_VERSION = "0.0.0"
+MAX_CHILDREN_HARD_CAP = 16
 AgentAdapterMode: TypeAlias = Literal["react", "simple"]
 DEFAULT_AGENT_ADAPTER: AgentAdapterMode = "react"
 
 DEFAULT_MAX_TURNS = 10
 MAX_TURNS_LIMIT = 200
+
+
+def is_engine_native_kind(kind: str) -> bool:
+    """True when the step kind is executed by the engine (no worker command)."""
+    return kind in ENGINE_NATIVE_STEP_KINDS
 
 
 class StepParameterSpec(BaseModel):
@@ -319,6 +331,86 @@ class CommitSagaStep(_SagaStepBase):
         return self
 
 
+class SpawnSpec(BaseModel):
+    """Fan-out configuration for a ``spawn_sagas`` step."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    saga_name: str
+    saga_version: str
+    items_from: str
+    item_var: str = "item"
+    result_from: str
+    max_children: int | None = Field(default=None, ge=1, le=MAX_CHILDREN_HARD_CAP)
+    input: dict[str, StepParameterSpec] = Field(default_factory=dict)
+
+    @field_validator("items_from", "result_from")
+    @classmethod
+    def jsonpath_must_start_with_dollar(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped.startswith("$"):
+            raise ValueError("JSONPath must start with '$'")
+        return stripped
+
+    @field_validator("item_var")
+    @classmethod
+    def item_var_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("item_var must be non-empty")
+        return stripped
+
+    @field_validator("saga_name", "saga_version")
+    @classmethod
+    def saga_ref_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("saga_name and saga_version must be non-empty")
+        return stripped
+
+
+class JoinSpec(BaseModel):
+    """Wait-all barrier configuration for a ``join_sagas`` step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    spawn_step_id: str
+    allow_zero_success: bool = True
+
+    @field_validator("spawn_step_id")
+    @classmethod
+    def spawn_step_id_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("spawn_step_id must be non-empty")
+        return stripped
+
+
+class _EngineNativeStepBase(BaseModel):
+    """Fields shared by engine-native spawn/join steps (no worker / tools / hitl)."""
+
+    id: str
+    name: str
+    timeout_seconds: int = 600
+    when: StepWhenSpec | None = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+class SpawnSagasStep(_EngineNativeStepBase):
+    """Engine-native fan-out: start child sagas for each item."""
+
+    kind: Literal["spawn_sagas"]
+    spawn: SpawnSpec
+
+
+class JoinSagasStep(_EngineNativeStepBase):
+    """Engine-native wait-all barrier over children of a spawn step."""
+
+    kind: Literal["join_sagas"]
+    join: JoinSpec
+
+
 class LoopUntilSpec(BaseModel):
     """Exit condition for a loop block: evaluated after each successful body pass."""
 
@@ -365,20 +457,26 @@ class LoopSagaStep(BaseModel):
         return v
 
 
-# Executable forward steps (reason/commit). Loop containers are top-level only.
+# Loop body steps stay reason/commit only.
 SagaStep = Annotated[
     ReasonSagaStep | CommitSagaStep,
     Field(discriminator="kind"),
 ]
 
+# Materializable forward steps (top-level executable + spawn/join).
+ExecutableSagaStep = Annotated[
+    ReasonSagaStep | CommitSagaStep | SpawnSagasStep | JoinSagasStep,
+    Field(discriminator="kind"),
+]
+
 TopLevelSagaStep = Annotated[
-    ReasonSagaStep | CommitSagaStep | LoopSagaStep,
+    ReasonSagaStep | CommitSagaStep | LoopSagaStep | SpawnSagasStep | JoinSagasStep,
     Field(discriminator="kind"),
 ]
 
 
 def iter_executable_step_ids(steps: list[TopLevelSagaStep]) -> list[str]:
-    """Collect reason/commit step ids across top-level steps and loop bodies."""
+    """Collect executable step ids across top-level steps and loop bodies."""
     ids: list[str] = []
     for step in steps:
         if isinstance(step, LoopSagaStep):
@@ -391,6 +489,13 @@ def iter_executable_step_ids(steps: list[TopLevelSagaStep]) -> list[str]:
 def iter_loop_ids(steps: list[TopLevelSagaStep]) -> list[str]:
     """Collect loop container ids from a blueprint steps list."""
     return [step.id for step in steps if isinstance(step, LoopSagaStep)]
+
+
+def _compile_jsonpath(path: str, *, step_id: str, field_name: str) -> None:
+    try:
+        parse_jsonpath(path)
+    except JsonPathParserError as e:
+        raise ValueError(f"spawn step {step_id!r} {field_name} is not a valid JSONPath: {e}") from e
 
 
 class SagaBlueprint(BaseModel):
@@ -418,3 +523,27 @@ class SagaBlueprint(BaseModel):
         if overlap:
             raise ValueError(f"Loop IDs must not collide with step IDs: {sorted(overlap)}")
         return v
+
+    @model_validator(mode="after")
+    def validate_spawn_join_wiring(self) -> "SagaBlueprint":
+        spawn_ids: set[str] = set()
+        joins: list[JoinSagasStep] = []
+        for step in self.steps:
+            if isinstance(step, SpawnSagasStep):
+                spawn_ids.add(step.id)
+                _compile_jsonpath(step.spawn.items_from, step_id=step.id, field_name="items_from")
+                _compile_jsonpath(step.spawn.result_from, step_id=step.id, field_name="result_from")
+            elif isinstance(step, JoinSagasStep):
+                joins.append(step)
+
+        seen_targets: set[str] = set()
+        for join in joins:
+            target = join.join.spawn_step_id
+            if target not in spawn_ids:
+                raise ValueError(
+                    f"join step {join.id!r} references unknown spawn_step_id {target!r}"
+                )
+            if target in seen_targets:
+                raise ValueError(f"spawn_step_id {target!r} is targeted by more than one join")
+            seen_targets.add(target)
+        return self

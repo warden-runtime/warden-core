@@ -291,6 +291,61 @@ async def _execute_step_retry(
         raise RecoveryConflictError(
             f"Step status is {step.status}; expected IN_PROGRESS for retry-step."
         )
+
+    from common.schemas.saga import is_engine_native_kind
+
+    from engine.child_sagas import try_complete_join
+
+    if is_engine_native_kind(step.step_kind):
+        if step.step_kind == "join_sagas":
+            await try_complete_join(parent=saga, join_step=step, db_conn=conn)
+            await get_registry().engine.on_operator_recovery_requested(
+                saga=saga,
+                step=step,
+                recovery_kind="retry-step",
+                conn=conn,
+                force=force,
+                allow_destructive=allow_destructive,
+                recovery_token=token,
+                reason=reason,
+                prior_idempotency_key=step.idempotency_key,
+                new_idempotency_key=step.idempotency_key,
+            )
+            return {
+                "status": "ok",
+                "idempotency_key": step.idempotency_key,
+                "worker_command_key": step.idempotency_key,
+                "recovery_token": token,
+            }
+        if step.step_kind == "spawn_sagas":
+            await trigger_step(
+                saga,
+                step.forward_seq,
+                conn,
+                allow_retry_in_progress=True,
+            )
+            await get_registry().engine.on_operator_recovery_requested(
+                saga=saga,
+                step=step,
+                recovery_kind="retry-step",
+                conn=conn,
+                force=force,
+                allow_destructive=allow_destructive,
+                recovery_token=token,
+                reason=reason,
+                prior_idempotency_key=step.idempotency_key,
+                new_idempotency_key=step.idempotency_key,
+            )
+            return {
+                "status": "scheduled",
+                "idempotency_key": step.idempotency_key,
+                "worker_command_key": step.idempotency_key,
+                "recovery_token": token,
+            }
+        raise RecoveryConflictError(
+            f"Unsupported engine-native step kind for retry-step: {step.step_kind!r}"
+        )
+
     _enforce_commit_force_gating(
         step=step,
         force=force,

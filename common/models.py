@@ -242,6 +242,12 @@ class SagaInstance(models.Model):
         description="Orchestration cursor: next_blueprint_index, active_loop_id.",
     )
     start_idempotency_key = fields.CharField(max_length=256, null=True)
+    parent_trace_id = fields.CharField(
+        max_length=32,
+        null=True,
+        db_index=True,
+        description="Parent saga trace_id when this instance was spawned by spawn_sagas.",
+    )
     started_at = fields.DatetimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -250,6 +256,23 @@ class SagaInstance(models.Model):
             ("namespace", "trace_id"),
             ("namespace", "start_idempotency_key"),
         )
+
+
+class SagaChild(models.Model):
+    """Link row from a parent spawn_sagas step to a child saga instance."""
+
+    id = fields.UUIDField(primary_key=True, default=uuid.uuid4)
+    namespace = fields.CharField(max_length=50, default="default")
+    parent_trace_id = fields.CharField(max_length=32)
+    spawn_step_id = fields.CharField(max_length=128)
+    spawn_span_id = fields.CharField(max_length=16)
+    item_id = fields.CharField(max_length=256)
+    child_trace_id = fields.CharField(max_length=32)
+    idempotency_key = fields.CharField(max_length=256, unique=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = "saga_children"
 
 
 class WorkerDefinition(models.Model):

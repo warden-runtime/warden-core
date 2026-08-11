@@ -1,6 +1,6 @@
 ---
 sidebar_position: 7
-pagination_prev: guides/manifests/loops
+pagination_prev: guides/manifests/child-sagas
 pagination_next: guides/manifests/compensation
 ---
 

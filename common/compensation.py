@@ -11,7 +11,15 @@ from common.models import StepStatus
 
 
 def forward_step_has_compensation(forward: SagaStepInstance) -> bool:
-    """True when the forward step declared a compensation block at saga start."""
+    """True when the forward step needs compensation handling on failure unwind.
+
+    ``spawn_sagas`` always participates (engine awaits children). ``join_sagas`` is a
+    no-op skip. Worker steps use the declared compensation block when present.
+    """
+    if forward.step_kind == "spawn_sagas":
+        return True
+    if forward.step_kind == "join_sagas":
+        return False
     return forward.compensation_definition is not None
 
 

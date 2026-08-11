@@ -8,6 +8,7 @@ REQUIRED_CORE_TABLES: tuple[str, ...] = (
     "saga_definitions",
     "saga_instances",
     "saga_step_instances",
+    "saga_children",
     "outbox_events",
     "processed_commands",
 )
@@ -29,6 +30,7 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
         "frozen_steps",
         "loop_definitions",
         "loop_state",
+        "parent_trace_id",
     ),
 }
 

@@ -72,6 +72,7 @@ const sidebars: SidebarsConfig = {
             'guides/manifests/mcp-and-tools',
             'guides/manifests/when-cel',
             'guides/manifests/loops',
+            'guides/manifests/child-sagas',
             'guides/manifests/policies',
             'guides/manifests/compensation',
           ],

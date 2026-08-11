@@ -49,13 +49,21 @@ async def resolve_executable_step_assets(
     schemas_root: str | None,
     compensations_root: str | None,
 ) -> list[tuple[dict[str, Any] | None, dict[str, Any] | None]]:
-    """Load output_schema and compensation for executable (reason/commit) step specs."""
+    """Load output_schema and compensation for executable step specs.
+
+    Engine-native spawn/join steps have no schema or compensation artifacts.
+    """
+    from common.schemas.saga import JoinSagasStep, SpawnSagasStep
+
     resolved: list[tuple[dict[str, Any] | None, dict[str, Any] | None]] = []
     for order_index, step_spec in enumerate(step_specs):
         if not isinstance(step_spec, dict):
             raise ValueError(f"Saga step at index {order_index} must be a mapping")
         clean = {k: v for k, v in step_spec.items() if not str(k).startswith("_")}
         step_model = parse_executable_step(clean)
+        if isinstance(step_model, (SpawnSagasStep, JoinSagasStep)):
+            resolved.append((None, None))
+            continue
         step_id = step_model.id
         try:
             resolved_output_schema = await load_output_schema(
@@ -149,6 +157,7 @@ async def _create_saga_and_steps(
     idempotency_key: str | None,
     schemas_root: str | None,
     compensations_root: str | None,
+    parent_trace_id: str | None = None,
 ) -> str:
     frozen_steps = list(definition.body.get("steps") or [])
     segment, loop_state = take_initial_materialization_segment(frozen_steps)
@@ -179,6 +188,7 @@ async def _create_saga_and_steps(
         loop_definitions=loop_definitions,
         loop_state=loop_state,
         start_idempotency_key=idempotency_key,
+        parent_trace_id=parent_trace_id,
         using_db=conn,
     )
     await get_registry().engine.on_saga_created(

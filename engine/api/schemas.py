@@ -171,6 +171,7 @@ class SagaInstanceItem(BaseModel):
     status: str
     started_at: datetime
     start_idempotency_key: str | None = None
+    parent_trace_id: str | None = None
 
 
 class SagaInstanceListResponse(BaseModel):
@@ -247,7 +248,7 @@ class PendingReviewStepItem(BaseModel):
     step_span_id: str
     step_id: str
     step_name: str
-    step_kind: Literal["reason", "commit"]
+    step_kind: Literal["reason", "commit", "spawn_sagas", "join_sagas"]
     order_index: int
     worker: str
     worker_version: str

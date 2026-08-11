@@ -56,7 +56,7 @@ from common.policy_gate import PolicyGateOutcome, run_policy_gate
 from common.processed_command_reap import release_worker_claim_for_retry
 from common.prompts import assert_prompt_file_exists
 from common.schemas.engine_events import AuditEngineEventType
-from common.schemas.saga import SAGA_STEP_KINDS
+from common.schemas.saga import WORKER_STEP_KINDS, is_engine_native_kind
 from common.step_output import (
     step_context_entry_for_saga,
     validate_business_data_schema,
@@ -1435,6 +1435,9 @@ async def _apply_step_failure_lifecycle(
             payload_schema=failed_payload,
             conn=db_conn,
         )
+        from engine.child_sagas import on_child_saga_terminal
+
+        await on_child_saga_terminal(saga, db_conn, trace_context=trace_ctx)
         return
 
     logger.info("Triggering compensation starting at forward_seq %s", start_compensation_seq)
@@ -1747,6 +1750,9 @@ async def handle_saga_completion(
         payload_schema=final_payload,
         conn=db_conn,
     )
+    from engine.child_sagas import on_child_saga_terminal
+
+    await on_child_saga_terminal(saga, db_conn, trace_context=trace_context)
 
 
 def _step_tool_and_resource_specs(step: SagaStepInstance) -> tuple[list[dict[str, Any]], list[Any]]:
@@ -1938,10 +1944,10 @@ async def _build_forward_worker_command(
     schedule_acc: EngineTimingAccumulator | None = None,
 ) -> tuple[DoStepCommand | DoCommitCommand, str] | None:
     tool_specs, resource_specs = _step_tool_and_resource_specs(step)
-    if step.step_kind not in SAGA_STEP_KINDS:
+    if step.step_kind not in WORKER_STEP_KINDS:
         raise ValueError(
-            f"Step {step.span_id} has invalid step_kind: {step.step_kind!r}; "
-            f"expected one of {sorted(SAGA_STEP_KINDS)!r}"
+            f"Step {step.span_id} has invalid step_kind for worker dispatch: "
+            f"{step.step_kind!r}; expected one of {sorted(WORKER_STEP_KINDS)!r}"
         )
     if step.step_kind == "commit":
         return await _build_commit_worker_command(
@@ -2051,6 +2057,35 @@ async def trigger_step(
     schedule_acc.start("schedule")
 
     try:
+        if is_engine_native_kind(step_to_run.step_kind):
+            schedule_acc.stop("schedule", bucket="schedule_ms")
+            from engine.child_sagas import execute_spawn_sagas, park_or_complete_join
+
+            await get_registry().engine.on_step_started(
+                saga=saga,
+                step=step_to_run,
+                conn=db_conn,
+                trace_context=trace_context,
+                from_status=schedule_from,
+            )
+            if step_to_run.step_kind == "spawn_sagas":
+                await execute_spawn_sagas(
+                    saga=saga,
+                    step=step_to_run,
+                    db_conn=db_conn,
+                    trace_context=trace_context,
+                )
+            elif step_to_run.step_kind == "join_sagas":
+                await park_or_complete_join(
+                    saga=saga,
+                    step=step_to_run,
+                    db_conn=db_conn,
+                    trace_context=trace_context,
+                )
+            else:
+                raise ValueError(f"Unsupported engine-native kind {step_to_run.step_kind!r}")
+            return
+
         worker_args = resolve_parameters_spec(
             step_to_run.parameters_spec or {},
             saga.context or {},
@@ -2176,6 +2211,9 @@ async def _finalize_saga_compensated(
         payload_schema=final_payload,
         conn=db_conn,
     )
+    from engine.child_sagas import on_child_saga_terminal
+
+    await on_child_saga_terminal(saga, db_conn, trace_context=trace_context)
 
 
 async def _emit_saga_failed_from_compensation(
@@ -2228,6 +2266,9 @@ async def _emit_saga_failed_from_compensation(
         payload_schema=failed_payload,
         conn=db_conn,
     )
+    from engine.child_sagas import on_child_saga_terminal
+
+    await on_child_saga_terminal(saga, db_conn, trace_context=trace_context)
 
 
 async def _load_forward_step_for_compensation(
@@ -2469,6 +2510,20 @@ async def _advance_lifo_compensation(
                 saga.trace_id,
                 forward.span_id,
             )
+            return
+
+        if forward.step_kind == "spawn_sagas":
+            from engine.child_sagas import compensate_spawn_sagas_forward
+
+            advanced = await compensate_spawn_sagas_forward(
+                saga=saga,
+                forward=forward,
+                db_conn=db_conn,
+                trace_context=trace_context,
+            )
+            if not advanced:
+                return
+            # compensate_spawn_sagas_forward already continued LIFO
             return
 
         await _schedule_compensation_for_forward(
