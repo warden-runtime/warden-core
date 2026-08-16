@@ -71,6 +71,7 @@ class AgentAdapterPort(ABC):
         arguments: dict[str, Any],
         tool_specs: list[dict[str, Any]],
         resource_specs: list[ResourceSpec] | None = None,
+        skill_specs: list[dict[str, Any]] | None = None,
         context: dict[str, Any] | None = None,
         output_schema: dict[str, Any] | None = None,
         max_turns: int | None = None,

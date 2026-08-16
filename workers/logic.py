@@ -58,6 +58,7 @@ from workers.step_context import (
     load_forward_step,
     load_saga_instance,
     merge_resource_specs,
+    merge_skill_specs,
     merge_tool_specs,
 )
 
@@ -76,6 +77,7 @@ def _tool_names_from_specs(tool_specs: list[dict[str, Any]] | None) -> list[str]
 class _HydratedExecution:
     tool_specs: list[dict[str, Any]]
     resource_specs: list[Any]
+    skill_specs: list[dict[str, Any]]
     output_schema: dict[str, Any] | None
     prompt_template: str | None
     step_output: dict[str, Any] | None
@@ -115,6 +117,7 @@ async def _hydrate_compensation_command(
     return _HydratedExecution(
         tool_specs=merge_tool_specs(cmd.tool_specs, comp_step.tools_allow),
         resource_specs=merge_resource_specs(cmd.resource_specs, comp_step.resources_allow),
+        skill_specs=[],
         output_schema=None,
         prompt_template=None,
         step_output=effective_forward_step_output(forward),
@@ -126,6 +129,22 @@ async def _hydrate_compensation_command(
         facts_extractors=[],
         agent_adapter="react",
     )
+
+
+async def _hydrate_do_step_prompt(cmd: DoStepCommand) -> str:
+    prompts_root = get_settings().prompts_root
+    if not prompts_root or not str(prompts_root).strip():
+        raise ValueError("prompts_root is not configured; set PROMPTS_ROOT on the worker service.")
+    return await run_in_executor_with_log_context(
+        load_prompt_content,
+        prompts_root,
+        cmd.prompt_ref,
+    )
+
+
+def _facts_extractors_from_step(step: Any) -> list[dict[str, Any]]:
+    raw_facts = step.facts_extractors if isinstance(step.facts_extractors, list) else []
+    return [entry for entry in raw_facts if isinstance(entry, dict)]
 
 
 async def _hydrate_forward_command(
@@ -142,22 +161,14 @@ async def _hydrate_forward_command(
     )
     prompt_template: str | None = None
     if isinstance(cmd, DoStepCommand):
-        prompts_root = get_settings().prompts_root
-        if not prompts_root or not str(prompts_root).strip():
-            raise ValueError(
-                "prompts_root is not configured; set PROMPTS_ROOT on the worker service."
-            )
-        prompt_template = await run_in_executor_with_log_context(
-            load_prompt_content,
-            prompts_root,
-            cmd.prompt_ref,
-        )
+        prompt_template = await _hydrate_do_step_prompt(cmd)
     output_schema = step.output_schema if isinstance(step.output_schema, dict) else None
-    raw_facts = step.facts_extractors if isinstance(step.facts_extractors, list) else []
-    facts_extractors = [entry for entry in raw_facts if isinstance(entry, dict)]
+    skill_wire = getattr(cmd, "skill_specs", None) if isinstance(cmd, DoStepCommand) else None
+    skill_full = getattr(step, "skills_allow", None)
     return _HydratedExecution(
         tool_specs=merge_tool_specs(cmd.tool_specs, step.tools_allow),
         resource_specs=merge_resource_specs(cmd.resource_specs, step.resources_allow),
+        skill_specs=merge_skill_specs(skill_wire, skill_full),
         output_schema=output_schema,
         prompt_template=prompt_template,
         step_output=None,
@@ -166,7 +177,7 @@ async def _hydrate_forward_command(
         max_turns=step.max_turns,
         max_step_tokens=getattr(step, "max_step_tokens", None),
         max_completion_tokens=getattr(step, "max_completion_tokens", None),
-        facts_extractors=facts_extractors,
+        facts_extractors=_facts_extractors_from_step(step),
         agent_adapter=str(getattr(step, "agent_adapter", None) or "react"),
     )
 
@@ -922,6 +933,7 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
                 arguments=cmd.arguments,
                 tool_specs=execution.hydrated.tool_specs,
                 resource_specs=execution.hydrated.resource_specs,
+                skill_specs=execution.hydrated.skill_specs,
                 context=execution.injection_context,
                 output_schema=execution.hydrated.output_schema,
                 max_turns=execution.hydrated.max_turns,

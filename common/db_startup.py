@@ -25,6 +25,7 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
         "forward_seq",
         "loop_id",
         "iteration",
+        "skills_allow",
     ),
     "saga_instances": (
         "frozen_steps",

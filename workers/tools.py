@@ -13,6 +13,8 @@ import anyio.lowlevel
 from anyio.abc import Process
 from anyio.streams.text import TextReceiveStream
 from common.agent_adapter import ExecutionStepError
+from common.config import get_settings
+from common.error_details import build_step_error_details
 from common.governance import execute_with_governance
 from common.plugins.context import (
     ExecutionScope,
@@ -21,6 +23,7 @@ from common.plugins.context import (
 )
 from common.plugins.registry import get_registry
 from common.resource_specs import ResourceSpec
+from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_body
 from common.utils import format_exception_chain, resolve_bindable_json_type
 from langchain_core.tools import StructuredTool
 from mcp import ClientSession
@@ -226,6 +229,58 @@ def _resolve_mcp_json_type(field_def: dict[str, Any]) -> tuple[str, bool]:
 
 class _ReadResourceArgs(BaseModel):
     uri: str = Field(..., description="Full MCP resource URI to read.")
+
+
+class _LoadSkillArgs(BaseModel):
+    name: str = Field(..., description="Skill id to load (must be on the step skills.allow list).")
+
+
+def _skill_ids_from_specs(skill_specs: list[dict[str, Any]] | None) -> list[str]:
+    ids: list[str] = []
+    for spec in skill_specs or []:
+        if isinstance(spec, dict):
+            name = spec.get("name")
+            if isinstance(name, str) and name.strip():
+                ids.append(name.strip())
+    return ids
+
+
+def _build_load_skill_tool(
+    *,
+    worker_name: str,
+    allowed_skill_ids: list[str],
+) -> StructuredTool:
+    allowed = set(allowed_skill_ids)
+
+    async def _execute_load_skill(name: str) -> str:
+        skill_id = (name or "").strip()
+        if skill_id not in allowed:
+            raise ExecutionStepError(
+                f"Skill {skill_id!r} is not on this step's skills.allow list",
+                error_details=build_step_error_details(
+                    code="SKILL_NOT_ALLOWED",
+                    message=f"Skill {skill_id!r} is not on this step's skills.allow list",
+                    skill=skill_id,
+                    allowed_skills=sorted(allowed),
+                ),
+            )
+        try:
+            return load_skill_body(get_settings().skills_root or "", worker_name, skill_id)
+        except SkillLoadError as e:
+            details = build_step_error_details(code=e.code, message=e.message)
+            if e.skill:
+                details["skill"] = e.skill
+            raise ExecutionStepError(e.message, error_details=details) from e
+
+    return StructuredTool.from_function(
+        coroutine=_execute_load_skill,
+        name=LOAD_SKILL_TOOL_NAME,
+        description=(
+            "Load the full body of an allowed skill playbook by name. "
+            "Call this before following a multi-step procedure described in allowed_skills."
+        ),
+        args_schema=_LoadSkillArgs,
+    )
 
 
 async def _emit_resource_allowlist_loaded(
@@ -557,27 +612,69 @@ async def _process_mcp_source(
         return []
 
 
+def _spec_by_name_rejecting_load_skill(
+    tool_specs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    spec_by_name: dict[str, dict[str, Any]] = {}
+    for spec in tool_specs or []:
+        name = spec.get("name")
+        if not isinstance(name, str):
+            continue
+        if name == LOAD_SKILL_TOOL_NAME:
+            raise ExecutionStepError(
+                "MCP tool name 'load_skill' is reserved for skill loading; "
+                "rename the tool in tool_specs.",
+                error_details={"code": "reserved_tool_name", "tool": LOAD_SKILL_TOOL_NAME},
+            )
+        spec_by_name[name] = spec
+    return spec_by_name
+
+
+def _reject_loaded_mcp_load_skill(loaded_tool_names: set[str]) -> None:
+    if LOAD_SKILL_TOOL_NAME in loaded_tool_names:
+        raise ExecutionStepError(
+            "MCP tool name 'load_skill' is reserved for skill loading; rename the MCP tool.",
+            error_details={"code": "reserved_tool_name", "tool": LOAD_SKILL_TOOL_NAME},
+        )
+
+
+def _append_load_skill_tool(
+    tools: list[StructuredTool],
+    *,
+    worker_def: Any,
+    skill_ids: list[str],
+) -> None:
+    if not skill_ids:
+        return
+    tools.append(
+        _build_load_skill_tool(
+            worker_name=str(worker_def.name),
+            allowed_skill_ids=skill_ids,
+        )
+    )
+
+
 async def build_tools_for_worker(
     worker_def,  # WorkerDefinition ORM model
     tool_specs: list[dict[str, Any]],
     exit_stack: AsyncExitStack,
     context: dict[str, Any] | None = None,
     resource_specs: list[ResourceSpec] | None = None,
+    skill_specs: list[dict[str, Any]] | None = None,
 ) -> list[StructuredTool]:
     """Connect to MCP sources, filter by tool_specs, return LangChain tools with governance."""
     scope = execution_scope_from_injection(context)
     conn = db_conn_from_injection(context)
     hook_kw = _hook_kwargs(context)
     allowlist = compile_resource_allowlist(resource_specs)
+    skill_ids = _skill_ids_from_specs(skill_specs)
     final_tools: list[StructuredTool] = []
-    spec_by_name: dict[str, dict[str, Any]] = {}
-    for spec in tool_specs or []:
-        name = spec.get("name")
-        if isinstance(name, str):
-            spec_by_name[name] = spec
+    spec_by_name = _spec_by_name_rejecting_load_skill(tool_specs)
     allowed_tools = list(spec_by_name.keys())
     loaded_tool_names: set[str] = set()
     used_sanitized_names: set[str] = set()
+    if skill_ids:
+        used_sanitized_names.add(LOAD_SKILL_TOOL_NAME)
     source_failures: list[dict[str, Any]] = []
     source_sessions: list[tuple[str | None, ClientSession]] = []
     saga_vars = _saga_vars_from_context(context)
@@ -585,13 +682,15 @@ async def build_tools_for_worker(
     has_required_resources: dict[str | None, bool] = {}
 
     if not worker_def.tool_sources:
-        return await _handle_no_sources(
+        tools = await _handle_no_sources(
             allowlist=allowlist,
             scope=scope,
             conn=conn,
             hook_kw=hook_kw,
             allowed_tools=allowed_tools,
         )
+        _append_load_skill_tool(tools, worker_def=worker_def, skill_ids=skill_ids)
+        return tools
 
     for source in worker_def.tool_sources:
         final_tools.extend(
@@ -613,6 +712,8 @@ async def build_tools_for_worker(
                 has_required_resources=has_required_resources,
             )
         )
+
+    _reject_loaded_mcp_load_skill(loaded_tool_names)
 
     if allowlist is not None and source_sessions and not any(has_required_resources.values()):
         raise ExecutionStepError(
@@ -659,6 +760,7 @@ async def build_tools_for_worker(
             )
         )
 
+    _append_load_skill_tool(final_tools, worker_def=worker_def, skill_ids=skill_ids)
     return final_tools
 
 

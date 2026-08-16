@@ -223,6 +223,28 @@ async def _validate_step_prompt(
     )
 
 
+async def _validate_step_skills(
+    *,
+    skills_root: str | None,
+    step: SagaStep,
+) -> None:
+    if not isinstance(step, ReasonSagaStep):
+        return
+    skills = step.skills.allow if step.skills else []
+    if not skills:
+        return
+    from common.skills import SkillLoadError, validate_skill_files_at_register
+
+    try:
+        validate_skill_files_at_register(
+            skills_root,
+            step.worker,
+            [s.name for s in skills],
+        )
+    except SkillLoadError as e:
+        raise ValueError(str(e.message)) from e
+
+
 async def _validate_step_policy(
     *,
     policies_root: str | None,
@@ -276,6 +298,13 @@ async def _validate_one_saga_step_at_registration(
         )
     except (OSError, ValueError) as e:
         raise ValueError(f"{step_label} prompt is invalid: {e}") from e
+    try:
+        await _validate_step_skills(
+            skills_root=settings.skills_root,
+            step=step,
+        )
+    except (OSError, ValueError) as e:
+        raise ValueError(f"{step_label} skills are invalid: {e}") from e
     try:
         await _validate_step_policy(
             policies_root=settings.policies_root,

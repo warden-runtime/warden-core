@@ -26,6 +26,7 @@ Engine and worker run in containers; you run `warden` on the host.
 | `DB_URL` | `postgres://...@127.0.0.1:5432/engine_db` (host CLI, `make migrate`) | Built by Compose → `...@postgres:5432/...` (**engine + worker**) |
 | `ENGINE_URL` | `http://127.0.0.1:8000` (**CLI only**) | not set — engine/worker use Postgres, not HTTP to each other |
 | `PROMPTS_ROOT` | **Leave unset** in `.env` | `/app/prompts` (set in `docker-compose.yml`) |
+| `SKILLS_ROOT` | **Leave unset** in `.env` | `/app/skills` |
 | `POLICIES_ROOT` | **Leave unset** in `.env` | `/app/policies` |
 | `SCHEMAS_ROOT` | **Leave unset** in `.env` | `/app/schemas` |
 | `COMPENSATIONS_ROOT` | **Leave unset** in `.env` | `/app/compensations` |
@@ -35,12 +36,13 @@ Compose mounts your repo's `./config/` tree into each container. The host path a
 | Repo path (host disk) | Mount inside container | Read by |
 |-----------------------|------------------------|---------|
 | `./config/prompts/` | `/app/prompts` | engine (register + validate), worker (execute) |
+| `./config/skills/` | `/app/skills` | engine (register + validate), worker (execute) |
 | `./config/policies/` | `/app/policies` | engine |
 | `./config/schemas/` | `/app/schemas` | engine |
 | `./config/compensations/` | `/app/compensations` | engine |
 
 :::warning[Do not mix host paths into `.env` for Compose]
-If you set `PROMPTS_ROOT=./config/prompts` in `.env`, Compose injects that value into containers via `env_file` — but `./config/prompts` does not exist *inside* the container filesystem. The compose file already sets `PROMPTS_ROOT=/app/prompts` and mounts `./config/prompts` there. **Leave `PROMPTS_ROOT`, `POLICIES_ROOT`, `SCHEMAS_ROOT`, and `COMPENSATIONS_ROOT` unset in `.env` for standard `make up` workflows** so containers use those compose-defined paths instead of a host-relative path that does not resolve inside the image.
+If you set `PROMPTS_ROOT=./config/prompts` in `.env`, Compose injects that value into containers via `env_file` — but `./config/prompts` does not exist *inside* the container filesystem. The compose file already sets `PROMPTS_ROOT=/app/prompts` and mounts `./config/prompts` there. **Leave `PROMPTS_ROOT`, `SKILLS_ROOT`, `POLICIES_ROOT`, `SCHEMAS_ROOT`, and `COMPENSATIONS_ROOT` unset in `.env` for standard `make up` workflows** so containers use those compose-defined paths instead of a host-relative path that does not resolve inside the image.
 :::
 
 `warden deploy -f config/saga.minimal.yaml` reads YAML from your host working tree. After deploy, manifest bodies live in Postgres; prompt, policy, schema, and compensation **files** stay on disk and must be visible at the container `*_ROOT` paths above.
@@ -221,6 +223,7 @@ Worker and saga **manifest YAML** is stored in Postgres when you `warden deploy`
 | Variable | Resolves | Consumer |
 |----------|----------|----------|
 | `PROMPTS_ROOT` | `prompt: foo.j2` → `{root}/foo.j2` | engine (register), worker (execute) |
+| `SKILLS_ROOT` | `skills.allow: [{name: triage}]` → `{root}/<worker>/triage.md` | engine (register), worker (execute) |
 | `POLICIES_ROOT` | `policy: gate.yaml` → `{root}/gate.yaml` (legacy stem `gate` → `{root}/gate.yaml`) | engine |
 | `SCHEMAS_ROOT` | `output_schema: triage.json` → `{root}/triage.json` | engine (register + saga start) |
 | `COMPENSATIONS_ROOT` | `compensation: disburse_undo.yaml` → `{root}/disburse_undo.yaml` | engine (register + saga start) |

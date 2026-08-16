@@ -32,6 +32,7 @@ from common.plugins.context import db_conn_from_injection, execution_scope_from_
 from common.plugins.registry import get_registry
 from common.resource_specs import ResourceSpec
 from common.schemas.saga import DEFAULT_MAX_TURNS
+from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_document
 from common.step_facts import StepFactsExtractionError, extract_step_facts
 from common.step_output import business_data_from_step_output, wrap_step_output_data
 from common.tool_results import clip_tool_text_for_llm, resolve_tool_message_limit
@@ -47,6 +48,7 @@ from workers.adapters.react_loop import (
 from workers.adapters.simple_schema import resolve_effective_schema
 from workers.llm import build_llm
 from workers.llm.structured import invoke_structured_output
+from workers.step_context import union_tool_specs_with_skill_tools
 from workers.tools import (
     build_tools_for_worker,
     get_warden_tool_mcp_name,
@@ -55,6 +57,39 @@ from workers.tools import (
 from workers.utils import resolve_step_prompt
 
 logger = logging.getLogger(__name__)
+
+
+def _execution_error_from_skill_load(exc: SkillLoadError) -> ExecutionStepError:
+    details = build_step_error_details(code=exc.code, message=exc.message)
+    if exc.skill:
+        details["skill"] = exc.skill
+    return ExecutionStepError(exc.message, error_details=details)
+
+
+def _resolve_skills_for_step(
+    *,
+    worker_name: str,
+    skill_specs: list[dict[str, Any]],
+    extras: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Load skill metas from disk, union tools, return (effective_tool_specs, allowed_skills index)."""
+    skills_root = get_settings().skills_root
+    skill_tool_names: list[str] = []
+    index: list[dict[str, str]] = []
+    for spec in skill_specs:
+        if not isinstance(spec, dict):
+            continue
+        skill_id = str(spec.get("name") or "").strip()
+        if not skill_id:
+            continue
+        try:
+            doc = load_skill_document(skills_root or "", worker_name, skill_id)
+        except SkillLoadError as e:
+            raise _execution_error_from_skill_load(e) from e
+        skill_tool_names.extend(doc.allowed_tools)
+        index.append({"name": doc.name, "description": doc.description})
+    effective = union_tool_specs_with_skill_tools(extras=extras, skill_tool_names=skill_tool_names)
+    return effective, index
 
 
 def _timing_acc_from_context(context: dict[str, Any] | None) -> WorkerTimingAccumulator | None:
@@ -458,6 +493,7 @@ class LangChainAdapter(AgentAdapterPort):
         arguments: dict[str, Any],
         tool_specs: list[dict[str, Any]],
         resource_specs: list[ResourceSpec] | None = None,
+        skill_specs: list[dict[str, Any]] | None = None,
         context: dict[str, Any] | None = None,
         output_schema: dict[str, Any] | None = None,
         max_turns: int | None = None,
@@ -471,8 +507,17 @@ class LangChainAdapter(AgentAdapterPort):
         usage_acc = _usage_acc_from_context(ctx)
         turn_budget = max_turns if max_turns is not None else DEFAULT_MAX_TURNS
         resources = resource_specs or []
+        skills = skill_specs or []
 
         if agent_adapter == "simple":
+            if skills:
+                raise ExecutionStepError(
+                    "simple agent-adapter does not support skills.allow",
+                    error_details=build_step_error_details(
+                        code="SKILL_INVALID",
+                        message="simple agent-adapter does not support skills.allow",
+                    ),
+                )
             template_context = {**arguments}
             final_input = resolve_step_prompt(
                 prompt_template=prompt_template,
@@ -494,33 +539,46 @@ class LangChainAdapter(AgentAdapterPort):
                 resource_specs=resources,
             )
 
-        spec_names = [name for t in (tool_specs or []) if isinstance(name := t.get("name"), str)]
-        if "_submit" in spec_names:
-            raise ExecutionStepError(
-                "MCP tool name '_submit' is reserved for step completion; rename the tool in tool_specs.",
-                error_details={"code": "reserved_tool_name", "tool": "_submit"},
+        effective_tool_specs = list(tool_specs or [])
+        allowed_skills_index: list[dict[str, str]] = []
+        if skills:
+            effective_tool_specs, allowed_skills_index = _resolve_skills_for_step(
+                worker_name=str(self._worker_definition.name),
+                skill_specs=skills,
+                extras=effective_tool_specs,
             )
+
+        spec_names = [name for t in effective_tool_specs if isinstance(name := t.get("name"), str)]
+        for reserved in (SUBMIT_TOOL_NAME, LOAD_SKILL_TOOL_NAME):
+            if reserved in spec_names:
+                raise ExecutionStepError(
+                    f"MCP tool name '{reserved}' is reserved; rename the tool in tool_specs.",
+                    error_details={"code": "reserved_tool_name", "tool": reserved},
+                )
 
         if timing_acc is not None:
             timing_acc.start("adapter_setup")
         async with AsyncExitStack() as stack:
             mcp_tools = await build_tools_for_worker(
                 worker_def=self._worker_definition,
-                tool_specs=tool_specs,
+                tool_specs=effective_tool_specs,
                 exit_stack=stack,
                 context=ctx,
                 resource_specs=resources or None,
+                skill_specs=skills or None,
             )
             allowed_tool_names = [tool.name for tool in mcp_tools]
-            if "_submit" in allowed_tool_names:
+            if SUBMIT_TOOL_NAME in allowed_tool_names:
                 raise ExecutionStepError(
                     "MCP tool name '_submit' is reserved for step completion; rename the tool in tool_specs.",
                     error_details={"code": "reserved_tool_name", "tool": "_submit"},
                 )
-            template_context = {
+            template_context: dict[str, Any] = {
                 **arguments,
-                "allowed_tools": allowed_tool_names + ["_submit"],
+                "allowed_tools": allowed_tool_names + [SUBMIT_TOOL_NAME],
             }
+            if allowed_skills_index:
+                template_context["allowed_skills"] = allowed_skills_index
             final_input = resolve_step_prompt(
                 prompt_template=prompt_template,
                 template_context=template_context,

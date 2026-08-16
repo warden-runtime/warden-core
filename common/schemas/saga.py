@@ -74,6 +74,32 @@ class ResourcesSpec(BaseModel):
     allow: list[Resource] = Field(default_factory=list)
 
 
+class Skill(BaseModel):
+    """A step-level allowlist entry for a worker-scoped skill on disk."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def skill_name_non_empty(cls, v: str) -> str:
+        stripped = (v or "").strip()
+        if not stripped:
+            raise ValueError("skill name must be non-empty")
+        if stripped == "load_skill":
+            raise ValueError("skill name 'load_skill' is reserved")
+        return stripped
+
+
+class SkillsSpec(BaseModel):
+    """Step-level skill allowlist (refs under SKILLS_ROOT/<worker>/<name>.md)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow: list[Skill] = Field(default_factory=list)
+
+
 class StepWhenSpec(BaseModel):
     """Optional schedule gate: CEL evaluated against saga context before the step runs."""
 
@@ -280,6 +306,13 @@ class ReasonSagaStep(_SagaStepBase):
         ),
     )
     tools: ToolsSpec | None = None
+    skills: SkillsSpec | None = Field(
+        default=None,
+        description=(
+            "Optional worker-scoped skill allowlist for react reason steps. "
+            "Skill frontmatter allowed_tools union with tools.allow into the effective MCP allowlist."
+        ),
+    )
     facts: list[StepFactsExtractor] | None = Field(
         default=None,
         description=(
@@ -313,8 +346,21 @@ class ReasonSagaStep(_SagaStepBase):
         resources = self.resources.allow if self.resources else []
         if resources:
             raise ValueError("simple agent-adapter requires an empty resources.allow")
+        skills = self.skills.allow if self.skills else []
+        if skills:
+            raise ValueError("simple agent-adapter requires an empty skills.allow")
         if self.facts:
             raise ValueError("facts require tool results; incompatible with simple agent-adapter")
+        return self
+
+    @model_validator(mode="after")
+    def validate_tools_allow_rejects_load_skill(self) -> "ReasonSagaStep":
+        tools = self.tools.allow if self.tools else []
+        for tool in tools:
+            if tool.name == "load_skill":
+                raise ValueError(
+                    "tools.allow must not include reserved virtual tool name 'load_skill'"
+                )
         return self
 
 
@@ -328,6 +374,8 @@ class CommitSagaStep(_SagaStepBase):
     def validate_exactly_one_tool(self) -> "CommitSagaStep":
         if len(self.tools.allow) != 1:
             raise ValueError("commit steps require exactly one tool in tools.allow")
+        if self.tools.allow[0].name == "load_skill":
+            raise ValueError("tools.allow must not include reserved virtual tool name 'load_skill'")
         return self
 
 

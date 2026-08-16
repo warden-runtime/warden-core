@@ -16,6 +16,7 @@ from common.schemas.saga import (
     JoinSagasStep,
     ReasonSagaStep,
     ResourcesSpec,
+    SkillsSpec,
     SpawnSagasStep,
     ToolsSpec,
 )
@@ -111,6 +112,7 @@ def _step_create_fields(
                 "worker_version": ENGINE_NATIVE_WORKER_VERSION,
                 "tools_allow": [],
                 "resources_allow": [],
+                "skills_allow": [],
                 "parameters_spec": {},
                 "policy_name": None,
                 "hitl_required": False,
@@ -126,6 +128,11 @@ def _step_create_fields(
 
     tools_spec = step_model.tools or ToolsSpec()
     resources_spec = step_model.resources or ResourcesSpec()
+    skills_spec = (
+        step_model.skills
+        if isinstance(step_model, ReasonSagaStep) and step_model.skills is not None
+        else SkillsSpec()
+    )
     base.update(
         {
             "max_turns": step_model.max_turns,
@@ -133,6 +140,7 @@ def _step_create_fields(
             "worker_version": step_model.worker_version,
             "tools_allow": [t.model_dump(mode="json") for t in tools_spec.allow],
             "resources_allow": [r.model_dump(mode="json") for r in resources_spec.allow],
+            "skills_allow": [s.model_dump(mode="json") for s in skills_spec.allow],
             "parameters_spec": clean.get("with") or {},
             "policy_name": step_model.policy,
             "hitl_required": step_model.hitl,

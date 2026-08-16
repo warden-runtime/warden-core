@@ -97,6 +97,10 @@ class DoStepCommand(BaseSagaMessage):
         description='Slim allowlist: [{"name": "tool_name"}, ...]; full specs on SagaStepInstance.',
     )
     resource_specs: list[ResourceSpec] = Field(default_factory=list)
+    skill_specs: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description='Skill allowlist refs: [{"name": "skill_id"}, ...]; bodies load from SKILLS_ROOT.',
+    )
 
 
 class DoCommitCommand(BaseSagaMessage):

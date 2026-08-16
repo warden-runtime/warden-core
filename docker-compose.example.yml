@@ -74,6 +74,7 @@ services:
       POLICIES_ROOT: /app/policies
       SCHEMAS_ROOT: /app/schemas
       COMPENSATIONS_ROOT: /app/compensations
+      SKILLS_ROOT: /app/skills
     ports:
       - "8000:8000"
     volumes:
@@ -81,6 +82,7 @@ services:
       - ./config/policies:/app/policies:ro
       - ./config/schemas:/app/schemas:ro
       - ./config/compensations:/app/compensations:ro
+      - ./config/skills:/app/skills:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,8 +104,10 @@ services:
       PYTHONPATH: /app
       DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       PROMPTS_ROOT: /app/prompts
+      SKILLS_ROOT: /app/skills
     volumes:
       - ./config/prompts:/app/prompts:ro
+      - ./config/skills:/app/skills:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -147,6 +147,13 @@ class SagaStepInstance(models.Model):
             "(uri, optional description)."
         ),
     )
+    skills_allow = fields.JSONField(
+        default=list,
+        description=(
+            "List of skill spec dicts from saga YAML skills.allow "
+            "(name under SKILLS_ROOT/<worker>/)."
+        ),
+    )
     parameters_spec = fields.JSONField(
         default=dict,
         description="Step ``with`` map: argument name → {from: JSONPath} or {value: literal}.",

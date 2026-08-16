@@ -1755,14 +1755,19 @@ async def handle_saga_completion(
     await on_child_saga_terminal(saga, db_conn, trace_context=trace_context)
 
 
-def _step_tool_and_resource_specs(step: SagaStepInstance) -> tuple[list[dict[str, Any]], list[Any]]:
+def _step_tool_and_resource_specs(
+    step: SagaStepInstance,
+) -> tuple[list[dict[str, Any]], list[Any], list[dict[str, Any]]]:
     tool_specs = step.tools_allow or []
     if not isinstance(tool_specs, list):
         tool_specs = []
     resource_specs = step.resources_allow or []
     if not isinstance(resource_specs, list):
         resource_specs = []
-    return tool_specs, resource_specs
+    skill_specs = getattr(step, "skills_allow", None) or []
+    if not isinstance(skill_specs, list):
+        skill_specs = []
+    return tool_specs, resource_specs, skill_specs
 
 
 async def _commit_policy_stopped_step(
@@ -1906,6 +1911,7 @@ async def _build_reason_worker_command(
     step: SagaStepInstance,
     tool_specs: list[dict[str, Any]],
     resource_specs: list[Any],
+    skill_specs: list[dict[str, Any]],
 ) -> tuple[DoStepCommand, str]:
     if not step.prompt_ref:
         raise ValueError(
@@ -1918,6 +1924,21 @@ async def _build_reason_worker_command(
             "prompts_root is not configured; set PROMPTS_ROOT when scheduling reason steps."
         )
     await asyncio.to_thread(assert_prompt_file_exists, prompts_root, step.prompt_ref)
+    skill_ids = [
+        str(s["name"])
+        for s in skill_specs
+        if isinstance(s, dict) and isinstance(s.get("name"), str) and s["name"].strip()
+    ]
+    if skill_ids:
+        from common.skills import assert_skill_files_exist
+
+        skills_root = get_settings().skills_root
+        await asyncio.to_thread(
+            assert_skill_files_exist,
+            skills_root,
+            step.worker,
+            skill_ids,
+        )
     cmd = DoStepCommand(
         type=CommandType.DO_STEP,
         namespace=saga.namespace,
@@ -1930,6 +1951,7 @@ async def _build_reason_worker_command(
         arguments=step.resolved_arguments or {},
         tool_specs=slim_tool_specs(tool_specs),
         resource_specs=resource_specs,
+        skill_specs=skill_specs,
     )
     return cmd, CommandType.DO_STEP.value
 
@@ -1943,7 +1965,7 @@ async def _build_forward_worker_command(
     trace_context: dict[str, Any] | None,
     schedule_acc: EngineTimingAccumulator | None = None,
 ) -> tuple[DoStepCommand | DoCommitCommand, str] | None:
-    tool_specs, resource_specs = _step_tool_and_resource_specs(step)
+    tool_specs, resource_specs, skill_specs = _step_tool_and_resource_specs(step)
     if step.step_kind not in WORKER_STEP_KINDS:
         raise ValueError(
             f"Step {step.span_id} has invalid step_kind for worker dispatch: "
@@ -1965,6 +1987,7 @@ async def _build_forward_worker_command(
         step=step,
         tool_specs=tool_specs,
         resource_specs=resource_specs,
+        skill_specs=skill_specs,
     )
 
 
@@ -2412,6 +2435,7 @@ async def _schedule_compensation_for_forward(
         step_kind=forward.step_kind,
         tools_allow=comp_tool_specs,
         resources_allow=comp_resource_specs,
+        skills_allow=[],
         parameters_spec={},
         resolved_arguments={},
         prompt_ref=None,

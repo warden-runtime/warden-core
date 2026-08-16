@@ -56,6 +56,24 @@ class Settings(BaseSettings):
             return None
         return value
 
+    skills_root: str | None = Field(
+        default=None,
+        validation_alias="SKILLS_ROOT",
+        description=(
+            "Base directory for worker-scoped skill markdown files "
+            "(SKILLS_ROOT/<worker_name>/<skill_id>.md); required when steps use skills.allow."
+        ),
+    )
+
+    @field_validator("skills_root", mode="before")
+    @classmethod
+    def _coerce_empty_skills_root(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     policies_root: str | None = Field(
         default=None,
         validation_alias="POLICIES_ROOT",

@@ -58,3 +58,27 @@ def test_simple_rejects_facts():
             agent_adapter="simple",
             facts=[{"tool": "echo", "into": "x", "fields": {"k": "$.a"}}],
         )
+
+
+def test_simple_rejects_skills():
+    with pytest.raises(ValidationError, match="skills.allow"):
+        _reason_step(
+            agent_adapter="simple",
+            skills={"allow": [{"name": "triage"}]},
+        )
+
+
+def test_reason_accepts_skills_allow():
+    step = _reason_step(skills={"allow": [{"name": "triage"}]})
+    assert step.skills is not None
+    assert step.skills.allow[0].name == "triage"
+
+
+def test_skill_name_load_skill_reserved():
+    with pytest.raises(ValidationError, match="load_skill"):
+        _reason_step(skills={"allow": [{"name": "load_skill"}]})
+
+
+def test_tools_allow_rejects_load_skill():
+    with pytest.raises(ValidationError, match="load_skill"):
+        _reason_step(tools={"allow": [{"name": "load_skill"}]})
