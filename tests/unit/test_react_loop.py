@@ -446,6 +446,92 @@ async def test_submit_mode_recoverable_edit_mismatch_feeds_back_then_submit():
 
 
 @pytest.mark.asyncio
+async def test_submit_mode_invoke_exception_directory_softens_then_submit():
+    mock_tool = MagicMock()
+    mock_tool.name = "read_file_sandbox"
+    mock_tool.ainvoke = AsyncMock(
+        side_effect=[
+            IsADirectoryError("/testbed/docs"),
+            "file contents",
+        ]
+    )
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(name="read_file_sandbox", args={"path": "/testbed/docs"}, id="1")
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="read_file_sandbox", args={"path": "/testbed/docs/conf.py"}, id="2"
+                    )
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[ToolCall(name="_submit", args={"result": {"ok": True}}, id="3")]
+            ),
+        ]
+    )
+    result = await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[mock_tool],
+        allowed_tool_names=["read_file_sandbox"],
+        completion_mode="submit",
+        max_turns=5,
+    )
+    assert result.submit_payload == {"ok": True}
+    assert mock_tool.ainvoke.await_count == 2
+    tool_msgs = [m for m in result.transcript if m.role == "tool"]
+    assert any("IsADirectoryError" in (m.content or "") for m in tool_msgs)
+    assert any("list_dir_sandbox" in (m.content or "") for m in tool_msgs)
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_invoke_infrastructure_exception_raises():
+    mock_tool = MagicMock()
+    mock_tool.name = "read_file_sandbox"
+    mock_tool.ainvoke = AsyncMock(side_effect=ConnectionError("Connection refused"))
+
+    llm = _ScriptedLLM(
+        [ChatResponse(tool_calls=[ToolCall(name="read_file_sandbox", args={}, id="1")])]
+    )
+    with pytest.raises(ExecutionStepError) as exc_info:
+        await run_react_loop(
+            llm=llm,
+            initial_messages=[ChatMessage(role="human", content="go")],
+            mcp_tools=[mock_tool],
+            allowed_tool_names=["read_file_sandbox"],
+            completion_mode="submit",
+            max_turns=5,
+        )
+    assert (exc_info.value.error_details or {}).get("code") == "TOOL_INVOKE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_submit_mode_cancelled_error_propagates():
+    import asyncio
+
+    mock_tool = MagicMock()
+    mock_tool.name = "echo"
+    mock_tool.ainvoke = AsyncMock(side_effect=asyncio.CancelledError())
+
+    llm = _ScriptedLLM([ChatResponse(tool_calls=[ToolCall(name="echo", args={}, id="1")])])
+    with pytest.raises(asyncio.CancelledError):
+        await run_react_loop(
+            llm=llm,
+            initial_messages=[ChatMessage(role="human", content="go")],
+            mcp_tools=[mock_tool],
+            allowed_tool_names=["echo"],
+            completion_mode="submit",
+            max_turns=5,
+        )
+
+
+@pytest.mark.asyncio
 async def test_submit_mode_empty_submit_payload():
     llm = _ScriptedLLM([ChatResponse(tool_calls=[ToolCall(name="_submit", args={}, id="1")])])
     result = await run_react_loop(

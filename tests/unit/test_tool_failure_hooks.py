@@ -7,8 +7,10 @@ from common.tool_failure import (
     annotate_recoverable_tool_output,
     default_tool_output_indicates_failure,
     default_tool_output_is_recoverable,
+    format_tool_invoke_exception,
     looks_like_apply_patch_reject,
     plain_text_tool_result_looks_like_error,
+    tool_invoke_exception_is_infrastructure,
 )
 from workers.adapters.state_utils import tool_output_indicates_failure, tool_output_is_recoverable
 
@@ -117,3 +119,38 @@ def test_state_utils_uses_runtime_registry_registration(mocker):
     assert tool_output_indicates_failure("anything-else") is False
     assert tool_output_is_recoverable("registry-stub-recoverable") is True
     assert tool_output_is_recoverable("registry-stub-trigger") is False
+
+
+def test_pydantic_validation_errors_are_recoverable_singular_and_plural():
+    singular = (
+        "Error: ValidationError: 1 validation error for read_file_sandbox\npath\n  field required"
+    )
+    plural = "Error: ValidationError: 2 validation errors for search_replace_sandbox\npath\n  field required"
+    assert default_tool_output_is_recoverable(singular) is True
+    assert default_tool_output_is_recoverable(plural) is True
+    assert default_tool_output_is_recoverable("Error: input validation error: foo") is False
+
+
+def test_directory_errors_are_recoverable_with_hints():
+    raw = "Error: IsADirectoryError: /tmp/foo"
+    assert default_tool_output_is_recoverable(raw) is True
+    annotated = annotate_recoverable_tool_output(raw)
+    assert "list_dir_sandbox" in annotated
+
+
+def test_tool_invoke_exception_is_infrastructure():
+    assert tool_invoke_exception_is_infrastructure(ConnectionError("refused")) is True
+    assert tool_invoke_exception_is_infrastructure(IsADirectoryError("/testbed/docs")) is False
+    assert tool_invoke_exception_is_infrastructure(FileNotFoundError("/missing")) is False
+
+
+def test_tool_invoke_exception_group_any_infra_leaf():
+    group = ExceptionGroup(
+        "task group",
+        (IsADirectoryError("/testbed/docs"), ConnectionResetError("reset")),
+    )
+    assert tool_invoke_exception_is_infrastructure(group) is True
+
+
+def test_format_tool_invoke_exception_uses_error_prefix():
+    assert format_tool_invoke_exception(ValueError("bad arg")).startswith("Error: ValueError:")

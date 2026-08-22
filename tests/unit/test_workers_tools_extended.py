@@ -318,6 +318,29 @@ async def test_convert_mcp_to_langchain_ainvoke_calls_session_and_returns_text()
 
 
 @pytest.mark.asyncio
+async def test_convert_mcp_to_langchain_is_error_prefixes_error():
+    from mcp.types import TextContent
+
+    mcp_tool = McpTool(
+        name="read_file",
+        description="Read",
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(
+        return_value=MagicMock(
+            content=[TextContent(type="text", text="path is a directory")],
+            isError=True,
+        )
+    )
+
+    tool = _convert_mcp_to_langchain(mcp_tool, mock_session, step_spec=None)
+    result = await tool.ainvoke({})
+
+    assert result == "Error: path is a directory"
+
+
+@pytest.mark.asyncio
 async def test_build_tools_for_worker_with_mocked_connect_and_list_tools(mocker):
     """build_tools_for_worker returns tools when _connect_to_source and list_tools are mocked."""
     mock_session = MagicMock()
