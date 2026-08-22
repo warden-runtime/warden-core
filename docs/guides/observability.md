@@ -177,7 +177,7 @@ Forward steps and compensation undo rows may persist provider-reported LLM token
 
 Worker result events carry top-level `usage.worker` on the outbox wire (same envelope shape as `timing.worker`). The engine writes that payload at ingest. Counts come from the provider via LangChain `AIMessage.usage_metadata` (OpenAI / Anthropic today); Warden does **not** run local tokenizers. Dollar / pricing conversion is intentionally out of core — capture raw tokens + `model_id` here; map to USD in a control plane.
 
-Anthropic prompt caching is always enabled in the Anthropic adapter (ephemeral, 5m TTL): the system message and last bound tool get `cache_control` breakpoints, plus a top-level `cache_control` on each call. When the cached prefix clears Anthropic’s per-model minimum, `details.cache_read_tokens` / `cache_creation_tokens` appear; short prompts below that threshold still show zeros.
+Anthropic prompt caching is always enabled in the Anthropic adapter (ephemeral, 5m TTL): the system message and last bound tool get `cache_control` breakpoints, plus a top-level `cache_control` on each call. When the cached prefix clears Anthropic’s per-model minimum, `details.cache_read_tokens` / `cache_write_tokens` appear (LangChain `cache_read` / `cache_creation` and other provider variants normalize on ingest); short prompts below that threshold still show zeros. OpenAI-style providers often report reads only — writes may be absent.
 
 Reason steps may also set `max_step_tokens` (or worker env `WARDEN_MAX_STEP_TOKENS`) to abort when accumulated `total_tokens` exceed a budget — see [Saga manifests → Step budgets](manifests/saga-manifests.md#step-budgets). That guardrail uses the same gross physical counters (not cache-adjusted billed tokens). Failed budget aborts still persist usage on `STEP_FAILED`.
 
@@ -193,6 +193,7 @@ Reason steps may also set `max_step_tokens` (or worker env `WARDEN_MAX_STEP_TOKE
     "llm_calls": 3,
     "details": {
       "cache_read_tokens": 800,
+      "cache_write_tokens": 120,
       "reasoning_tokens": 120
     },
     "memory": {
