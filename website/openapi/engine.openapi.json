@@ -243,7 +243,9 @@
           "step_kind": {
             "enum": [
               "reason",
-              "commit"
+              "commit",
+              "spawn_sagas",
+              "join_sagas"
             ],
             "title": "Step Kind",
             "type": "string"
@@ -393,6 +395,17 @@
           "namespace": {
             "title": "Namespace",
             "type": "string"
+          },
+          "parent_trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Trace Id"
           },
           "start_idempotency_key": {
             "anyOf": [
@@ -1363,6 +1376,24 @@
               ],
               "description": "Filter to a single saga instance trace_id.",
               "title": "Trace Id"
+            }
+          },
+          {
+            "description": "Filter to child sagas spawned by this parent trace_id.",
+            "in": "query",
+            "name": "parent_trace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to child sagas spawned by this parent trace_id.",
+              "title": "Parent Trace Id"
             }
           },
           {

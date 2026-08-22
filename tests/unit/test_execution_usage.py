@@ -63,7 +63,16 @@ def test_token_usage_from_aimessage_anthropic_shape():
     assert usage is not None
     assert usage.model_id == "claude-sonnet-4-20250514"
     assert usage.details.get("cache_read_tokens") == 40
-    assert usage.details.get("cache_creation_tokens") == 10
+    assert usage.details.get("cache_write_tokens") == 10
+
+
+def test_normalize_usage_details_maps_legacy_cache_creation_tokens():
+    from common.execution_usage import normalize_usage_details
+
+    assert normalize_usage_details({"cache_creation_tokens": 25}) == {"cache_write_tokens": 25}
+    assert normalize_usage_details({"cache_write": 5, "cache_creation": 3}) == {
+        "cache_write_tokens": 8
+    }
 
 
 def test_token_usage_absent_returns_none():

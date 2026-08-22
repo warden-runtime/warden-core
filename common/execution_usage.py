@@ -35,13 +35,16 @@ WORKER_MEMORY_COUNTERS: tuple[str, ...] = (
     "tier1_redactions",
 )
 
-# Stable aliases from LangChain / provider detail blobs → Warden keys.
+# Stable aliases from LangChain / provider detail blobs → Warden canonical keys.
 _DETAIL_KEY_ALIASES: dict[str, str] = {
+    # Cache reads
     "cache_read": "cache_read_tokens",
     "cache_read_input_tokens": "cache_read_tokens",
-    "cache_creation": "cache_creation_tokens",
-    "cache_creation_input_tokens": "cache_creation_tokens",
-    "cache_write": "cache_creation_tokens",
+    # Cache writes (Anthropic cache_creation, OpenAI cache_write, legacy rows, …)
+    "cache_write": "cache_write_tokens",
+    "cache_creation": "cache_write_tokens",
+    "cache_creation_input_tokens": "cache_write_tokens",
+    "cache_creation_tokens": "cache_write_tokens",
     "reasoning": "reasoning_tokens",
     "reasoning_tokens": "reasoning_tokens",
 }
@@ -106,7 +109,7 @@ def _normalize_detail_key(key: str) -> str | None:
     if key in _DETAIL_KEY_ALIASES:
         return _DETAIL_KEY_ALIASES[key]
     # Pass through snake_case int-ish detail keys unchanged.
-    if key.endswith("_tokens") or key in ("cache_read_tokens", "cache_creation_tokens"):
+    if key.endswith("_tokens") or key in ("cache_read_tokens", "cache_write_tokens"):
         return key
     return key if key.replace("_", "").isalnum() else None
 

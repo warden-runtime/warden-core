@@ -14,7 +14,14 @@ from common.saga_assets import (
     assert_output_schema_readable,
     load_compensation_definition,
 )
-from common.schemas.saga import LoopSagaStep, ReasonSagaStep, SagaBlueprint, SagaStep
+from common.schemas.saga import (
+    JoinSagasStep,
+    LoopSagaStep,
+    ReasonSagaStep,
+    SagaBlueprint,
+    SagaStep,
+    SpawnSagasStep,
+)
 from common.schemas.worker import WorkerBlueprint
 from common.step_facts import validate_facts_extractors
 from common.step_when import validate_when_cel_compile
@@ -47,6 +54,25 @@ async def _embed_compensation_on_step_dict(
         step_dict["compensation_definition"] = comp
 
 
+async def _embed_loop_body_compensations(
+    *,
+    step: LoopSagaStep,
+    steps_body_entry: dict[str, Any],
+    compensations_root: str | None,
+) -> None:
+    body_list = steps_body_entry.get("steps")
+    if not isinstance(body_list, list):
+        return
+    for body_i, body_step in enumerate(step.steps):
+        if body_i >= len(body_list) or not isinstance(body_list[body_i], dict):
+            continue
+        await _embed_compensation_on_step_dict(
+            step_dict=body_list[body_i],
+            step=body_step,
+            compensations_root=compensations_root,
+        )
+
+
 async def _embed_resolved_compensation_definitions(
     *,
     blueprint: SagaBlueprint,
@@ -61,17 +87,13 @@ async def _embed_resolved_compensation_definitions(
         if index >= len(steps_body) or not isinstance(steps_body[index], dict):
             continue
         if isinstance(step, LoopSagaStep):
-            body_list = steps_body[index].get("steps")
-            if not isinstance(body_list, list):
-                continue
-            for body_i, body_step in enumerate(step.steps):
-                if body_i >= len(body_list) or not isinstance(body_list[body_i], dict):
-                    continue
-                await _embed_compensation_on_step_dict(
-                    step_dict=body_list[body_i],
-                    step=body_step,
-                    compensations_root=compensations_root,
-                )
+            await _embed_loop_body_compensations(
+                step=step,
+                steps_body_entry=steps_body[index],
+                compensations_root=compensations_root,
+            )
+            continue
+        if isinstance(step, (SpawnSagasStep, JoinSagasStep)):
             continue
         await _embed_compensation_on_step_dict(
             step_dict=steps_body[index],
@@ -201,6 +223,28 @@ async def _validate_step_prompt(
     )
 
 
+async def _validate_step_skills(
+    *,
+    skills_root: str | None,
+    step: SagaStep,
+) -> None:
+    if not isinstance(step, ReasonSagaStep):
+        return
+    skills = step.skills.allow if step.skills else []
+    if not skills:
+        return
+    from common.skills import SkillLoadError, validate_skill_files_at_register
+
+    try:
+        validate_skill_files_at_register(
+            skills_root,
+            step.worker,
+            [s.name for s in skills],
+        )
+    except SkillLoadError as e:
+        raise ValueError(str(e.message)) from e
+
+
 async def _validate_step_policy(
     *,
     policies_root: str | None,
@@ -255,6 +299,13 @@ async def _validate_one_saga_step_at_registration(
     except (OSError, ValueError) as e:
         raise ValueError(f"{step_label} prompt is invalid: {e}") from e
     try:
+        await _validate_step_skills(
+            skills_root=settings.skills_root,
+            step=step,
+        )
+    except (OSError, ValueError) as e:
+        raise ValueError(f"{step_label} skills are invalid: {e}") from e
+    try:
         await _validate_step_policy(
             policies_root=settings.policies_root,
             step=step,
@@ -273,6 +324,27 @@ async def _validate_one_saga_step_at_registration(
         except ValueError as e:
             raise ValueError(f"{step_label} facts extractors are invalid: {e}") from e
     return comp_d
+
+
+async def _assert_child_saga_definitions_registered(blueprint: SagaBlueprint) -> None:
+    """Ensure every spawn_sagas target definition exists in the parent namespace."""
+    missing: list[str] = []
+    for step in blueprint.steps:
+        if not isinstance(step, SpawnSagasStep):
+            continue
+        found = await SagaDefinition.filter(
+            namespace=blueprint.namespace,
+            name=step.spawn.saga_name,
+            version=step.spawn.saga_version,
+        ).first()
+        if found is None:
+            missing.append(f"{step.spawn.saga_name}@{step.spawn.saga_version}")
+    if missing:
+        raise ValueError(
+            "This saga spawns child definitions that are not registered. "
+            "Please register these saga manifests first: "
+            f"{sorted(set(missing))}"
+        )
 
 
 async def _collect_saga_registration_workers(
@@ -309,6 +381,14 @@ async def _collect_saga_registration_workers(
                 ) from e
             for j, body in enumerate(step.steps):
                 await _register_executable(f"{i}.body[{j}]", body)
+            continue
+        if isinstance(step, (SpawnSagasStep, JoinSagasStep)):
+            step_label = f"Saga step {i} (id={step.id!r})"
+            if step.when is not None:
+                try:
+                    validate_when_cel_compile(step.when.cel)
+                except PolicyEvaluationError as e:
+                    raise ValueError(f"{step_label} when.cel is invalid: {e}") from e
             continue
         await _register_executable(str(i), step)
     return required_workers
@@ -410,6 +490,7 @@ class RegistryService:
         settings = get_settings()
         required_workers = await _collect_saga_registration_workers(blueprint, settings)
         await _assert_saga_workers_registered(blueprint, required_workers)
+        await _assert_child_saga_definitions_registered(blueprint)
 
         body_payload = _saga_definition_body_payload(blueprint)
         await _embed_resolved_compensation_definitions(

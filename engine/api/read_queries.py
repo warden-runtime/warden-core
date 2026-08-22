@@ -76,12 +76,15 @@ async def list_saga_instances(
     statuses: list[SagaStatus] | None,
     limit: int,
     offset: int,
+    parent_trace_id: str | None = None,
 ) -> list[SagaInstance]:
     q: Any = SagaInstance.all()
     if namespace is not None:
         q = q.filter(namespace=namespace)
     if trace_id is not None:
         q = q.filter(trace_id=trace_id)
+    if parent_trace_id is not None:
+        q = q.filter(parent_trace_id=parent_trace_id)
     if statuses is not None:
         q = q.filter(status__in=statuses)
     q = q.order_by("-started_at", "trace_id")

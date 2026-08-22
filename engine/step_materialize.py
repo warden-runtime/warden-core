@@ -8,7 +8,18 @@ from typing import TYPE_CHECKING, Any
 from common.loops import forward_idempotency_key, parse_executable_step
 from common.models import SagaInstance, SagaStepInstance, StepStatus
 from common.plugins.registry import get_registry
-from common.schemas.saga import ReasonSagaStep, ResourcesSpec, ToolsSpec
+from common.schemas.saga import (
+    DEFAULT_MAX_TURNS,
+    ENGINE_NATIVE_WORKER,
+    ENGINE_NATIVE_WORKER_VERSION,
+    CommitSagaStep,
+    JoinSagasStep,
+    ReasonSagaStep,
+    ResourcesSpec,
+    SkillsSpec,
+    SpawnSagasStep,
+    ToolsSpec,
+)
 
 if TYPE_CHECKING:
     from tortoise.backends.base.client import BaseDBAsyncClient
@@ -62,11 +73,9 @@ def _step_create_fields(
     loop_id = step_spec.get("_loop_id")
     iteration = step_spec.get("_loop_iteration")
     step_model = parse_executable_step(clean)
-    tools_spec = step_model.tools or ToolsSpec()
-    resources_spec = step_model.resources or ResourcesSpec()
     loop_id_str = str(loop_id) if loop_id else None
     iteration_int = int(iteration) if iteration is not None else None
-    fields = {
+    base = {
         "span_id": uuid.uuid4().hex[:16],
         "saga_trace_id": saga.trace_id,
         "namespace": saga.namespace,
@@ -84,29 +93,63 @@ def _step_create_fields(
             iteration=iteration_int,
         ),
         "timeout_seconds": step_model.timeout_seconds,
-        "max_turns": step_model.max_turns,
         "status": StepStatus.PENDING,
-        "worker": step_model.worker,
-        "worker_version": step_model.worker_version,
         "step_kind": step_model.kind,
-        "tools_allow": [t.model_dump(mode="json") for t in tools_spec.allow],
-        "resources_allow": [r.model_dump(mode="json") for r in resources_spec.allow],
-        "parameters_spec": clean.get("with") or {},
         "resolved_arguments": {},
         "output_payload": None,
         "error_details": None,
         "compensation_definition": compensation_definition,
         "output_schema": resolved_output_schema,
-        "policy_name": step_model.policy,
-        "hitl_required": step_model.hitl,
-        "hitl_max_retries": step_model.hitl_max_retries if step_model.hitl else None,
         "hitl_retry_count": 0,
-        "hitl_retry_guidance": step_model.hitl_retry_guidance if step_model.hitl else None,
         "pending_review_payload": None,
         "when_cel": step_model.when.cel if step_model.when else None,
     }
-    fields.update(_reason_fields(step_model))
-    return fields
+    if isinstance(step_model, (SpawnSagasStep, JoinSagasStep)):
+        base.update(
+            {
+                "max_turns": DEFAULT_MAX_TURNS,
+                "worker": ENGINE_NATIVE_WORKER,
+                "worker_version": ENGINE_NATIVE_WORKER_VERSION,
+                "tools_allow": [],
+                "resources_allow": [],
+                "skills_allow": [],
+                "parameters_spec": {},
+                "policy_name": None,
+                "hitl_required": False,
+                "hitl_max_retries": None,
+                "hitl_retry_guidance": None,
+            }
+        )
+        base.update(_reason_fields(None))
+        return base
+
+    if not isinstance(step_model, (ReasonSagaStep, CommitSagaStep)):
+        raise ValueError(f"Unsupported step kind for materialization: {step_model.kind!r}")
+
+    tools_spec = step_model.tools or ToolsSpec()
+    resources_spec = step_model.resources or ResourcesSpec()
+    skills_spec = (
+        step_model.skills
+        if isinstance(step_model, ReasonSagaStep) and step_model.skills is not None
+        else SkillsSpec()
+    )
+    base.update(
+        {
+            "max_turns": step_model.max_turns,
+            "worker": step_model.worker,
+            "worker_version": step_model.worker_version,
+            "tools_allow": [t.model_dump(mode="json") for t in tools_spec.allow],
+            "resources_allow": [r.model_dump(mode="json") for r in resources_spec.allow],
+            "skills_allow": [s.model_dump(mode="json") for s in skills_spec.allow],
+            "parameters_spec": clean.get("with") or {},
+            "policy_name": step_model.policy,
+            "hitl_required": step_model.hitl,
+            "hitl_max_retries": step_model.hitl_max_retries if step_model.hitl else None,
+            "hitl_retry_guidance": step_model.hitl_retry_guidance if step_model.hitl else None,
+        }
+    )
+    base.update(_reason_fields(step_model))
+    return base
 
 
 async def materialize_executable_steps(

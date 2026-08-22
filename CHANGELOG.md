@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - ReAct `_submit` is accepted only as a singleton tool batch. Mixed batches run the other tools, feed a `_submit must be alone` tool error, and continue the loop (no silent short-circuit that drops sibling calls).
 - Reason / simple / compensation human messages no longer `json.dumps` string prompts (Jinja and inline templates stay plain text). Structured dict/list prompt inputs are still JSON-encoded.
+- Worker-scoped **skills** (`SKILLS_ROOT/<worker>/<id>.md`): step `skills.allow` drives a static `allowed_skills` index + virtual `load_skill`; skill frontmatter `allowed_tools` unions with `tools.allow` extras for react reason steps (`007_skills_allow.sql`).
 - Coerce sloppy LLM tool arguments against MCP `inputSchema` before ReAct validation (common Ollama/vLLM stringified array/object fields)
 - Admit LLM JSON against reason-step `output_schema` before validation (`_submit` and `simple` structured output)
 - LLM JSON admission no longer crashes on nullable union `type` arrays; coerce string `"null"` / `"none"` to JSON `null` when the schema allows it

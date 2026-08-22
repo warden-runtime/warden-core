@@ -51,6 +51,45 @@ On **`react`** reason steps only, the virtual **`_submit`** tool is always avail
 
 Syntax and examples: [Worker manifests](worker-manifests.md) for `tool_sources`, [Saga manifests](saga-manifests.md) for `tools.allow`.
 
+## Skills (`skills.allow`)
+
+Skills are **worker-scoped playbooks** on disk under `SKILLS_ROOT/<worker_name>/<skill_id>.md` (YAML frontmatter + markdown body). They are not MCP tools.
+
+On **`react`** reason steps, optional `skills.allow` lists skill ids the step may load. At execute time the worker:
+
+1. Loads each skill’s frontmatter (`name`, `description`, `allowed_tools`)
+2. Unions those `allowed_tools` with the step’s `tools.allow` (**extras**) into the effective MCP allowlist (raw and sanitized MCP ids collapse to one entry; extras win for schemas)
+3. Injects a virtual **`load_skill`** tool and puts `allowed_skills: [{name, description}, …]` into the step prompt context (static index)
+
+Do **not** list `load_skill` in `tools.allow` or skill `allowed_tools` — it is reserved like `_submit`. Missing or malformed skill files fail the step with `SKILL_NOT_FOUND` / `SKILL_INVALID` **before** any LLM turn. Incompatible with **`agent-adapter: simple`**. Commit steps do not use skills. A `skills:` key under compensation YAML is ignored (v1).
+
+```yaml
+  - id: triage
+    kind: reason
+    worker: github-demo-worker
+    prompt: triage.j2
+    skills:
+      allow:
+        - name: triage
+    tools:
+      allow:
+        - name: add_issue_comment   # extra beyond the skill's allowed_tools
+```
+
+Example skill file (`config/skills/github-demo-worker/triage.md`):
+
+```markdown
+---
+name: triage
+description: Use when classifying GitHub issues before drafting a comment.
+allowed_tools:
+  - get_issue
+  - list_issues
+---
+# Triage playbook
+...
+```
+
 ## Resource allowlists (`resources.allow`)
 
 MCP **tools** are callable functions (`list_issues`, `add_issue_comment`, …). MCP **resources** are addressable documents the server exposes by URI — policy files, profile records, static context blobs. Tools and resources are governed separately: `tools.allow` controls which tools the agent may invoke; `resources.allow` controls which resource URIs it may read.

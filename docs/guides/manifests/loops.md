@@ -1,7 +1,7 @@
 ---
 sidebar_position: 7
 pagination_prev: guides/manifests/when-cel
-pagination_next: guides/manifests/policies
+pagination_next: guides/manifests/child-sagas
 ---
 
 # Loop blocks (`until`)

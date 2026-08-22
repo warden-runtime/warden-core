@@ -115,6 +115,7 @@ services:
       POLICIES_ROOT: /app/policies
       SCHEMAS_ROOT: /app/schemas
       COMPENSATIONS_ROOT: /app/compensations
+      SKILLS_ROOT: /app/skills
     ports:
       - "8000:8000"
     volumes:
@@ -124,6 +125,7 @@ services:
       - ./config/policies:/app/policies:ro
       - ./config/schemas:/app/schemas:ro
       - ./config/compensations:/app/compensations:ro
+      - ./config/skills:/app/skills:ro
     healthcheck:
       test:
         [
@@ -169,6 +171,7 @@ services:
       OTLP_INSECURE: "true"
       OTEL_TRACES_EXPORTER: otlp_proto_grpc
       PROMPTS_ROOT: /app/prompts
+      SKILLS_ROOT: /app/skills
     # Mount source only (not full repo root): a bind mount of `.:/app` would hide the
     # image's `/app/.venv` from `uv sync` in the Dockerfile; the worker would then
     # depend on a host venv and often exit immediately if `.venv` is missing or stale.
@@ -176,6 +179,7 @@ services:
       - ./common:/app/common
       - ./workers:/app/workers
       - ./config/prompts:/app/prompts:ro
+      - ./config/skills:/app/skills:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:

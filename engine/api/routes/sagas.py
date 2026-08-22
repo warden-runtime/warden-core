@@ -3,6 +3,7 @@
 import logging
 from typing import Annotated
 
+from common.models import SagaStatus
 from fastapi import APIRouter, HTTPException, Query
 
 from engine.api import read_queries
@@ -27,6 +28,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sagas", tags=["sagas"])
 
 
+def _resolve_list_saga_statuses(
+    *,
+    in_flight: bool | None,
+    status_list: list[str],
+) -> list[SagaStatus] | None:
+    if in_flight is True and len(status_list) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Do not combine in_flight=true with status filters; use one or the other.",
+        )
+    try:
+        if in_flight is True:
+            return read_queries.in_flight_statuses()
+        if len(status_list) > 0:
+            return read_queries.parse_saga_statuses(status_list)
+        return None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
 @router.get("", response_model=SagaInstanceListResponse)
 async def get_sagas(
     namespace: Annotated[
@@ -36,6 +57,10 @@ async def get_sagas(
     trace_id: Annotated[
         str | None,
         Query(description="Filter to a single saga instance trace_id."),
+    ] = None,
+    parent_trace_id: Annotated[
+        str | None,
+        Query(description="Filter to child sagas spawned by this parent trace_id."),
     ] = None,
     status: Annotated[
         list[str] | None,
@@ -56,27 +81,19 @@ async def get_sagas(
     lim, off = validated_limit_offset(limit=limit, offset=offset)
     if trace_id is not None:
         validate_trace_id(trace_id)
+    if parent_trace_id is not None:
+        validate_trace_id(parent_trace_id)
     if namespace is not None:
         validate_namespace(namespace)
-    status_list = list(status) if status is not None else []
-    if in_flight is True and len(status_list) > 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Do not combine in_flight=true with status filters; use one or the other.",
-        )
-    try:
-        if in_flight is True:
-            statuses = read_queries.in_flight_statuses()
-        elif len(status_list) > 0:
-            statuses = read_queries.parse_saga_statuses(status_list)
-        else:
-            statuses = None
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+    statuses = _resolve_list_saga_statuses(
+        in_flight=in_flight,
+        status_list=list(status) if status is not None else [],
+    )
 
     rows = await read_queries.list_saga_instances(
         namespace=namespace,
         trace_id=trace_id,
+        parent_trace_id=parent_trace_id,
         statuses=statuses,
         limit=lim,
         offset=off,
@@ -89,6 +106,7 @@ async def get_sagas(
             status=r.status.value,
             started_at=r.started_at,
             start_idempotency_key=r.start_idempotency_key,
+            parent_trace_id=r.parent_trace_id,
         )
         for r in rows
     ]

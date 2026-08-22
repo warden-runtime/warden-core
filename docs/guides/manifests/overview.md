@@ -62,7 +62,9 @@ Here's the order we recommend:
 3. **[Prompts](prompts.md)** — Write Jinja templates for reason steps.
 4. **[MCP and tools](mcp-and-tools.md)** — Configure transports, tool allowlists, and resource reads.
 5. **[Conditional branching (`when.cel`)](when-cel.md)** — Skip steps based on prior output or tool facts.
-6. **[Policies](policies.md)** — CEL guardrails at `after_reason` and `before_commit`.
-7. **[Compensation](compensation.md)** — Undo paths when a run fails.
+6. **[Loop blocks (`until`)](loops.md)** — Bounded do-while over nested reason/commit steps.
+7. **[Child sagas (`spawn_sagas` / `join_sagas`)](child-sagas.md)** — Fan out to child saga instances and wait-all join.
+8. **[Policies](policies.md)** — CEL guardrails at `after_reason` and `before_commit`.
+9. **[Compensation](compensation.md)** — Undo paths when a run fails.
 
 After authoring, use **[Observability](../observability.md)** to inspect runs in Postgres and Jaeger, then the **[CLI](../cli/overview.md)** to operate sagas day to day.

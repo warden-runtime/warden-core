@@ -14,9 +14,11 @@ from common.policy.cel_eval import (
 from common.policy.loader import PolicyArtifact
 from common.schemas.saga import (
     CommitSagaStep,
+    ExecutableSagaStep,
+    JoinSagasStep,
     LoopSagaStep,
     ReasonSagaStep,
-    SagaStep,
+    SpawnSagasStep,
     TopLevelSagaStep,
 )
 from common.utils import coerce_dict, status_value
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
     from common.models import SagaInstance, SagaStepInstance
 
 _TOP_LEVEL_ADAPTER = TypeAdapter(TopLevelSagaStep)
-_EXECUTABLE_ADAPTER = TypeAdapter(SagaStep)
+_EXECUTABLE_FORWARD_ADAPTER = TypeAdapter(ExecutableSagaStep)
 
 _compiled_until_cache: dict[str, object] = {}
 
@@ -52,9 +54,11 @@ def parse_top_level_step(step_spec: dict[str, Any]) -> TopLevelSagaStep:
     return _TOP_LEVEL_ADAPTER.validate_python(step_spec)
 
 
-def parse_executable_step(step_spec: dict[str, Any]) -> ReasonSagaStep | CommitSagaStep:
-    """Validate one reason/commit step mapping."""
-    return _EXECUTABLE_ADAPTER.validate_python(step_spec)
+def parse_executable_step(
+    step_spec: dict[str, Any],
+) -> ReasonSagaStep | CommitSagaStep | SpawnSagasStep | JoinSagasStep:
+    """Validate one materializable forward step (reason/commit/spawn/join)."""
+    return _EXECUTABLE_FORWARD_ADAPTER.validate_python(step_spec)
 
 
 def initial_loops_context(frozen_steps: list[Any]) -> dict[str, Any]:
