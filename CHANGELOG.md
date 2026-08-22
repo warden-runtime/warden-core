@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `provider: azure` — Azure OpenAI / Microsoft Foundry via LangChain `ChatOpenAI` and the OpenAI-compatible `/openai/v1/` path (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`; worker `model_name` is the deployment name). Defaults to Chat Completions for prompt-cache friendliness; Responses API is opt-in via `WARDEN_AZURE_USE_RESPONSES_API`.
 - Submit-mode ReAct soft-feeds **recoverable** tool mismatches (e.g. `search_replace` `old_text not found` / non-unique match, missing path, patch-apply text failures) into the transcript with a one-line recovery hint instead of failing the step with `TOOL_OUTPUT_ERROR`. `apply_patch_sandbox` JSON rejects get the same hint. Transport/`MCP error` / invalid-argument failures remain hard. Override via `ToolLifecycleHooks.tool_output_is_recoverable`.
+- Submit-mode ReAct softens **recoverable tool invoke exceptions** (e.g. `IsADirectoryError`, Pydantic arg validation) by normalizing them to `Error:` tool payloads and reusing the same recoverability classifier; MCP `CallToolResult.isError` is honored at the tool wrapper. Infrastructure failures (`McpError`, connection/timeout, mixed `ExceptionGroup` with transport leaves) still raise `TOOL_INVOKE_FAILED`.
 
 ### Fixed
 

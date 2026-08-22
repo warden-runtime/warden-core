@@ -23,12 +23,17 @@ from common.error_details import build_step_error_details
 from common.execution_timing import elapsed_ms
 from common.execution_usage import enforce_step_token_budget
 from common.llm import ChatMessage, ChatModelPort, ChatResponse, ToolCall
-from common.tool_failure import annotate_recoverable_tool_output
+from common.tool_failure import (
+    annotate_recoverable_tool_output,
+    format_tool_invoke_exception,
+    tool_invoke_exception_is_infrastructure,
+)
 from common.tool_results import clip_tool_text_for_llm, tool_message_limit_from_env
 from common.utils import (
     coerce_llm_json_from_schema,
     format_exception_chain,
     tool_call_args_to_dict,
+    unwrap_execution_step_error,
 )
 from workers.adapters import state_utils
 from workers.adapters.react_memory import (
@@ -229,20 +234,36 @@ async def _invoke_mcp_tool(
         resolved = coerce_llm_json_from_schema(resolved, schema)
     try:
         return str(await selected.ainvoke(resolved))
+    except ExecutionStepError:
+        raise
     except Exception as e:
-        detail = format_exception_chain(e)
-        logger.exception("Tool %s failed: %s", tool_call.name, e)
-        if strict_errors:
-            raise ExecutionStepError(
-                detail,
+        return _tool_invoke_exception_result(
+            tool_call=tool_call, exc=e, strict_errors=strict_errors
+        )
+
+
+def _tool_invoke_exception_result(
+    *,
+    tool_call: ToolCall,
+    exc: Exception,
+    strict_errors: bool,
+) -> str:
+    nested = unwrap_execution_step_error(exc)
+    if nested is not None:
+        raise nested from exc
+    detail = format_exception_chain(exc)
+    logger.exception("Tool %s failed: %s", tool_call.name, exc)
+    if strict_errors and tool_invoke_exception_is_infrastructure(exc):
+        raise ExecutionStepError(
+            detail,
+            tool=tool_call.name,
+            error_details=build_step_error_details(
+                code="TOOL_INVOKE_FAILED",
+                message=detail,
                 tool=tool_call.name,
-                error_details=build_step_error_details(
-                    code="TOOL_INVOKE_FAILED",
-                    message=detail,
-                    tool=tool_call.name,
-                ),
-            ) from e
-        return f"Error executing tool: {detail}"
+            ),
+        ) from exc
+    return format_tool_invoke_exception(exc)
 
 
 def _handle_tool_output_content(

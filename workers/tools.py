@@ -1185,7 +1185,13 @@ def _convert_mcp_to_langchain(
                     output_text.append(content.text)
                 elif content.type == "image":
                     output_text.append(f"[Image: {content.mimeType}]")
-            return "\n".join(output_text)
+            text = "\n".join(output_text)
+            is_error = getattr(result, "isError", False)
+            if isinstance(is_error, bool) and is_error:
+                if text.strip():
+                    return f"Error: {text}"
+                return "Error: tool returned isError with no text content"
+            return text
 
         try:
             return await execute_with_governance(
