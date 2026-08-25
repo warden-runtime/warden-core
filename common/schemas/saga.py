@@ -56,9 +56,31 @@ class Tool(BaseModel):
 
 
 class ToolsSpec(BaseModel):
-    """Step-level tool allowlist with optional input/output schemas."""
+    """Step-level tool allowlist with optional bound ``with`` keys for reason MCP args."""
 
     allow: list[Tool] = Field(default_factory=list)
+    bind: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Reason/react only: ``with`` keys to pin onto MCP tool args (saga wins). "
+            "Each name must also appear under the step ``with`` map."
+        ),
+    )
+
+    @field_validator("bind")
+    @classmethod
+    def bind_keys_non_empty_unique(cls, v: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for raw in v:
+            key = str(raw).strip()
+            if not key:
+                raise ValueError("tools.bind entries must be non-empty")
+            if key in seen:
+                raise ValueError(f"tools.bind contains duplicate key {key!r}")
+            seen.add(key)
+            cleaned.append(key)
+        return cleaned
 
 
 class Resource(BaseModel):
@@ -163,6 +185,8 @@ class CompensationStep(BaseModel):
             raise ValueError("compensation requires exactly one tool in tools.allow")
         if self.tools.allow[0].name == "load_skill":
             raise ValueError("tools.allow must not include reserved virtual tool name 'load_skill'")
+        if self.tools.bind:
+            raise ValueError("tools.bind is not supported on compensation steps")
         return self
 
 
@@ -266,6 +290,22 @@ class _SagaStepBase(BaseModel):
         return self
 
 
+def _simple_agent_adapter_error(step: "ReasonSagaStep") -> str | None:
+    """Return a validation error message if ``simple`` constraints are violated."""
+    tools = step.tools
+    if tools is not None and tools.allow:
+        return "simple agent-adapter requires an empty tools.allow"
+    if tools is not None and tools.bind:
+        return "simple agent-adapter does not support tools.bind"
+    if step.resources is not None and step.resources.allow:
+        return "simple agent-adapter requires an empty resources.allow"
+    if step.skills is not None and step.skills.allow:
+        return "simple agent-adapter requires an empty skills.allow"
+    if step.facts:
+        return "facts require tool results; incompatible with simple agent-adapter"
+    return None
+
+
 class ReasonSagaStep(_SagaStepBase):
     """LLM reasoning step: requires a prompt template ref; tools.allow is optional."""
 
@@ -335,17 +375,23 @@ class ReasonSagaStep(_SagaStepBase):
     def validate_simple_agent_adapter_constraints(self) -> "ReasonSagaStep":
         if self.agent_adapter != "simple":
             return self
-        tools = self.tools.allow if self.tools else []
-        if tools:
-            raise ValueError("simple agent-adapter requires an empty tools.allow")
-        resources = self.resources.allow if self.resources else []
-        if resources:
-            raise ValueError("simple agent-adapter requires an empty resources.allow")
-        skills = self.skills.allow if self.skills else []
-        if skills:
-            raise ValueError("simple agent-adapter requires an empty skills.allow")
-        if self.facts:
-            raise ValueError("facts require tool results; incompatible with simple agent-adapter")
+        err = _simple_agent_adapter_error(self)
+        if err is not None:
+            raise ValueError(err)
+        return self
+
+    @model_validator(mode="after")
+    def validate_tools_bind_subset_of_with(self) -> "ReasonSagaStep":
+        bind = self.tools.bind if self.tools else []
+        if not bind:
+            return self
+        with_keys = set(self.with_spec.keys())
+        missing = [key for key in bind if key not in with_keys]
+        if missing:
+            raise ValueError(
+                "tools.bind keys must also be declared in step 'with': "
+                + ", ".join(repr(k) for k in missing)
+            )
         return self
 
     @model_validator(mode="after")
@@ -371,6 +417,8 @@ class CommitSagaStep(_SagaStepBase):
             raise ValueError("commit steps require exactly one tool in tools.allow")
         if self.tools.allow[0].name == "load_skill":
             raise ValueError("tools.allow must not include reserved virtual tool name 'load_skill'")
+        if self.tools.bind:
+            raise ValueError("tools.bind is not supported on commit steps")
         return self
 
 

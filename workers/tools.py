@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from asyncio import wait_for
+from collections.abc import Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
@@ -471,6 +472,7 @@ async def _load_tools_from_session(
     conn: BaseDBAsyncClient | None,
     hook_kw: dict[str, Any],
     worker_definition: Any,
+    omit_arg_keys: Sequence[str] | frozenset[str] | None = None,
 ) -> list[StructuredTool]:
     mcp_response = await wait_for(session.list_tools(), timeout=_MCP_CALL_TIMEOUT_S)
     loaded: list[StructuredTool] = []
@@ -507,6 +509,7 @@ async def _load_tools_from_session(
                 conn=conn,
                 worker_definition=worker_definition,
                 llm_name=llm_name,
+                omit_arg_keys=omit_arg_keys,
             )
         )
         loaded_tool_names.add(mcp_tool.name)
@@ -530,6 +533,7 @@ async def _process_mcp_source(
     source_failures: list[dict[str, Any]],
     required_resource_patterns: list[re.Pattern[str]],
     has_required_resources: dict[str | None, bool],
+    omit_arg_keys: Sequence[str] | frozenset[str] | None = None,
 ) -> list[StructuredTool]:
     source_name = source.get("name")
     source_url = source.get("url")
@@ -583,6 +587,7 @@ async def _process_mcp_source(
             conn=conn,
             hook_kw=hook_kw,
             worker_definition=worker_definition,
+            omit_arg_keys=omit_arg_keys,
         )
     except BaseException as exc:
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -661,6 +666,7 @@ async def build_tools_for_worker(
     context: dict[str, Any] | None = None,
     resource_specs: list[ResourceSpec] | None = None,
     skill_specs: list[dict[str, Any]] | None = None,
+    omit_arg_keys: Sequence[str] | frozenset[str] | None = None,
 ) -> list[StructuredTool]:
     """Connect to MCP sources, filter by tool_specs, return LangChain tools with governance."""
     scope = execution_scope_from_injection(context)
@@ -710,6 +716,7 @@ async def build_tools_for_worker(
                 source_failures=source_failures,
                 required_resource_patterns=required_patterns,
                 has_required_resources=has_required_resources,
+                omit_arg_keys=omit_arg_keys,
             )
         )
 
@@ -1148,19 +1155,27 @@ def _convert_mcp_to_langchain(
     conn: BaseDBAsyncClient | None = None,
     worker_definition: Any = None,
     llm_name: str | None = None,
+    omit_arg_keys: Sequence[str] | frozenset[str] | None = None,
 ) -> StructuredTool:
     """Create a LangChain StructuredTool that calls MCP and runs governance.
 
     ``StructuredTool.name`` is the provider-safe (sanitized) alias exposed to the
     LLM. ``session.call_tool`` and governance always use the original MCP id.
+
+    ``omit_arg_keys`` drops those properties from the LLM-facing ``args_schema``
+    (and ``required``) while keeping the full MCP ``inputSchema`` in metadata for
+    saga-wins bind overlay at invoke time.
     """
     input_schema = mcp_tool.inputSchema or {}
     properties = input_schema.get("properties", {})
     required = input_schema.get("required", [])
     wire_name = llm_name if llm_name is not None else sanitize_mcp_tool_name(mcp_tool.name)
+    omit = frozenset(omit_arg_keys or ())
 
     fields = {}
     for field_name, field_def in properties.items():
+        if field_name in omit:
+            continue
         if not isinstance(field_def, dict):
             field_def = {}
         type_token, nullable = _resolve_mcp_json_type(field_def)

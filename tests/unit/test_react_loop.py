@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from common.agent_adapter import ExecutionStepError
 from common.llm import ChatMessage, ChatResponse, ToolCall
+from common.tool_arg_bind import overlay_bound_tool_arguments
 from common.utils import tool_call_args_to_dict
 from mcp.types import Tool as McpTool
 from workers.adapters.react_loop import (
@@ -630,6 +631,64 @@ async def test_react_loop_coerces_stringified_array_args_before_ainvoke():
     mock_session.call_tool.assert_called_once_with(
         "sandbox_exec",
         arguments={"commands": ["ok"]},
+    )
+
+
+@pytest.mark.asyncio
+async def test_react_loop_merge_tool_args_overlays_bound_container_id():
+    """Saga-wins merge_tool_args pins container_id before MCP invoke."""
+
+    mcp_tool = McpTool(
+        name="sandbox_exec",
+        description="Run",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "container_id": {"type": "string"},
+                "command": {"type": "string"},
+            },
+            "required": ["container_id", "command"],
+        },
+    )
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(
+        return_value=MagicMock(content=[MagicMock(type="text", text="ok")]),
+    )
+    tool = _convert_mcp_to_langchain(
+        mcp_tool,
+        mock_session,
+        step_spec=None,
+        omit_arg_keys=["container_id"],
+    )
+
+    llm = _ScriptedLLM(
+        [
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        name="sandbox_exec",
+                        args={"container_id": "llm-junk", "command": "ls"},
+                        id="1",
+                    )
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[ToolCall(name="_submit", args={"result": {"summary": "done"}}, id="2")]
+            ),
+        ]
+    )
+    await run_react_loop(
+        llm=llm,
+        initial_messages=[ChatMessage(role="human", content="go")],
+        mcp_tools=[tool],
+        allowed_tool_names=["sandbox_exec"],
+        max_turns=10,
+        merge_context={"container_id": "saga-real-id"},
+        merge_tool_args=overlay_bound_tool_arguments,
+    )
+    mock_session.call_tool.assert_called_once_with(
+        "sandbox_exec",
+        arguments={"container_id": "saga-real-id", "command": "ls"},
     )
 
 

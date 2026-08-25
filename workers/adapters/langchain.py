@@ -34,6 +34,7 @@ from common.schemas.saga import DEFAULT_MAX_TURNS
 from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_document
 from common.step_facts import StepFactsExtractionError, extract_step_facts
 from common.step_output import business_data_from_step_output, wrap_step_output_data
+from common.tool_arg_bind import bound_arguments_from_step, overlay_bound_tool_arguments
 from common.tool_results import clip_tool_text_for_llm, resolve_tool_message_limit
 from common.utils import create_pydantic_model_from_schema
 from langchain_core.tools import StructuredTool
@@ -499,6 +500,7 @@ class LangChainAdapter(AgentAdapterPort):
         max_completion_tokens: int | None = None,
         facts_extractors: list[dict[str, Any]] | None = None,
         agent_adapter: AgentAdapterMode = "react",
+        tool_bind_keys: list[str] | None = None,
     ) -> StepResult:
         ctx = context or self._context
         timing_acc = _timing_acc_from_context(ctx)
@@ -508,6 +510,14 @@ class LangChainAdapter(AgentAdapterPort):
         skills = skill_specs or []
 
         if agent_adapter == "simple":
+            if tool_bind_keys:
+                raise ExecutionStepError(
+                    "simple agent-adapter does not support tools.bind",
+                    error_details=build_step_error_details(
+                        code="agent_adapter_invalid",
+                        message="simple agent-adapter does not support tools.bind",
+                    ),
+                )
             if skills:
                 raise ExecutionStepError(
                     "simple agent-adapter does not support skills.allow",
@@ -537,6 +547,9 @@ class LangChainAdapter(AgentAdapterPort):
                 resource_specs=resources,
             )
 
+        bind_keys = list(tool_bind_keys or [])
+        bound_args = bound_arguments_from_step(arguments, bind_keys)
+
         effective_tool_specs = list(tool_specs or [])
         allowed_skills_index: list[dict[str, str]] = []
         if skills:
@@ -564,6 +577,7 @@ class LangChainAdapter(AgentAdapterPort):
                 context=ctx,
                 resource_specs=resources or None,
                 skill_specs=skills or None,
+                omit_arg_keys=bind_keys or None,
             )
             allowed_tool_names = [tool.name for tool in mcp_tools]
             if SUBMIT_TOOL_NAME in allowed_tool_names:
@@ -599,6 +613,12 @@ class LangChainAdapter(AgentAdapterPort):
             if timing_acc is not None:
                 timing_acc.stop("adapter_setup", bucket="setup_ms")
 
+            merge_tool_args = None
+            merge_context: dict[str, Any] | None = None
+            if bound_args:
+                merge_context = bound_args
+                merge_tool_args = overlay_bound_tool_arguments
+
             max_schema_attempts = _schema_retry_max_attempts()
             remaining_turns = turn_budget
             loop_result: ReactLoopResult | None = None
@@ -610,6 +630,8 @@ class LangChainAdapter(AgentAdapterPort):
                         mcp_tools=mcp_tools,
                         allowed_tool_names=allowed_tool_names,
                         max_turns=remaining_turns,
+                        merge_tool_args=merge_tool_args,
+                        merge_context=merge_context,
                         log_preview_len=_react_log_preview_len(ctx),
                         timing_acc=timing_acc,
                         usage_acc=usage_acc,

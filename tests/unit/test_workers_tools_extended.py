@@ -262,6 +262,37 @@ async def test_convert_mcp_to_langchain_attaches_warden_input_schema():
 
 
 @pytest.mark.asyncio
+async def test_convert_mcp_omits_bound_keys_from_args_schema():
+    """omit_arg_keys drops properties from LLM args_schema but keeps full MCP schema."""
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "container_id": {"type": "string"},
+            "command": {"type": "string"},
+        },
+        "required": ["container_id", "command"],
+    }
+    mcp_tool = McpTool(name="sandbox_exec", description="Exec", inputSchema=input_schema)
+    mock_session = MagicMock()
+    mock_session.call_tool = AsyncMock(return_value=MagicMock(content=[]))
+
+    tool = _convert_mcp_to_langchain(
+        mcp_tool,
+        mock_session,
+        step_spec=None,
+        omit_arg_keys=["container_id"],
+    )
+
+    assert get_warden_tool_input_schema(tool) == input_schema
+    schema_props = tool.args_schema.model_json_schema().get("properties", {})
+    assert "container_id" not in schema_props
+    assert "command" in schema_props
+    required = tool.args_schema.model_json_schema().get("required", [])
+    assert "container_id" not in required
+    assert "command" in required
+
+
+@pytest.mark.asyncio
 async def test_convert_mcp_to_langchain_accepts_stringified_array_args():
     """Stringified JSON array args pass LangChain validation when coerced in the ReAct loop."""
     mcp_tool = McpTool(

@@ -316,3 +316,97 @@ def test_loop_rejects_duplicate_body_step_ids() -> None:
                 ],
             }
         )
+
+
+def _reason_base(**overrides: object) -> dict:
+    base: dict = {
+        "id": "r1",
+        "name": "R",
+        "kind": "reason",
+        "worker": "w",
+        "worker_version": "1.0.0",
+        "with": {},
+        "prompt": "p.j2",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_reason_tools_bind_subset_of_with() -> None:
+    step = ReasonSagaStep.model_validate(
+        _reason_base(
+            **{
+                "with": {
+                    "container_id": {"value": "c1"},
+                    "problem": {"from": "$.input.problem"},
+                },
+                "tools": {
+                    "bind": ["container_id"],
+                    "allow": [{"name": "sandbox_exec"}],
+                },
+            }
+        )
+    )
+    assert step.tools is not None
+    assert step.tools.bind == ["container_id"]
+
+
+def test_reason_tools_bind_rejects_unknown_with_key() -> None:
+    with pytest.raises(ValidationError, match="tools.bind keys must also be declared"):
+        ReasonSagaStep.model_validate(
+            _reason_base(
+                **{
+                    "with": {"problem": {"value": "x"}},
+                    "tools": {
+                        "bind": ["container_id"],
+                        "allow": [{"name": "sandbox_exec"}],
+                    },
+                }
+            )
+        )
+
+
+def test_reason_tools_bind_rejects_duplicates() -> None:
+    with pytest.raises(ValidationError, match="duplicate"):
+        ReasonSagaStep.model_validate(
+            _reason_base(
+                **{
+                    "with": {"container_id": {"value": "c1"}},
+                    "tools": {
+                        "bind": ["container_id", "container_id"],
+                        "allow": [{"name": "sandbox_exec"}],
+                    },
+                }
+            )
+        )
+
+
+def test_simple_agent_adapter_rejects_tools_bind() -> None:
+    with pytest.raises(ValidationError, match="tools.bind"):
+        ReasonSagaStep.model_validate(
+            _reason_base(
+                **{
+                    "agent-adapter": "simple",
+                    "with": {"container_id": {"value": "c1"}},
+                    "tools": {"bind": ["container_id"]},
+                }
+            )
+        )
+
+
+def test_commit_rejects_tools_bind() -> None:
+    with pytest.raises(ValidationError, match="tools.bind"):
+        CommitSagaStep.model_validate(
+            {
+                "id": "c1",
+                "name": "C",
+                "kind": "commit",
+                "worker": "w",
+                "worker_version": "1.0.0",
+                "with": {"body": {"value": "hi"}},
+                "tools": {
+                    "bind": ["body"],
+                    "allow": [{"name": "add_comment"}],
+                },
+            }
+        )

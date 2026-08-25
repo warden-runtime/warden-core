@@ -12,6 +12,7 @@ from common.compensation_context import (
     fence_compensation_tool_arguments,
 )
 from common.llm import ChatResponse, ToolCall
+from common.tool_arg_bind import overlay_bound_tool_arguments
 from workers.adapters.langchain import (
     LangChainAdapter,
     _build_submit_tool,
@@ -929,3 +930,41 @@ async def test_run_step_passes_resource_specs_to_build_tools(mocker):
         context={},
     )
     assert captured.get("resource_specs") == resource_specs
+
+
+@pytest.mark.asyncio
+async def test_run_step_passes_tool_bind_keys_to_build_and_react(mocker):
+    captured_build: dict[str, object] = {}
+    mock_loop = mocker.patch(
+        "workers.adapters.langchain.run_react_loop",
+        new_callable=AsyncMock,
+        return_value=mocker.MagicMock(submit_payload={"summary": "ok"}),
+    )
+
+    async def _capture_build_tools(**kwargs):
+        captured_build.update(kwargs)
+        return []
+
+    mocker.patch(
+        "workers.adapters.langchain.build_tools_for_worker",
+        new_callable=AsyncMock,
+        side_effect=_capture_build_tools,
+    )
+    _patch_build_llm(mocker, [ChatResponse(content="", tool_calls=[])])
+
+    adapter = LangChainAdapter(
+        worker_definition=_make_worker_def(),
+        secret=_make_secret(),
+    )
+    await adapter.run_step(
+        system_prompt="sys",
+        prompt_template="Hello {{ container_id }}",
+        arguments={"container_id": "saga-real-id", "problem": "x"},
+        tool_specs=[{"name": "sandbox_exec"}],
+        context={},
+        tool_bind_keys=["container_id"],
+    )
+    assert list(captured_build.get("omit_arg_keys") or []) == ["container_id"]
+    assert mock_loop.await_args is not None
+    assert mock_loop.await_args.kwargs["merge_context"] == {"container_id": "saga-real-id"}
+    assert mock_loop.await_args.kwargs["merge_tool_args"] is overlay_bound_tool_arguments
