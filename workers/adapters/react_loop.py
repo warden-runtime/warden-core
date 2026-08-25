@@ -1,10 +1,9 @@
 """
-Native ReAct loop on ChatModelPort: tool rounds, _submit completion, or assistant JSON (compensation).
+Native ReAct loop on ChatModelPort: tool rounds and _submit completion.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -55,7 +54,6 @@ from workers.tools import get_warden_tool_input_schema, get_warden_tool_mcp_name
 
 logger = logging.getLogger(__name__)
 _transcript_logger = logging.getLogger("warden.react.transcript")
-CompletionMode = Literal["submit", "assistant_json"]
 SUBMIT_TOOL_NAME = "_submit"
 _DEFAULT_PREVIEW_LEN = 500
 _TOOL_ERROR_PREVIEW_LEN = 500
@@ -116,7 +114,6 @@ class ReactLoopResult:
 
     transcript: list[ChatMessage]
     submit_payload: dict[str, Any] | None = None
-    final_content: str | None = None
     tool_results: list[dict[str, Any]] | None = None
 
 
@@ -439,7 +436,6 @@ async def _process_tool_calls(
     messages: list[ChatMessage],
     mcp_tools: Sequence[Any],
     allowed_tool_names: Sequence[str],
-    completion_mode: CompletionMode,
     merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
     merge_context: dict[str, Any],
     tool_results: list[dict[str, Any]],
@@ -461,14 +457,13 @@ async def _process_tool_calls(
             tool_calls=tool_calls,
         )
     )
-    allow_submit = completion_mode == "submit"
     for tool_call in tool_calls:
         _check_allowlist_tool_name(
             tool_call.name,
             allowed_tool_names,
-            allow_submit=allow_submit,
+            allow_submit=True,
         )
-    if allow_submit and len(tool_calls) == 1 and tool_calls[0].name == SUBMIT_TOOL_NAME:
+    if len(tool_calls) == 1 and tool_calls[0].name == SUBMIT_TOOL_NAME:
         return _submit_payload_from_call(tool_calls[0])
     await _execute_tool_batch(
         tool_calls=tool_calls,
@@ -477,8 +472,8 @@ async def _process_tool_calls(
         merge_tool_args=merge_tool_args,
         merge_context=merge_context,
         tool_results=tool_results,
-        allow_submit=allow_submit,
-        strict_errors=completion_mode == "submit",
+        allow_submit=True,
+        strict_errors=True,
         timing_acc=timing_acc,
         tool_message_limit=tool_message_limit,
         turn_index=turn_index,
@@ -533,30 +528,12 @@ def _raise_no_submit(
     )
 
 
-def _raise_compensation_max_turns(
-    *,
-    had_tool_results: bool,
-    transcript_message_count: int,
-) -> NoReturn:
-    """Compensation loop exhausted max turns without final JSON (and no tool rows to synthesize)."""
-    raise ExecutionStepError(
-        "Compensation ReAct loop exceeded max turns without final JSON.",
-        error_details={
-            "error": "max_turns_exceeded",
-            "code": "compensation_max_turns",
-            "had_tool_results": had_tool_results,
-            "transcript_message_count": transcript_message_count,
-        },
-    )
-
-
 async def _react_loop_turn(
     *,
     llm: ChatModelPort,
     messages: list[ChatMessage],
     mcp_tools: Sequence[Any],
     allowed_tool_names: Sequence[str],
-    completion_mode: CompletionMode,
     merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
     merge_context: dict[str, Any],
     tool_results: list[dict[str, Any]],
@@ -605,7 +582,6 @@ async def _react_loop_turn(
             messages=messages,
             mcp_tools=mcp_tools,
             allowed_tool_names=allowed_tool_names,
-            completion_mode=completion_mode,
             merge_tool_args=merge_tool_args,
             merge_context=merge_context,
             tool_results=tool_results,
@@ -627,34 +603,21 @@ async def _react_loop_turn(
             )
         return _TurnContinue()
 
-    if completion_mode == "submit":
-        if allow_submit_text_recovery:
-            messages.append(ChatMessage(role="assistant", content=response.content or ""))
-            messages.append(ChatMessage(role="human", content=_SUBMIT_TEXT_EXIT_NUDGE))
-            logger.info(
-                "ReAct submit soft-retry: model_text_exit; injected _submit nudge (turn=%d/%d)",
-                turns_used,
-                max_turns,
-            )
-            return _TurnContinue(used_submit_text_recovery=True)
-        _raise_no_submit(
-            reason="model_text_exit",
-            turns_used=turns_used,
-            max_turns=max_turns,
-            tool_results=tool_results,
-            assistant_content=response.content,
+    if allow_submit_text_recovery:
+        messages.append(ChatMessage(role="assistant", content=response.content or ""))
+        messages.append(ChatMessage(role="human", content=_SUBMIT_TEXT_EXIT_NUDGE))
+        logger.info(
+            "ReAct submit soft-retry: model_text_exit; injected _submit nudge (turn=%d/%d)",
+            turns_used,
+            max_turns,
         )
-
-    _log_transcript(messages, log_preview_len=log_preview_len)
-    _log_react_summary(
-        outcome="assistant_json",
+        return _TurnContinue(used_submit_text_recovery=True)
+    _raise_no_submit(
+        reason="model_text_exit",
         turns_used=turns_used,
-        message_count=len(messages),
-    )
-    return ReactLoopResult(
-        transcript=messages,
-        final_content=response.content,
-        tool_results=tool_results or None,
+        max_turns=max_turns,
+        tool_results=tool_results,
+        assistant_content=response.content,
     )
 
 
@@ -664,7 +627,6 @@ async def run_react_loop(
     initial_messages: list[ChatMessage],
     mcp_tools: Sequence[Any],
     allowed_tool_names: Sequence[str],
-    completion_mode: CompletionMode,
     max_turns: int,
     merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
     merge_context: dict[str, Any] | None = None,
@@ -674,31 +636,28 @@ async def run_react_loop(
     max_step_tokens: int | None = None,
 ) -> ReactLoopResult:
     """
-    Run a bounded ReAct loop: LLM turns, MCP tool execution, then submit or assistant JSON.
+    Run a bounded ReAct loop: LLM turns, MCP tool execution, then ``_submit``.
 
     Args:
         llm: Chat model (typically with tools bound via bind_tools).
         initial_messages: Starting transcript (system + human).
         mcp_tools: MCP StructuredTool instances (not including virtual _submit).
         allowed_tool_names: Names from step tool_specs (excludes _submit).
-        completion_mode: ``submit`` for reason steps (_submit required); ``assistant_json`` for compensation.
-        max_turns: Maximum LLM invocations (submit-mode text-exit soft retry may add at most
+        max_turns: Maximum LLM invocations (text-exit soft retry may add at most
             ``WARDEN_REACT_SUBMIT_TEXT_RETRIES`` bonus call(s) when prose exit hits the last turn).
-        merge_tool_args: Optional merger for compensation tool args with engine original_input.
-        merge_context: Second argument to merge_tool_args (e.g. original_input).
+        merge_tool_args: Optional merger applied to MCP tool args before invoke.
+        merge_context: Second argument to merge_tool_args.
         log_preview_len: Optional transcript log truncation override (from injection context);
             ``0`` disables truncation. Falls back to ``WARDEN_REACT_LOG_PREVIEW_LEN``.
         timing_acc: Optional worker timing accumulator (``llm_ms`` / ``tool_ms``).
         usage_acc: Optional worker usage accumulator (provider token totals).
-        max_step_tokens: Optional accumulated total_tokens budget; None means unlimited
-            (compensation must pass None).
+        max_step_tokens: Optional accumulated total_tokens budget; None means unlimited.
 
     Returns:
-        ReactLoopResult with transcript and completion fields.
+        ReactLoopResult with transcript and ``_submit`` payload.
 
     Raises:
-        ExecutionStepError: Governance, allowlist, tool failure, no _submit, token budget,
-            or compensation max turns.
+        ExecutionStepError: Governance, allowlist, tool failure, no ``_submit``, or token budget.
     """
     messages = list(initial_messages)
     tool_results: list[dict[str, Any]] = []
@@ -708,9 +667,7 @@ async def run_react_loop(
     estimator = CalibratedEstimator() if compression_on else None
     context_limit = context_limit_from_env() if compression_on else None
     context_headroom = context_headroom_from_env() if compression_on else None
-    submit_text_recoveries_left = (
-        submit_text_retries_from_env() if completion_mode == "submit" else 0
-    )
+    submit_text_recoveries_left = submit_text_retries_from_env()
     if compression_on:
         logger.debug(
             "ReAct memory compression enabled context_limit=%s headroom=%s",
@@ -731,7 +688,6 @@ async def run_react_loop(
             messages=messages,
             mcp_tools=mcp_tools,
             allowed_tool_names=allowed_tool_names,
-            completion_mode=completion_mode,
             merge_tool_args=merge_tool_args,
             merge_context=ctx,
             tool_results=tool_results,
@@ -755,52 +711,9 @@ async def run_react_loop(
                 effective_max_turns = turns_used + 1
         # else: tool round(s) without _submit — continue
 
-    if completion_mode == "submit":
-        _raise_no_submit(
-            reason="max_turns_exceeded",
-            turns_used=turns_used,
-            max_turns=max_turns,
-            tool_results=tool_results,
-        )
-
-    # Only reached when every turn had tool_calls (no early prose exit). Synthesize rollback
-    # from tool rows, or fail closed when the turn budget was zero/empty.
-    _log_transcript(messages, log_preview_len=log_preview_len)
-    if tool_results:
-        logger.warning(
-            "Compensation: max turns without final JSON; synthetic output from %d tool result(s).",
-            len(tool_results),
-        )
-        _log_react_summary(
-            outcome="compensation_synthetic",
-            turns_used=turns_used,
-            message_count=len(messages),
-        )
-        return ReactLoopResult(transcript=messages, tool_results=tool_results)
-    _raise_compensation_max_turns(
-        had_tool_results=False,
-        transcript_message_count=len(messages),
+    _raise_no_submit(
+        reason="max_turns_exceeded",
+        turns_used=turns_used,
+        max_turns=max_turns,
+        tool_results=tool_results,
     )
-
-
-def parse_compensation_output(loop_result: ReactLoopResult) -> dict[str, Any]:
-    """Build compensation output dict from loop result (synthetic or parsed JSON)."""
-    if loop_result.tool_results and (
-        loop_result.final_content is None or not str(loop_result.final_content).strip()
-    ):
-        return {
-            "rollback_status": "completed",
-            "tool_results": loop_result.tool_results,
-        }
-    content = loop_result.final_content
-    if content is None:
-        _raise_compensation_max_turns(
-            had_tool_results=bool(loop_result.tool_results),
-            transcript_message_count=len(loop_result.transcript),
-        )
-    clean = content.strip().replace("```json", "").replace("```", "")
-    try:
-        parsed = json.loads(clean)
-    except json.JSONDecodeError:
-        return {"raw_output": content}
-    return parsed if isinstance(parsed, dict) else {"raw_output": content}

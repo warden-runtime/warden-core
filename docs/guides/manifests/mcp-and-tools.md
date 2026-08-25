@@ -61,7 +61,7 @@ On **`react`** reason steps, optional `skills.allow` lists skill ids the step ma
 2. Unions those `allowed_tools` with the step’s `tools.allow` (**extras**) into the effective MCP allowlist (raw and sanitized MCP ids collapse to one entry; extras win for schemas)
 3. Injects a virtual **`load_skill`** tool and puts `allowed_skills: [{name, description}, …]` into the step prompt context (static index)
 
-Do **not** list `load_skill` in `tools.allow` or skill `allowed_tools` — it is reserved like `_submit`. Missing or malformed skill files fail the step with `SKILL_NOT_FOUND` / `SKILL_INVALID` **before** any LLM turn. Incompatible with **`agent-adapter: simple`**. Commit steps do not use skills. A `skills:` key under compensation YAML is ignored (v1).
+Do **not** list `load_skill` in `tools.allow` or skill `allowed_tools` — it is reserved like `_submit`. Missing or malformed skill files fail the step with `SKILL_NOT_FOUND` / `SKILL_INVALID` **before** any LLM turn. Incompatible with **`agent-adapter: simple`**. Commit steps and compensation undo YAML do not use skills.
 
 ```yaml
   - id: triage

@@ -9,7 +9,7 @@ import pytest
 from common.agent_adapter import ExecutionStepError
 from common.compensation_context import (
     WARDEN_TOOL_IDEMPOTENCY_KEY,
-    merge_compensation_tool_arguments,
+    fence_compensation_tool_arguments,
 )
 from common.llm import ChatResponse, ToolCall
 from workers.adapters.langchain import (
@@ -51,7 +51,6 @@ def _make_worker_def(
     model_name: str = "gpt-4o",
     system_prompt: str = "You are helpful.",
     tool_sources: list | None = None,
-    compensation_prompt: str | None = None,
 ):
     w = MagicMock()
     w.name = "test-worker"
@@ -61,33 +60,31 @@ def _make_worker_def(
     w.model_name = model_name
     w.system_prompt = system_prompt
     w.tool_sources = tool_sources or []
-    w.compensation_prompt = compensation_prompt
     return w
 
 
-def test_merge_compensation_tool_args_keeps_resolved_ids_when_llm_sends_null():
-    """Engine-resolved original_input must win over null/empty LLM tool args."""
-    merged = merge_compensation_tool_arguments(
-        {"payment_id": None, "reservation_id": "res-000001"},
+def test_fence_compensation_tool_arguments_copies_resolved_input():
+    fenced = fence_compensation_tool_arguments(
         {
             "payment_id": "pay-000001",
             "reservation_id": "res-000001",
             "amount_cents": 100,
         },
     )
-    assert merged["payment_id"] == "pay-000001"
-    assert merged["reservation_id"] == "res-000001"
-    assert merged["amount_cents"] == 100
+    assert fenced == {
+        "payment_id": "pay-000001",
+        "reservation_id": "res-000001",
+        "amount_cents": 100,
+    }
 
 
-def test_merge_compensation_tool_args_injects_idempotency_key():
-    merged = merge_compensation_tool_arguments(
-        {},
+def test_fence_compensation_tool_arguments_injects_idempotency_key():
+    fenced = fence_compensation_tool_arguments(
         {"payment_id": "pay-1"},
         idempotency_key="comp-trace-span",
     )
-    assert merged[WARDEN_TOOL_IDEMPOTENCY_KEY] == "comp-trace-span"
-    assert merged["payment_id"] == "pay-1"
+    assert fenced[WARDEN_TOOL_IDEMPOTENCY_KEY] == "comp-trace-span"
+    assert fenced["payment_id"] == "pay-1"
 
 
 def _make_secret(api_key: str = "sk-fake"):
@@ -796,7 +793,6 @@ async def test_run_compensation_single_tool_invokes_mcp_once_no_llm(mocker):
         secret=_make_secret(),
     )
     result = await adapter.run_compensation(
-        compensation_prompt="Undo the step.",
         original_input={"claim_id": "c1"},
         step_output={"summary": "did something"},
         failure_reason=None,
@@ -805,7 +801,6 @@ async def test_run_compensation_single_tool_invokes_mcp_once_no_llm(mocker):
         context={},
     )
     assert result.output.get("rollback_status") == "completed"
-    assert result.output.get("compensation_mode") == "single_tool"
     assert result.output.get("data", {}).get("status") == "compensated"
     assert len(result.output.get("tool_results", [])) == 1
     build_llm.assert_not_called()
@@ -836,7 +831,6 @@ async def test_run_compensation_single_tool_clips_large_recorded_result(mocker, 
         secret=_make_secret(),
     )
     result = await adapter.run_compensation(
-        compensation_prompt="Undo the step.",
         original_input={"claim_id": "c1"},
         step_output={"summary": "did something"},
         failure_reason=None,
@@ -850,39 +844,47 @@ async def test_run_compensation_single_tool_clips_large_recorded_result(mocker, 
 
 
 @pytest.mark.asyncio
-async def test_run_compensation_multi_tool_uses_llm_loop(mocker):
-    mock_tool_a = MagicMock()
-    mock_tool_a.name = "a"
-    mock_tool_a.ainvoke = AsyncMock(return_value="ok")
-    mock_tool_b = MagicMock()
-    mock_tool_b.name = "b"
-    mock_tool_b.ainvoke = AsyncMock(return_value="ok")
-
-    async def _build_tools(*, worker_def, tool_specs, exit_stack, context, resource_specs=None):
-        return [mock_tool_a, mock_tool_b]
-
-    _patch_build_llm(mocker, [ChatResponse(content='{"rollback": "done"}')])
-
+async def test_run_compensation_rejects_multi_tool(mocker):
+    build_llm = mocker.patch("workers.adapters.langchain.build_llm")
     mocker.patch(
         "workers.adapters.langchain.build_tools_for_worker",
         new_callable=AsyncMock,
-        side_effect=_build_tools,
+        return_value=[],
     )
 
     adapter = LangChainAdapter(
         worker_definition=_make_worker_def(),
         secret=_make_secret(),
     )
-    result = await adapter.run_compensation(
-        compensation_prompt="Rollback.",
-        original_input={},
-        step_output={},
-        failure_reason=None,
-        context_snapshot={},
-        tool_specs=[{"name": "a"}, {"name": "b"}],
-        context={},
+    with pytest.raises(ExecutionStepError) as exc_info:
+        await adapter.run_compensation(
+            original_input={},
+            step_output={},
+            failure_reason=None,
+            context_snapshot={},
+            tool_specs=[{"name": "a"}, {"name": "b"}],
+            context={},
+        )
+    assert (exc_info.value.error_details or {}).get("code") == "compensation_tool_count"
+    build_llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_compensation_rejects_zero_tools(mocker):
+    adapter = LangChainAdapter(
+        worker_definition=_make_worker_def(),
+        secret=_make_secret(),
     )
-    assert result.output.get("rollback") == "done"
+    with pytest.raises(ExecutionStepError) as exc_info:
+        await adapter.run_compensation(
+            original_input={},
+            step_output={},
+            failure_reason=None,
+            context_snapshot={},
+            tool_specs=[],
+            context={},
+        )
+    assert (exc_info.value.error_details or {}).get("code") == "compensation_tool_count"
 
 
 @pytest.mark.asyncio

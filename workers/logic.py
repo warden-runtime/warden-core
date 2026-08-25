@@ -9,11 +9,8 @@ from typing import Any
 
 from common.agent_adapter import StepResult
 from common.compensation_context import (
-    DEFAULT_COMPENSATION_PROMPT,
     compensation_parameter_context,
-    compensation_prompt_from_snapshot,
     effective_forward_step_output,
-    system_prompt_from_snapshot,
 )
 from common.config import get_settings
 from common.contracts import (
@@ -123,7 +120,8 @@ async def _hydrate_compensation_command(
         step_output=effective_forward_step_output(forward),
         context_snapshot=context_snapshot,
         saga_vars=dict(context_snapshot),
-        max_turns=comp_step.max_turns,
+        # Unused on the undo path (dataclass fields shared with forward hydrate).
+        max_turns=1,
         max_step_tokens=None,
         max_completion_tokens=None,
         facts_extractors=[],
@@ -446,19 +444,8 @@ async def _run_compensation_command(
     timing_acc: WorkerTimingAccumulator,
     usage_acc: WorkerUsageAccumulator,
 ) -> None:
-    compensation_prompt = compensation_prompt_from_snapshot(
-        cmd.worker_snapshot,
-        fallback=worker_definition.compensation_prompt,
-        default=DEFAULT_COMPENSATION_PROMPT,
-    )
-    system_prompt = system_prompt_from_snapshot(
-        cmd.worker_snapshot,
-        fallback=worker_definition.system_prompt,
-    )
     try:
         result = await adapter.run_compensation(
-            compensation_prompt=compensation_prompt,
-            system_prompt=system_prompt,
             original_input=cmd.original_input,
             step_output=hydrated.step_output,
             failure_reason=cmd.failure_reason,
@@ -467,7 +454,6 @@ async def _run_compensation_command(
             resource_specs=hydrated.resource_specs,
             context=injection_context,
             idempotency_key=cmd.idempotency_key,
-            max_turns=hydrated.max_turns,
         )
     except Exception as e:
         logger.exception("Compensation failed: %s", e)

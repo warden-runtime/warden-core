@@ -141,10 +141,7 @@ class DoCompensationCommand(BaseSagaMessage):
     failure_reason: dict[str, Any] | None = None
     worker_snapshot: dict[str, Any] | None = Field(
         default=None,
-        description=(
-            "Worker definition fields frozen when compensation was scheduled "
-            "(prompts, model, version)."
-        ),
+        description="Worker version frozen when compensation was scheduled.",
     )
 
 

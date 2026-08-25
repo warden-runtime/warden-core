@@ -147,25 +147,23 @@ class StepFactsExtractor(BaseModel):
 
 
 class CompensationStep(BaseModel):
-    """Compensation (undo) definition for a saga step."""
+    """Compensation (undo) definition: exactly one MCP tool, deterministic like a commit."""
 
     worker: str
     worker_version: str
     with_spec: dict[str, StepParameterSpec] = Field(default_factory=dict, alias="with")
-    tools: ToolsSpec | None = None
+    tools: ToolsSpec
     resources: ResourcesSpec | None = None
-    timeout_seconds: int | None = None
-    max_turns: int | None = Field(
-        default=None,
-        ge=1,
-        le=MAX_TURNS_LIMIT,
-        description=(
-            "Override max LLM invocations for multi-tool compensation ReAct; "
-            "omit to use the forward step max_turns."
-        ),
-    )
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_exactly_one_tool(self) -> "CompensationStep":
+        if len(self.tools.allow) != 1:
+            raise ValueError("compensation requires exactly one tool in tools.allow")
+        if self.tools.allow[0].name == "load_skill":
+            raise ValueError("tools.allow must not include reserved virtual tool name 'load_skill'")
+        return self
 
 
 class _SagaStepBase(BaseModel):
@@ -195,10 +193,7 @@ class _SagaStepBase(BaseModel):
         default=DEFAULT_MAX_TURNS,
         ge=1,
         le=MAX_TURNS_LIMIT,
-        description=(
-            "Maximum LLM invocations in the ReAct loop for reason steps "
-            "(and multi-tool compensation when not overridden in undo YAML)."
-        ),
+        description="Maximum LLM invocations in the ReAct loop for reason steps.",
     )
     output_schema: str | None = Field(
         default=None,

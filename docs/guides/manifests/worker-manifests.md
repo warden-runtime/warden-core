@@ -100,23 +100,14 @@ Everything beyond the [required fields](#required-fields) is optional. Common ad
 | `temperature` | `0.0` | LLM sampling temperature |
 | `tool_sources` | `[]` | MCP servers — see [MCP tool sources](#mcp-tool-sources) |
 | `adapter` | `langchain` | How the worker runs agent steps internally. Leave at default unless you ship a custom adapter. **Not** the same as saga-step `agent-adapter: react \| simple` — see [Saga manifests → Reason step execution](saga-manifests.md#reason-step-execution-agent-adapter) |
-| `compensation_prompt` | Built-in compensation prompt | **Multi-tool compensation only** — ignored when compensation YAML has exactly one `tools.allow` entry |
-
-### Compensation prompt
-
-The usual path is **one tool** in your compensation YAML's `tools.allow`. The worker calls it once — no LLM, same as a commit step. `compensation_prompt` is ignored on that path.
-
-Use `compensation_prompt` only when compensation allows **multiple** tools and needs a ReAct loop. The worker prepends this text before that loop (or a built-in default if the field is empty). `max_turns` on the compensation file caps the loop.
-
-Even with a custom prompt, the engine's core safety rules still apply — your agent won't auto-retry or diagnose errors during an active rollback. For most workflows, skip `compensation_prompt` and stick to a single, direct undo tool. See [Compensation](compensation.md).
 
 ### How many times the agent can loop (`max_turns`)
 
-This setting actually lives on each individual **`kind: reason` step** inside your saga YAML — not here on the worker manifest.
+This setting lives on each **`kind: reason` step** in the saga YAML — not on the worker manifest.
 
-For a standard **`react`** step, your agent will keep calling tools and talking to the LLM until it decides to run the special `_submit` tool. `max_turns` acts as a safety valve to cap those back-and-forth rounds (default is **10**, max is **200**). Invalid `_submit` payloads that trigger schema soft-retries still draw from this same turn budget — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback). If you use a **`simple`** step, it only makes a single LLM call and ignores this cap entirely.
+For a standard **`react`** step, the agent keeps calling tools until it invokes `_submit`. `max_turns` caps those rounds (default **10**, max **200**). Invalid `_submit` payloads that trigger schema soft-retries still draw from this budget — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback). **`simple`** steps make one LLM call and ignore this cap.
 
-Most of your undo paths will just call a single MCP tool without any agent logic at all. But if you have a complex, multi-tool undo sequence that needs a short reasoning loop, you can set a custom `max_turns` value inside your compensation YAML file too.
+Compensation undo is a single MCP tool call (see [Compensation](compensation.md)); it does not use `max_turns`.
 
 See [Saga manifests → Step budgets](saga-manifests.md#step-budgets) for defaults and examples.
 

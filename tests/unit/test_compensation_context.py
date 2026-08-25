@@ -9,8 +9,8 @@ from common.compensation_context import (
     COMPENSATION_METADATA_KEY,
     build_compensation_metadata,
     compensation_parameter_context,
+    fence_compensation_tool_arguments,
     is_dirty_forward_step,
-    merge_compensation_tool_arguments,
 )
 from common.models import StepStatus
 
@@ -93,14 +93,14 @@ def test_compensation_parameter_context_empty_output_layer_on_dirty_step():
 
 
 @pytest.mark.parametrize(
-    ("llm", "original", "key", "expected"),
+    ("original", "key", "expected"),
     [
-        ({}, {"a": 1}, "comp-1", {"a": 1, "warden_idempotency_key": "comp-1"}),
-        ({"a": None}, {"a": 1}, None, {"a": 1}),
+        ({"a": 1}, "comp-1", {"a": 1, "warden_idempotency_key": "comp-1"}),
+        ({"a": 1}, None, {"a": 1}),
     ],
 )
-def test_merge_compensation_tool_arguments(llm, original, key, expected):
-    assert merge_compensation_tool_arguments(llm, original, idempotency_key=key) == expected
+def test_fence_compensation_tool_arguments(original, key, expected):
+    assert fence_compensation_tool_arguments(original, idempotency_key=key) == expected
 
 
 def test_compensation_parameter_context_isolates_live_steps():

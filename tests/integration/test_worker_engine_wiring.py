@@ -398,7 +398,8 @@ async def compensating_two_step_saga_definition(
     from common.models import SagaDefinition
 
     (tmp_path / "undo.yaml").write_text(
-        "worker: integration-worker\nworker_version: 1.0.0\nwith: {}\ntools:\n  allow: []\n",
+        "worker: integration-worker\nworker_version: 1.0.0\nwith: {}\n"
+        "tools:\n  allow:\n    - name: undo_tool\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("SCHEMAS_ROOT", str(tmp_path))
@@ -436,7 +437,8 @@ async def dirty_compensating_two_step_saga_definition(
     from common.models import SagaDefinition
 
     (tmp_path / "undo.yaml").write_text(
-        "worker: integration-worker\nworker_version: 1.0.0\nwith: {}\ntools:\n  allow: []\n",
+        "worker: integration-worker\nworker_version: 1.0.0\nwith: {}\n"
+        "tools:\n  allow:\n    - name: undo_tool\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("SCHEMAS_ROOT", str(tmp_path))

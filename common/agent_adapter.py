@@ -57,9 +57,8 @@ class ExecutionStepError(Exception):
 
 class AgentAdapterPort(ABC):
     """
-    Port for agent adapters. Implementations run a single agentic step (LLM with
-    tools, execute tool_calls through governance, repeat until done or max turns)
-    and compensation; every tool invocation must go through governance.
+    Port for agent adapters: reason steps (LLM + tools), commit steps (one MCP call),
+    and compensation (one deterministic MCP undo). Tool invocations go through governance.
     """
 
     @abstractmethod
@@ -137,7 +136,6 @@ class AgentAdapterPort(ABC):
     async def run_compensation(
         self,
         *,
-        compensation_prompt: str,
         original_input: dict[str, Any],
         step_output: dict[str, Any] | None,
         failure_reason: dict[str, Any] | None,
@@ -145,29 +143,24 @@ class AgentAdapterPort(ABC):
         tool_specs: list[dict[str, Any]],
         resource_specs: list[ResourceSpec] | None = None,
         context: dict[str, Any] | None = None,
-        system_prompt: str | None = None,
         idempotency_key: str | None = None,
-        max_turns: int | None = None,
     ) -> CompensationResult:
-        """Run compensation (undo) flow with real tool execution.
+        """Run single-tool compensation (undo): one deterministic MCP invoke.
 
         Args:
-            compensation_prompt: Prompt for the compensation step.
-            original_input: Resolved input that was used for the forward step.
+            original_input: Resolved compensation ``with`` arguments for the undo tool.
             step_output: Output from the step being compensated (or None).
             failure_reason: Error details that triggered compensation.
             context_snapshot: Saga context at time of compensation.
-            tool_specs: Tool allowlist for compensation.
+            tool_specs: Must contain exactly one tool (same contract as commit).
             resource_specs: Optional resource allowlist for compensation.
             context: Optional extra context (e.g. headers).
-            system_prompt: Frozen forward worker system prompt; defaults to worker row.
             idempotency_key: Command idempotency key injected into undo tool arguments.
-            max_turns: Max LLM invocations for multi-tool compensation ReAct.
 
         Returns:
             CompensationResult with output payload.
 
         Raises:
-            Exception: On LLM or tool failure (implementation-dependent).
+            ExecutionStepError: When tool_specs is not exactly one tool, or the tool fails.
         """
         ...

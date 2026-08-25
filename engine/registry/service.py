@@ -113,7 +113,6 @@ def _worker_definition_fields(blueprint: WorkerBlueprint) -> dict[str, Any]:
         "model_provider": blueprint.provider,
         "model_name": blueprint.model_name,
         "system_prompt": blueprint.system_prompt,
-        "compensation_prompt": blueprint.compensation_prompt,
         "tool_sources": tool_sources,
         "adapter": blueprint.adapter,
     }

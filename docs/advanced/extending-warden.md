@@ -33,7 +33,7 @@ Warden uses the word **adapter** in three places — they are not interchangeabl
 | **Reason strategy** | Inside `AgentAdapterPort` | Saga step `agent-adapter: react \| simple` (default `react`) | `react`, `simple` on `langchain` |
 | **Adapter hooks** | `AdapterHooks` (registry `adapter` slot) | `register_adapter_hooks()` at plugin install | NoOp default |
 
-Add an **LLM adapter** when you integrate a new model API. Add an **agent adapter** when you replace the worker's reason/commit execution port (MCP binding, structured output, compensation ReAct). **`agent-adapter` on saga steps** chooses `react` vs `simple` inside the shipped `langchain` port — not a separate worker manifest field. Use **adapter hooks** only to observe or extend behavior after a reason step without replacing the loop.
+Add an **LLM adapter** when you integrate a new model API. Add an **agent adapter** when you replace the worker's reason/commit/compensation execution port (MCP binding, structured output, single-tool undo). **`agent-adapter` on saga steps** chooses `react` vs `simple` inside the shipped `langchain` port — not a separate worker manifest field. Use **adapter hooks** only to observe or extend behavior after a reason step without replacing the loop.
 
 ### Add an LLM provider
 
@@ -82,8 +82,8 @@ class MyAgentAdapter(AgentAdapterPort):
         # Single governed MCP tool call — no LLM
         ...
 
-    async def run_compensation(self, *, system_prompt: str, prompt_template: str, arguments: dict, ...) -> CompensationResult:
-        # Undo step execution
+    async def run_compensation(self, *, original_input: dict, tool_specs: list[dict], ...) -> CompensationResult:
+        # Single-tool deterministic undo (same shape as run_commit)
         ...
 ```
 

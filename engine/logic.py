@@ -2356,8 +2356,7 @@ async def _schedule_compensation_for_forward(
         forward_worker_version=forward.worker_version,
     )
     comp_tool_specs, comp_resource_specs = compensation_tool_resource_specs(comp_def)
-    comp_max_turns = comp_def.get("max_turns")
-    undo_max_turns = int(comp_max_turns) if isinstance(comp_max_turns, int) else forward.max_turns
+    undo_max_turns = forward.max_turns
 
     worker_row = await WorkerDefinition.get_or_none(
         name=comp_worker,

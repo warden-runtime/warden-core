@@ -45,7 +45,7 @@ Warden splits its workflows into two step types so you can separate open-ended r
 :::warning[Side effects on reason steps]
 Mutating tools on reason steps are your choice — Warden does not block them. The reason/commit split is a **design convention**, not a hard sandbox.
 
-If a reason step touches external state, plan for failure like any forward step: define [compensation](../guides/manifests/compensation.md), keep `tools.allow` tight, and remember that `after_reason` policy runs after the ReAct loop — tools may already have run. Prefer commit steps when one side effect should stand alone under `before_commit` and human-in-the-loop review.
+If a reason step touches external state, declare a [single-tool compensation](../guides/manifests/compensation.md) for the step's net effect, keep `tools.allow` tight, and remember that `after_reason` policy runs after the ReAct loop — tools may already have run. Prefer commit steps when one side effect should stand alone under `before_commit` and human-in-the-loop review.
 :::
 
 ## Governed execution

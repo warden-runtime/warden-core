@@ -140,8 +140,8 @@ Worker result events (`STEP_COMPLETED`, `STEP_FAILED`, `STEP_COMPENSATED`, `COMP
 |--------|---------|--------------|------------------------|
 | `hydration_ms` | Worker | Command hydrate | Same |
 | `setup_ms` | Worker | Adapter + MCP bootstrap | Same |
-| `llm_ms` | Worker | **`react`:** ReAct turns; **`simple`:** single structured LLM call | `0` for single-tool undo; ReAct sum for multi-tool |
-| `tool_ms` | Worker | MCP invokes | Single `ainvoke` or ReAct tool sum |
+| `llm_ms` | Worker | **`react`:** ReAct turns; **`simple`:** single structured LLM call | `0` (undo is deterministic MCP) |
+| `tool_ms` | Worker | MCP invokes | Single `ainvoke` |
 | `when_cel_ms` | Engine | `when.cel` evaluation at schedule | — (FSM-driven) |
 | `schedule_ms` | Engine | `trigger_step` / `trigger_compensation` | Child row create + command emit |
 | `policy_ms` | Engine | Before-commit + after-reason gates | `0` today |
@@ -169,7 +169,7 @@ WHERE saga_trace_id = :trace_id
   AND compensates_span_id IS NOT NULL;
 ```
 
-See [Compensation](manifests/compensation.md) for single-tool vs ReAct undo timing expectations.
+See [Compensation](manifests/compensation.md) for undo timing expectations.
 
 ## Execution usage (LLM tokens)
 
