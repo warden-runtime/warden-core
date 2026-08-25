@@ -8,7 +8,7 @@ pagination_next: guides/manifests/mcp-and-tools
 
 A `reason` step uses a [Jinja2](https://jinja.palletsprojects.com/en/stable/templates/) template to build the user prompt that goes to the LLM. Unlike saga manifests, prompts aren't saved to the database with version numbers — they live as plain files on disk under `PROMPTS_ROOT`. Your saga manifest points to the file by name (like `prompt: triage.j2`) and uses a `with` block to feed data into it. When the step runs, the worker combines the file and the data to render your prompt.
 
-Commit steps never use prompt files — they call one MCP tool with resolved `with` arguments. Compensation undo steps use YAML under `COMPENSATIONS_ROOT` (and optionally the worker's `compensation_prompt`), not saga prompt templates — see [Compensation](compensation.md).
+Commit steps never use prompt files — they call one MCP tool with resolved `with` arguments. Compensation undo steps use YAML under `COMPENSATIONS_ROOT` (not saga prompt templates) — see [Compensation](compensation.md).
 
 For how `with` bindings work, see [Saga manifests → Bindings](saga-manifests.md#bindings-with).
 

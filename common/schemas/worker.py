@@ -37,7 +37,6 @@ class WorkerBlueprint(BaseModel):
 
     # The "Soul" of the Agent
     system_prompt: str
-    compensation_prompt: str | None = "You are in rollback mode. Undo the previous operation."
 
     tool_sources: list[MCPServerConfig] = Field(default_factory=list)
     adapter: str = "langchain"

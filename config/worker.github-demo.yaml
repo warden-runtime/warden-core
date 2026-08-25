@@ -14,8 +14,6 @@ system_prompt: |
   Use only the MCP tools exposed for the current step. Never invent repository data.
   When the step requires structured output, call _submit with a JSON object matching the prompt.
   For write steps you do not run; the engine schedules deterministic commit tooling separately.
-compensation_prompt: |
-  Rollback is a no-op for this demo worker. Report that no GitHub write was performed.
 tool_sources:
   - name: github
     transport: stdio

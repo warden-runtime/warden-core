@@ -369,9 +369,9 @@ There is no built-in reviewer UI — the kernel exposes CLI and HTTP only. For c
 | `max_step_tokens` | **`react` and `simple`** | unlimited (omit / null) | Financial guardrail: abort when accumulated provider-reported **`total_tokens`** (prompt + completion across the step) exceed this budget. |
 | `max_completion_tokens` | **`react` and `simple`** | no Warden override (omit / null) | Per-call generation cap passed to the provider as `max_tokens`. Distinct from `max_step_tokens`. |
 
-`max_step_tokens` counts **gross physical tokens** from the provider usage metadata — not cache-discounted billed tokens. Prompt caching can make the invoice much smaller than the counted total; the budget still uses the raw counter. Compensation loops **never** enforce this budget (hydrate always passes unlimited) so rollbacks are not cut short mid-cleanup.
+`max_step_tokens` counts **gross physical tokens** from the provider usage metadata — not cache-discounted billed tokens. Prompt caching can make the invoice much smaller than the counted total; the budget still uses the raw counter. Token budgets apply to **reason** steps only; compensation undo is a single MCP call and does not use LLM budgets.
 
-`max_completion_tokens` limits how much the model may generate **on each LLM call** (every ReAct turn shares the same cap). Omit it to leave the provider default (Anthropic via LangChain may still default to 8192). Compensation does not set a completion cap.
+`max_completion_tokens` limits how much the model may generate **on each LLM call** (every ReAct turn shares the same cap). Omit it to leave the provider default (Anthropic via LangChain may still default to 8192).
 
 Optional process-wide fallbacks: set worker env `WARDEN_MAX_STEP_TOKENS` / `WARDEN_MAX_COMPLETION_TOKENS` (see [Configuration](../../getting-started/configuration.md)). Each applies only when the step omits the matching field. Unset or `0` means no fallback.
 
@@ -397,7 +397,7 @@ On `triage`:
         - name: issue_read
 ```
 
-Compensation steps inherit `max_turns` from the forward step unless you override it in the compensation file. Compensation YAML lives at `config/<compensation-file>.yaml` (via `COMPENSATIONS_ROOT`; see [Compensation](compensation.md#declaring-compensation)). Token budgets do not apply to compensation.
+Compensation undo is always a single deterministic MCP call (exactly one `tools.allow` entry). See [Compensation](compensation.md#declaring-compensation).
 
 ## Structured output (`output_schema`)
 

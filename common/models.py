@@ -107,7 +107,7 @@ class SagaStepInstance(models.Model):
     timeout_seconds = fields.IntField()
     max_turns = fields.IntField(
         default=10,
-        description="Max LLM invocations for reason-step ReAct and multi-tool compensation.",
+        description="Max LLM invocations for reason-step ReAct.",
     )
     max_step_tokens = fields.IntField(
         null=True,
@@ -296,7 +296,6 @@ class WorkerDefinition(models.Model):
     model_name = fields.CharField(max_length=128)
 
     system_prompt = fields.TextField()
-    compensation_prompt = fields.TextField(null=True)
     tool_sources = fields.JSONField(default=list)
     adapter = fields.CharField(max_length=32, default="langchain")
 

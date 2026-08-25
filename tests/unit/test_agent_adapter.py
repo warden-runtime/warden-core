@@ -67,7 +67,6 @@ def test_resolve_adapter_defaults_to_langchain_when_adapter_missing():
         model_name="gpt-4o",
         system_prompt="Hi",
         tool_sources=[],
-        compensation_prompt=None,
     )
     secret = SimpleNamespace(api_key="sk-fake")
     port = resolve_adapter(worker_definition=worker_def, secret=secret)

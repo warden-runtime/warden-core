@@ -52,7 +52,6 @@ async def test_react_loop_emits_llm_and_tool_child_spans(memory_span_exporter):
             ],
             mcp_tools=[tool],
             allowed_tool_names=["echo"],
-            completion_mode="submit",
             max_turns=3,
         )
 
@@ -96,7 +95,6 @@ async def test_react_loop_records_token_usage_on_llm_spans(memory_span_exporter)
         ],
         mcp_tools=[],
         allowed_tool_names=[],
-        completion_mode="submit",
         max_turns=2,
         usage_acc=usage_acc,
     )

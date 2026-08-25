@@ -6,13 +6,13 @@ pagination_next: guides/observability
 
 # Compensation
 
-If a saga hits an error and fails halfway through, Warden doesn't leave your system in a messy, half-finished state. Instead, it automatically rolls back completed steps in reverse order (last completed step first) by running an undo path for each one. Behind the scenes, the engine creates a separate child row for every compensation step and sends a command to your workers to kick off the cleanup.
+If a saga fails halfway through, Warden rolls back completed steps in reverse order (last completed first). For each step that declared an undo path, the engine creates a child compensation row and dispatches one deterministic MCP tool call — the same shape as a commit step.
 
-You define what "undo" means for each forward step. Warden handles the order and scheduling. This page covers compensation YAML, runtime metadata, idempotency, failure modes, and what to do when undo gets stuck.
+Reason and commit steps share that contract. On a mutating **reason** step, declare a single-tool net-effect undo (reset sandbox, cancel payment, …). Omit `compensation:` on read-only reason steps.
 
 ## Declaring compensation
 
-Add a `compensation` field to any forward step. The value is a **path relative to `COMPENSATIONS_ROOT`** — its own directory root alongside `PROMPTS_ROOT`, `POLICIES_ROOT`, and `SCHEMAS_ROOT`.
+Add a `compensation` field on the forward step. The value is a **path relative to `COMPENSATIONS_ROOT`** (alongside `PROMPTS_ROOT`, `POLICIES_ROOT`, and `SCHEMAS_ROOT`).
 
 With the repo defaults (`COMPENSATIONS_ROOT=./config/compensations`), a file at `config/compensations/disburse_undo.yaml` is referenced as `disburse_undo.yaml`:
 
@@ -25,12 +25,11 @@ steps:
     compensation: disburse_undo.yaml
 ```
 
-The compensation file declares the worker, tool, and bindings for the compensation step:
+The compensation file lists the worker, bindings, and **exactly one** tool:
 
 ```yaml
 worker: payments-worker
 worker_version: "1.0.0"
-max_turns: 15                 # optional; only relevant for multi-tool ReAct compensation
 with:
   payment_id:
     from: "$.steps.disburse.output.data.payment_id"
@@ -39,9 +38,9 @@ tools:
     - name: cancel_payment
 ```
 
-`worker_version` must match a deployed worker row in the saga's namespace. Prefer a single tool in `tools.allow` when possible — the worker runs a deterministic MCP call with no LLM loop.
+Supported fields: `worker`, `worker_version`, `with`, `tools` (exactly one allow entry), and optional `resources`. Deploy rejects any other keys and rejects an empty or multi-entry allowlist.
 
-If you list **more than one** tool, compensation falls back to a multi-turn ReAct loop: the worker invokes the LLM with `compensation_prompt` (from the worker manifest), chooses tools across turns, and respects `max_turns` from the compensation file or the forward step. Even with a custom prompt, the engine's core safety rules still apply — your agent won't try to auto-retry or diagnose errors during an active rollback. See [Worker manifests → Compensation prompt](worker-manifests.md#compensation-prompt).
+`worker_version` must match a deployed worker row in the saga's namespace. The worker invokes that MCP tool once with the resolved `with` arguments — no LLM.
 
 Warden resolves and freezes the compensation definition when you deploy the saga. At saga start, that block is copied onto each forward step row. Disk changes after a saga starts don't affect **running sagas**.
 
@@ -80,9 +79,7 @@ Warden injects `warden_idempotency_key` into every compensation tool call's MCP 
 
 ## Worker snapshot
 
-Warden freezes prompts, model, and worker version in the compensation command when it schedules the undo. Changes to the live worker definition after the saga started don't affect compensation steps already in flight.
-
-For multi-tool ReAct compensation only, set `compensation_prompt` on the worker manifest. Single-tool compensation ignores that field. See [Worker manifests](worker-manifests.md#compensation-prompt).
+Warden freezes the worker **version** on the compensation command when it schedules the undo. The worker checks that version at execute time so a redeployed worker definition cannot silently change undo identity mid-rollback.
 
 ## Failure modes
 
@@ -112,12 +109,7 @@ Do not schedule a second compensation child row for the same forward span. The e
 
 Compensation undo rows use the same `execution_timing` column as forward steps. Timing is stored on the **child** row (`compensates_span_id` set), not the forward row.
 
-| Mode | Worker buckets | Notes |
-|------|----------------|-------|
-| Single-tool (`tools.allow` length 1) | `hydration_ms`, `setup_ms`, `tool_ms`; `llm_ms` = 0 | Deterministic commit-style path |
-| Multi-tool ReAct | `hydration_ms`, `setup_ms`, `llm_ms`, `tool_ms` | `assistant_json` completion mode |
-
-Engine buckets on undo rows: `schedule_ms` (child create + `EXECUTE_COMPENSATION` emit) and `dispatch_to_ingest_ms`. Inspect via `GET /v1/sagas/steps` or SQL filtered on `compensates_span_id IS NOT NULL` — see [Observability](../observability.md).
+Worker buckets: `hydration_ms`, `setup_ms`, `tool_ms`; `llm_ms` is `0`. Engine buckets: `schedule_ms` (child create + `EXECUTE_COMPENSATION` emit) and `dispatch_to_ingest_ms`. Inspect via `GET /v1/sagas/steps` or SQL filtered on `compensates_span_id IS NOT NULL` — see [Observability](../observability.md).
 
 ## What's next
 

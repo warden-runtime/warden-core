@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Breaking
+
+- Compensation YAML must declare **exactly one** tool in `tools.allow` (same as commit). Reason and commit steps share that single-tool undo path. Worker-manifest / DB `compensation_prompt` is removed (migration `008_drop_compensation_prompt.sql`).
+
 ### Added
 
 - `provider: azure` — Azure OpenAI / Microsoft Foundry via LangChain `ChatOpenAI` and the OpenAI-compatible `/openai/v1/` path (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`; worker `model_name` is the deployment name). Defaults to Chat Completions for prompt-cache friendliness; Responses API is opt-in via `WARDEN_AZURE_USE_RESPONSES_API`.
@@ -15,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - ReAct `_submit` is accepted only as a singleton tool batch. Mixed batches run the other tools, feed a `_submit must be alone` tool error, and continue the loop (no silent short-circuit that drops sibling calls).
-- Reason / simple / compensation human messages no longer `json.dumps` string prompts (Jinja and inline templates stay plain text). Structured dict/list prompt inputs are still JSON-encoded.
+- Reason / simple human messages no longer `json.dumps` string prompts (Jinja and inline templates stay plain text). Structured dict/list prompt inputs are still JSON-encoded.
 - Worker-scoped **skills** (`SKILLS_ROOT/<worker>/<id>.md`): step `skills.allow` drives a static `allowed_skills` index + virtual `load_skill`; skill frontmatter `allowed_tools` unions with `tools.allow` extras for react reason steps (`007_skills_allow.sql`).
 - Coerce sloppy LLM tool arguments against MCP `inputSchema` before ReAct validation (common Ollama/vLLM stringified array/object fields)
 - Admit LLM JSON against reason-step `output_schema` before validation (`_submit` and `simple` structured output)

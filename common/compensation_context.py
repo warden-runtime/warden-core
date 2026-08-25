@@ -17,15 +17,6 @@ COMPENSATION_METADATA_KEY = "_compensation"
 # Injected into MCP tool arguments so external undo APIs can dedupe redelivered commands.
 WARDEN_TOOL_IDEMPOTENCY_KEY = "warden_idempotency_key"
 
-DEFAULT_COMPENSATION_PROMPT = (
-    "[CRITICAL POLICY]\n"
-    "You are running an automated system rollback. Do not diagnose, fix, or retry the "
-    "forward operation. Your sole objective is to execute the provided cleanup tools using "
-    "the parameters in original_input. Use warden_idempotency_key when the undo API supports "
-    "idempotency.\n"
-    "If forward step output is missing (blind_cleanup), use only original_input and saga input."
-)
-
 
 def step_output_for_saga_context(output: dict[str, Any] | None) -> dict[str, Any]:
     """Canonical ``{ \"data\": <dict> }`` for ``context.steps`` (drops non-data envelope keys)."""
@@ -63,7 +54,7 @@ def build_compensation_metadata(
     undo_span_id: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
-    """Structured rollback metadata for context, prompts, and tool fencing."""
+    """Structured rollback metadata for JSONPath context and tool fencing."""
     has_output = forward_step_has_rollback_output(forward)
     dirty = is_dirty_forward_step(forward)
     return {
@@ -128,58 +119,18 @@ def compensation_parameter_context(
     return ctx
 
 
-def merge_compensation_tool_arguments(
-    llm_args: dict[str, Any] | None,
+def fence_compensation_tool_arguments(
     original_input: dict[str, Any],
     *,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Merge LLM tool args with engine-resolved input and inject rollback idempotency key."""
-    merged = dict(original_input or {})
-    for key, value in (llm_args or {}).items():
-        if value is not None and value != "":
-            merged[key] = value
-    if idempotency_key and WARDEN_TOOL_IDEMPOTENCY_KEY not in merged:
-        merged[WARDEN_TOOL_IDEMPOTENCY_KEY] = idempotency_key
-    return merged
+    """Copy engine-resolved undo args and inject the rollback idempotency key."""
+    fenced = dict(original_input or {})
+    if idempotency_key and WARDEN_TOOL_IDEMPOTENCY_KEY not in fenced:
+        fenced[WARDEN_TOOL_IDEMPOTENCY_KEY] = idempotency_key
+    return fenced
 
 
 def worker_snapshot_for_compensation(worker: Any) -> dict[str, Any]:
-    """Freeze worker fields needed for undo at compensation schedule time."""
-    return {
-        "version": worker.version,
-        "system_prompt": worker.system_prompt,
-        "compensation_prompt": worker.compensation_prompt,
-        "model_provider": worker.model_provider,
-        "model_name": worker.model_name,
-        "adapter": worker.adapter,
-    }
-
-
-def compensation_prompt_from_snapshot(
-    snapshot: dict[str, Any] | None,
-    *,
-    fallback: str | None,
-    default: str = DEFAULT_COMPENSATION_PROMPT,
-) -> str:
-    """Resolve compensation prompt from command snapshot, worker row, or default."""
-    if snapshot:
-        snap_prompt = snapshot.get("compensation_prompt")
-        if isinstance(snap_prompt, str) and snap_prompt.strip():
-            return snap_prompt
-    if isinstance(fallback, str) and fallback.strip():
-        return fallback
-    return default
-
-
-def system_prompt_from_snapshot(
-    snapshot: dict[str, Any] | None,
-    *,
-    fallback: str,
-) -> str:
-    """Resolve system prompt from command snapshot or live worker row."""
-    if snapshot:
-        snap_prompt = snapshot.get("system_prompt")
-        if isinstance(snap_prompt, str) and snap_prompt.strip():
-            return snap_prompt
-    return fallback
+    """Freeze worker version for undo scheduling (identity check at execute time)."""
+    return {"version": worker.version}

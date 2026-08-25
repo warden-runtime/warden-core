@@ -1,6 +1,6 @@
 """
 Agent adapter: MCP tools, ChatModelPort, and native ReAct loop (_submit for reason steps).
-Single-tool compensation uses deterministic MCP (run_commit); multi-tool uses the same ReAct loop.
+Compensation is always a single deterministic MCP call (run_commit).
 """
 
 import json
@@ -18,8 +18,7 @@ from common.agent_adapter import (
     StepResult,
 )
 from common.compensation_context import (
-    COMPENSATION_METADATA_KEY,
-    merge_compensation_tool_arguments,
+    fence_compensation_tool_arguments,
 )
 from common.config import get_settings
 from common.error_details import build_step_error_details
@@ -42,7 +41,6 @@ from pydantic import BaseModel, Field
 from workers.adapters.react_loop import (
     SUBMIT_TOOL_NAME,
     ReactLoopResult,
-    parse_compensation_output,
     run_react_loop,
 )
 from workers.adapters.simple_schema import resolve_effective_schema
@@ -611,7 +609,6 @@ class LangChainAdapter(AgentAdapterPort):
                         initial_messages=loop_messages,
                         mcp_tools=mcp_tools,
                         allowed_tool_names=allowed_tool_names,
-                        completion_mode="submit",
                         max_turns=remaining_turns,
                         log_preview_len=_react_log_preview_len(ctx),
                         timing_acc=timing_acc,
@@ -768,62 +765,6 @@ class LangChainAdapter(AgentAdapterPort):
 
         return StepResult(output=wrap_step_output_data(result_parsed))
 
-    async def _run_compensation_react(
-        self,
-        *,
-        system_instruction: str,
-        final_input: dict[str, Any],
-        tool_specs: list[dict[str, Any]],
-        original_input: dict[str, Any],
-        ctx: dict[str, Any],
-        resource_specs: list[ResourceSpec] | None = None,
-        idempotency_key: str | None = None,
-        max_turns: int = DEFAULT_MAX_TURNS,
-    ) -> ReactLoopResult:
-        resources = resource_specs or []
-        timing_acc = _timing_acc_from_context(ctx)
-        usage_acc = _usage_acc_from_context(ctx)
-        if timing_acc is not None:
-            timing_acc.start("comp_react_setup")
-        async with AsyncExitStack() as stack:
-            tools = await build_tools_for_worker(
-                worker_def=self._worker_definition,
-                tool_specs=tool_specs,
-                exit_stack=stack,
-                context=ctx,
-                resource_specs=resources or None,
-            )
-            allowed = [tool.name for tool in tools]
-            llm = build_llm(
-                provider=self._worker_definition.model_provider,
-                model_name=self._worker_definition.model_name,
-                api_key=self._secret.api_key,
-            )
-            llm_with_tools = llm.bind_tools(cast("list[ToolProtocol]", tools)) if tools else llm
-            initial_messages = [
-                ChatMessage(role="system", content=system_instruction),
-                ChatMessage(role="human", content=_human_message_content(final_input)),
-            ]
-            if timing_acc is not None:
-                timing_acc.stop("comp_react_setup", bucket="setup_ms")
-            return await run_react_loop(
-                llm=llm_with_tools,
-                initial_messages=initial_messages,
-                mcp_tools=tools,
-                allowed_tool_names=allowed,
-                completion_mode="assistant_json",
-                max_turns=max_turns,
-                merge_tool_args=lambda llm_args, resolved: merge_compensation_tool_arguments(
-                    llm_args,
-                    resolved,
-                    idempotency_key=idempotency_key,
-                ),
-                merge_context=original_input,
-                log_preview_len=_react_log_preview_len(ctx),
-                timing_acc=timing_acc,
-                usage_acc=usage_acc,
-            )
-
     async def _run_single_tool_compensation(
         self,
         *,
@@ -854,7 +795,6 @@ class LangChainAdapter(AgentAdapterPort):
         return CompensationResult(
             output={
                 "rollback_status": "completed",
-                "compensation_mode": "single_tool",
                 "data": inner,
                 "tool_results": [
                     {
@@ -868,7 +808,6 @@ class LangChainAdapter(AgentAdapterPort):
     async def run_compensation(
         self,
         *,
-        compensation_prompt: str,
         original_input: dict[str, Any],
         step_output: dict[str, Any] | None,
         failure_reason: dict[str, Any] | None,
@@ -876,52 +815,29 @@ class LangChainAdapter(AgentAdapterPort):
         tool_specs: list[dict[str, Any]],
         resource_specs: list[ResourceSpec] | None = None,
         context: dict[str, Any] | None = None,
-        system_prompt: str | None = None,
         idempotency_key: str | None = None,
-        max_turns: int | None = None,
     ) -> CompensationResult:
-        ctx = context or self._context
-        turn_budget = max_turns if max_turns is not None else DEFAULT_MAX_TURNS
-        effective_system_prompt = system_prompt or self._worker_definition.system_prompt
-        fenced_input = merge_compensation_tool_arguments(
-            None,
+        del step_output, failure_reason, context_snapshot
+        if len(tool_specs) != 1:
+            raise ExecutionStepError(
+                f"run_compensation requires exactly one tool; got {len(tool_specs)}",
+                error_details={
+                    "code": "compensation_tool_count",
+                    "got": len(tool_specs),
+                },
+            )
+        fenced_input = fence_compensation_tool_arguments(
             original_input,
             idempotency_key=idempotency_key,
         )
-        if len(tool_specs) == 1:
-            spec0 = tool_specs[0]
-            out_schema = spec0.get("output_schema") if isinstance(spec0, dict) else None
-            tool_name = (spec0.get("name") or "").strip() if isinstance(spec0, dict) else ""
-            return await self._run_single_tool_compensation(
-                fenced_input=fenced_input,
-                tool_specs=tool_specs,
-                resource_specs=resource_specs,
-                context=context,
-                output_schema=out_schema,
-                tool_name=tool_name,
-            )
-
-        rollback_meta = context_snapshot.get(COMPENSATION_METADATA_KEY)
-        system_instruction = (
-            f"{compensation_prompt}\n\n"
-            f"CONTEXT: The task that failed was defined as: '{effective_system_prompt}'"
-        )
-        final_input = {
-            "original_input": fenced_input,
-            "step_output": step_output,
-            "failure_reason": failure_reason,
-            "context": context_snapshot,
-            COMPENSATION_METADATA_KEY: rollback_meta,
-        }
-        loop_result = await self._run_compensation_react(
-            system_instruction=system_instruction,
-            final_input=final_input,
+        spec0 = tool_specs[0]
+        out_schema = spec0.get("output_schema") if isinstance(spec0, dict) else None
+        tool_name = (spec0.get("name") or "").strip() if isinstance(spec0, dict) else ""
+        return await self._run_single_tool_compensation(
+            fenced_input=fenced_input,
             tool_specs=tool_specs,
-            original_input=fenced_input,
-            ctx=ctx,
             resource_specs=resource_specs,
-            idempotency_key=idempotency_key,
-            max_turns=turn_budget,
+            context=context,
+            output_schema=out_schema,
+            tool_name=tool_name,
         )
-        output_payload = parse_compensation_output(loop_result)
-        return CompensationResult(output=output_payload)
