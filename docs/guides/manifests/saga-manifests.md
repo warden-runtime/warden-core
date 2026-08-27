@@ -198,9 +198,16 @@ The worker must have MCP `tool_sources` — resource reads go through connected 
 
 ## Bindings (`with`)
 
-Add a `with` block when a step needs data from the saga's start input or from steps that already finished. Each key becomes a named value for the step — a prompt variable on `reason` steps, an MCP tool argument on `commit` steps.
+Add a `with` block when a step needs data from the saga's start input or from steps that already finished. Resolved values are used differently per step kind — see the table below.
 
 Warden resolves your `with` blocks right before it kicks off the step. It uses standard JSONPath syntax (`$.…`) to grab data from the saga's initial input or any outputs saved by earlier steps, and passes that combined context into the new step. Use `from` for JSONPath lookups, or `value` for a literal.
+
+| Step kind | How resolved `with` is used |
+|-----------|------------------------------|
+| **reason** (`react`) | Every key hydrates the Jinja prompt. Optionally list a subset under `tools.bind` to also pin those values onto matching MCP tool args (saga wins; keys are stripped from the LLM-facing tool schema). |
+| **reason** (`simple`) | Prompt variables only. `tools.bind` is rejected. |
+| **commit** | The full map becomes the single MCP tool's kwargs. Do not set `tools.bind`. |
+| **compensation** | Same as commit for the undo tool. Do not set `tools.bind`. |
 
 ```yaml
 steps:
@@ -218,6 +225,23 @@ steps:
         - name: list_issues
         - name: issue_read
 
+  - id: run-in-sandbox
+    name: Execute in sandbox
+    kind: reason
+    worker: sandbox-worker
+    worker_version: "1.0.0"
+    prompt: sandbox-exec.j2
+    with:
+      container_id:
+        from: $.steps.init-sandbox.output.data.container_id
+      problem_statement:
+        from: $.input.problem_statement
+    tools:
+      bind:
+        - container_id
+      allow:
+        - name: sandbox_exec
+
   - id: post-comment
     name: Post triage comment
     kind: commit
@@ -230,6 +254,16 @@ steps:
       allow:
         - name: add_issue_comment
 ```
+
+### Pinning MCP args on reason steps (`tools.bind`)
+
+On **`react`** reason steps, the model normally chooses every MCP argument. Session keys such as `container_id` often get garbled when the LLM re-emits them. Declare those keys under `tools.bind` (each name must also appear in `with`):
+
+1. Warden overlays the resolved saga value onto the tool invoke for any key present in that tool's `inputSchema.properties` (saga always wins, including over empty/junk model args).
+2. Bound properties are omitted from the LLM-facing `args_schema` / `required`, so the model is not asked to invent them.
+3. Keys that are not on a given tool's schema stay prompt-only (no auto-intersect of all `with` keys).
+
+`tools.bind` is not supported on `agent-adapter: simple`, commit steps, or compensation undo YAML.
 
 ### What you can fetch
 
@@ -287,7 +321,7 @@ with:
 
 Only bind from steps that have **already finished** in forward order. When a saga starts, Warden pre-initializes every step id with empty `output.data` and `facts`, so a path to a future or incomplete step resolves to `{}` or `null`. Tool fact paths stay absent until the extractor's tool actually ran — use `when.cel` with `has(...)` for optional branches instead of relying on bindings alone. To populate `facts` buckets on a reason step, see [Tool facts](#tool-facts-facts).
 
-Once resolved, `with` values feed the step at run time. On **commit** steps they become MCP tool arguments. On **reason** steps they hydrate the Jinja prompt — see [Prompts](prompts.md) for how bindings become template variables and what Warden checks when you deploy.
+Once resolved, `with` values feed the step at run time. On **commit** steps they become MCP tool arguments. On **reason** steps they hydrate the Jinja prompt; with `tools.bind` on `react`, selected keys also pin MCP args — see [Prompts](prompts.md) for how bindings become template variables and what Warden checks when you deploy.
 
 :::info[Context scoping]
 Saga context is **append-only per step id**. When a step completes, Warden merges its output under `steps.<step_id>` — it does not mutate other steps' buckets. A later step cannot change what an earlier step stored.

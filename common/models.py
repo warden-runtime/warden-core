@@ -140,6 +140,10 @@ class SagaStepInstance(models.Model):
         default=list,
         description="List of tool spec dicts from saga YAML tools.allow (name, optional schemas).",
     )
+    tools_bind = fields.JSONField(
+        default=list,
+        description=("Reason/react: list of ``with`` keys pinned onto MCP tool args (tools.bind)."),
+    )
     resources_allow = fields.JSONField(
         default=list,
         description=(

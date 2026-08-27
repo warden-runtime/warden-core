@@ -78,6 +78,7 @@ class AgentAdapterPort(ABC):
         max_completion_tokens: int | None = None,
         facts_extractors: list[dict[str, Any]] | None = None,
         agent_adapter: AgentAdapterMode = "react",
+        tool_bind_keys: list[str] | None = None,
     ) -> StepResult:
         """Run agentic loop: LLM with tools, execute tool_calls through governance, repeat until done.
 
@@ -97,6 +98,7 @@ class AgentAdapterPort(ABC):
             max_completion_tokens: Optional per-call generation cap (provider max_tokens); None means
                 no Warden override.
             agent_adapter: ``react`` for ReAct + _submit; ``simple`` for single structured turn.
+            tool_bind_keys: Reason/react ``tools.bind`` keys; saga values pin onto matching MCP args.
 
         Returns:
 

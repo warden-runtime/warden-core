@@ -65,3 +65,18 @@ def test_validate_compensation_rejects_load_skill() -> None:
         validate_compensation_definition_dict(
             _valid_compensation(tools={"allow": [{"name": "load_skill"}]})
         )
+
+
+def test_validate_compensation_rejects_tools_bind() -> None:
+    with pytest.raises(ValidationError, match="tools.bind"):
+        validate_compensation_definition_dict(
+            _valid_compensation(
+                **{
+                    "with": {"container_id": {"value": "c1"}},
+                    "tools": {
+                        "bind": ["container_id"],
+                        "allow": [{"name": "cancel_payment"}],
+                    },
+                }
+            )
+        )

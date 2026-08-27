@@ -46,7 +46,7 @@ As steps complete, the engine adds each step's output and facts under that step'
 
 ### Bindings (`with`)
 
-Optional keys on a saga step that pull values from [saga context](#saga-context). When the step is scheduled, the engine resolves them into a flat `arguments` map. On **reason** steps, those keys hydrate the prompt template. On **commit** steps, they become MCP tool arguments. See [Bindings](../guides/manifests/saga-manifests.md#bindings-with).
+Optional keys on a saga step that pull values from [saga context](#saga-context). When the step is scheduled, the engine resolves them into a flat `arguments` map. On **`react`** reason steps, keys hydrate the Jinja prompt; optional `tools.bind` (⊆ `with`) also pins selected values onto MCP tool args. On **commit** steps, the full map becomes MCP tool kwargs. See [Bindings](../guides/manifests/saga-manifests.md#bindings-with).
 
 ### Conditional branching (`when.cel`)
 

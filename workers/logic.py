@@ -85,6 +85,7 @@ class _HydratedExecution:
     max_completion_tokens: int | None
     facts_extractors: list[dict[str, Any]]
     agent_adapter: str
+    tool_bind_keys: list[str]
 
 
 async def _hydrate_compensation_command(
@@ -126,6 +127,7 @@ async def _hydrate_compensation_command(
         max_completion_tokens=None,
         facts_extractors=[],
         agent_adapter="react",
+        tool_bind_keys=[],
     )
 
 
@@ -177,6 +179,7 @@ async def _hydrate_forward_command(
         max_completion_tokens=getattr(step, "max_completion_tokens", None),
         facts_extractors=_facts_extractors_from_step(step),
         agent_adapter=str(getattr(step, "agent_adapter", None) or "react"),
+        tool_bind_keys=list(getattr(step, "tools_bind", None) or []),
     )
 
 
@@ -929,6 +932,7 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
                 ),
                 facts_extractors=execution.hydrated.facts_extractors or None,
                 agent_adapter=execution.hydrated.agent_adapter,  # type: ignore[arg-type]
+                tool_bind_keys=execution.hydrated.tool_bind_keys or None,
             ),
             scope=execution.scope,
             worker_definition=execution.worker_definition,

@@ -4,6 +4,7 @@ Native ReAct loop on ChatModelPort: tool rounds and _submit completion.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import time
@@ -201,36 +202,81 @@ def _log_react_summary(
     )
 
 
+def _tool_not_found_result(*, tool_name: str, strict_errors: bool) -> str:
+    output = f"Error: Tool {tool_name} not found."
+    if strict_errors:
+        raise ExecutionStepError(
+            output,
+            tool=tool_name,
+            error_details=build_step_error_details(
+                code="TOOL_NOT_FOUND",
+                message=output,
+                tool=tool_name,
+            ),
+        )
+    return output
+
+
+def _resolve_mcp_tool_args(
+    *,
+    tool_call: ToolCall,
+    selected: Any,
+    merge_tool_args: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, Any] | None], dict[str, Any]
+    ]
+    | None,
+    merge_context: dict[str, Any],
+) -> dict[str, Any]:
+    llm_args = tool_call_args_to_dict(tool_call.args)
+    schema = get_warden_tool_input_schema(selected)
+    resolved = (
+        merge_tool_args(llm_args, merge_context, schema)
+        if merge_tool_args is not None
+        else llm_args
+    )
+    if schema:
+        return coerce_llm_json_from_schema(resolved, schema)
+    return resolved
+
+
+async def _call_mcp_tool(selected: Any, resolved: dict[str, Any]) -> str:
+    """Invoke a LangChain/MCP tool, preserving args omitted from LLM args_schema.
+
+    Prefer the raw coroutine so saga-wins / bind overlays survive when the
+    LLM-facing ``args_schema`` omits bound keys (``ainvoke`` would drop them).
+    Fall back to ``ainvoke`` for test doubles / tools without a real coroutine.
+    """
+    coro = getattr(selected, "coroutine", None)
+    if callable(coro):
+        maybe = coro(**resolved)
+        if inspect.isawaitable(maybe):
+            return str(await maybe)
+    return str(await selected.ainvoke(resolved))
+
+
 async def _invoke_mcp_tool(
     *,
     tool_call: ToolCall,
     mcp_tools: Sequence[Any],
-    merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    merge_tool_args: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, Any] | None], dict[str, Any]
+    ]
+    | None,
     merge_context: dict[str, Any],
     strict_errors: bool,
 ) -> str:
     selected = next((t for t in mcp_tools if t.name == tool_call.name), None)
     if selected is None:
-        output = f"Error: Tool {tool_call.name} not found."
-        if strict_errors:
-            raise ExecutionStepError(
-                output,
-                tool=tool_call.name,
-                error_details=build_step_error_details(
-                    code="TOOL_NOT_FOUND",
-                    message=output,
-                    tool=tool_call.name,
-                ),
-            )
-        return output
+        return _tool_not_found_result(tool_name=tool_call.name, strict_errors=strict_errors)
 
-    llm_args = tool_call_args_to_dict(tool_call.args)
-    resolved = merge_tool_args(llm_args, merge_context) if merge_tool_args is not None else llm_args
-    schema = get_warden_tool_input_schema(selected)
-    if schema:
-        resolved = coerce_llm_json_from_schema(resolved, schema)
+    resolved = _resolve_mcp_tool_args(
+        tool_call=tool_call,
+        selected=selected,
+        merge_tool_args=merge_tool_args,
+        merge_context=merge_context,
+    )
     try:
-        return str(await selected.ainvoke(resolved))
+        return await _call_mcp_tool(selected, resolved)
     except ExecutionStepError:
         raise
     except Exception as e:
@@ -344,7 +390,10 @@ async def _run_one_mcp_tool_call(
     tool_call: ToolCall,
     messages: list[ChatMessage],
     mcp_tools: Sequence[Any],
-    merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    merge_tool_args: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, Any] | None], dict[str, Any]
+    ]
+    | None,
     merge_context: dict[str, Any],
     tool_results: list[dict[str, Any]],
     strict_errors: bool,
@@ -392,7 +441,10 @@ async def _execute_tool_batch(
     tool_calls: list[ToolCall],
     messages: list[ChatMessage],
     mcp_tools: Sequence[Any],
-    merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    merge_tool_args: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, Any] | None], dict[str, Any]
+    ]
+    | None,
     merge_context: dict[str, Any],
     tool_results: list[dict[str, Any]],
     allow_submit: bool,
@@ -436,7 +488,10 @@ async def _process_tool_calls(
     messages: list[ChatMessage],
     mcp_tools: Sequence[Any],
     allowed_tool_names: Sequence[str],
-    merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    merge_tool_args: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, Any] | None], dict[str, Any]
+    ]
+    | None,
     merge_context: dict[str, Any],
     tool_results: list[dict[str, Any]],
     timing_acc: WorkerTimingAccumulator | None = None,
@@ -534,7 +589,10 @@ async def _react_loop_turn(
     messages: list[ChatMessage],
     mcp_tools: Sequence[Any],
     allowed_tool_names: Sequence[str],
-    merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    merge_tool_args: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, Any] | None], dict[str, Any]
+    ]
+    | None,
     merge_context: dict[str, Any],
     tool_results: list[dict[str, Any]],
     log_preview_len: int | None,
@@ -628,7 +686,10 @@ async def run_react_loop(
     mcp_tools: Sequence[Any],
     allowed_tool_names: Sequence[str],
     max_turns: int,
-    merge_tool_args: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
+    merge_tool_args: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, Any] | None], dict[str, Any]
+    ]
+    | None = None,
     merge_context: dict[str, Any] | None = None,
     log_preview_len: int | None = None,
     timing_acc: WorkerTimingAccumulator | None = None,
@@ -645,8 +706,9 @@ async def run_react_loop(
         allowed_tool_names: Names from step tool_specs (excludes _submit).
         max_turns: Maximum LLM invocations (text-exit soft retry may add at most
             ``WARDEN_REACT_SUBMIT_TEXT_RETRIES`` bonus call(s) when prose exit hits the last turn).
-        merge_tool_args: Optional merger applied to MCP tool args before invoke.
-        merge_context: Second argument to merge_tool_args.
+        merge_tool_args: Optional merger ``(llm_args, merge_context, input_schema) -> args``
+            applied before schema coercion (e.g. saga-wins ``tools.bind`` overlay).
+        merge_context: Second argument to merge_tool_args (e.g. bound ``with`` values).
         log_preview_len: Optional transcript log truncation override (from injection context);
             ``0`` disables truncation. Falls back to ``WARDEN_REACT_LOG_PREVIEW_LEN``.
         timing_acc: Optional worker timing accumulator (``llm_ms`` / ``tool_ms``).
