@@ -106,7 +106,7 @@ class SagaStepInstance(models.Model):
     )  # Set when step reaches terminal state (reaper/audit)
     timeout_seconds = fields.IntField()
     max_turns = fields.IntField(
-        default=10,
+        default=25,
         description="Max LLM invocations for reason-step ReAct.",
     )
     max_step_tokens = fields.IntField(

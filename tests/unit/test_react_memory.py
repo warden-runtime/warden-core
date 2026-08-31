@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 
 import pytest
@@ -15,7 +14,6 @@ from workers.adapters.react_memory import (
     _compute_budgets,
     compress_if_needed,
     effective_context_limit,
-    format_tool_keys_peek,
     partition_messages,
     phi_split,
     serialize_for_estimate,
@@ -52,7 +50,6 @@ def test_compression_stats_when_triggered():
         max_turns=3,
         context_limit=None,
         estimator=CalibratedEstimator(),
-        tool_redact_limit=None,
     )
     assert stats.compressed is True
     assert stats.deepest_tier >= 2
@@ -130,57 +127,6 @@ def test_partition_parallel_tools_one_group():
     assert len(groups[1].tool_msgs) == 1
 
 
-def test_format_tool_keys_empty_and_redacted():
-    assert format_tool_keys_peek("{}") == "keys=<empty>"
-    assert format_tool_keys_peek('{"secret_api_key": "x", "password": "y"}') == "keys=<redacted>"
-    assert format_tool_keys_peek('{"id": 1, "secret_token": "x"}') == "keys=id"
-    assert format_tool_keys_peek("not-json") == "keys=unknown"
-    assert format_tool_keys_peek("[1,2]") == "keys=list"
-
-
-def test_tier1_redacts_old_tools_and_encodes_status():
-    big = json.dumps({"id": 1, "rows": list(range(200))})
-    assert len(big) > 50
-    msgs = _transcript_with_groups(3, tool_payload=big)
-    # Append a hot group with smaller payload so Tier 1 can finish under turn budget
-    msgs.extend([_asst("hot", tools=["hot"]), _tool("hot", "small")])
-
-    out, stats = compress_if_needed(
-        msgs,
-        max_turns=4,  # wm_turn_target = floor(4*0.618)=2 → over with 4 groups
-        context_limit=None,
-        estimator=CalibratedEstimator(),
-        tool_redact_limit=50,
-    )
-    # Oldest tool messages should be redacted; digest or fewer groups present
-    tool_contents = [m.content for m in out if m.role == "tool"]
-    assert any("Tool output redacted" in c and "keys=id" in c for c in tool_contents)
-    assert any("status=ok" in c for c in tool_contents if "Tool output redacted" in c)
-
-
-def test_tier1_empty_object_and_all_sensitive_keys():
-    msgs = [
-        ChatMessage(role="system", content="sys"),
-        ChatMessage(role="human", content="goal"),
-        _asst("t0", tools=["e"]),
-        _tool("e", "{}"),
-        _asst("t1", tools=["s"]),
-        _tool("s", json.dumps({"api_key": "x", "db_password": "y"})),
-        _asst("hot", tools=["h"]),
-        _tool("h", "ok"),
-    ]
-    out, stats = compress_if_needed(
-        msgs,
-        max_turns=2,
-        context_limit=None,
-        estimator=CalibratedEstimator(),
-        tool_redact_limit=1,
-    )
-    blob = "\n".join(m.content for m in out)
-    assert "keys=<empty>" in blob
-    assert "keys=<redacted>" in blob
-
-
 def test_digest_is_human_with_untrusted_boundary():
     msgs = _transcript_with_groups(5, tool_payload="result-ok")
     out, stats = compress_if_needed(
@@ -188,7 +134,6 @@ def test_digest_is_human_with_untrusted_boundary():
         max_turns=3,  # wm_target = 1
         context_limit=None,
         estimator=CalibratedEstimator(),
-        tool_redact_limit=None,
     )
     digests = [m for m in out if m.role == "human" and (m.content or "").startswith("[Warden")]
     assert digests, "expected a memory digest human message"
@@ -218,7 +163,6 @@ def test_digest_marks_failures_differently():
         max_turns=2,
         context_limit=None,
         estimator=CalibratedEstimator(),
-        tool_redact_limit=None,
     )
     digest = next(m for m in out if m.role == "human" and "[Warden memory digest]" in m.content)
     assert "status=error" in digest.content
@@ -284,31 +228,7 @@ def test_context_overflow_when_hot_group_still_too_large():
             max_turns=10,
             context_limit=500,
             estimator=CalibratedEstimator(default_ratio=3.5),
-            tool_redact_limit=None,  # cannot redact hot-only group via tier1 cold path
             headroom=0.9,
         )
     details = exc.value.error_details or {}
     assert details.get("code") == "CONTEXT_OVERFLOW"
-
-
-def test_sensitive_keys_scrubbed_in_placeholder():
-    payload = json.dumps({"id": 1, "api_token": "shh", "name": "n" + ("!" * 40)})
-    msgs = [
-        ChatMessage(role="system", content="sys"),
-        ChatMessage(role="human", content="goal"),
-        _asst("t0", tools=["q"]),
-        _tool("q", payload),
-        _asst("hot", tools=["h"]),
-        _tool("h", "ok"),
-    ]
-    out, stats = compress_if_needed(
-        msgs,
-        max_turns=2,
-        context_limit=None,
-        estimator=CalibratedEstimator(),
-        tool_redact_limit=10,
-    )
-    blob = "\n".join(m.content for m in out)
-    assert "keys=id, name" in blob
-    # Sensitive key name must not appear in the keys= peek token
-    assert "api_token" not in blob.split("keys=")[1].split(".")[0]

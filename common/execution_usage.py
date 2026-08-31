@@ -32,7 +32,6 @@ WORKER_MEMORY_COUNTERS: tuple[str, ...] = (
     "groups_evicted",
     "estimated_tokens_saved",
     "max_tier",
-    "tier1_redactions",
 )
 
 # Stable aliases from LangChain / provider detail blobs → Warden canonical keys.

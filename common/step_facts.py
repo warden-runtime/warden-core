@@ -11,7 +11,9 @@ from pydantic import TypeAdapter, ValidationError
 
 from common.schemas.saga import StepFactsExtractor
 from common.tool_failure import plain_text_tool_result_looks_like_error
-from common.tool_results import DEFAULT_TOOL_RESULT_RECORD_LIMIT
+
+DEFAULT_TOOL_RESULT_RECORD_LIMIT = 8000
+"""Legacy worker record cap; used only to detect truncated JSON in stored tool_results."""
 
 _TOOL_RESULT_PREVIEW_LEN = 500
 _TRUNCATION_POS_TOLERANCE = 64
@@ -202,6 +204,7 @@ def extract_step_facts(
 
 
 __all__ = [
+    "DEFAULT_TOOL_RESULT_RECORD_LIMIT",
     "FACT_EXTRACTION_FAILED",
     "TOOL_RESULT_TRUNCATED",
     "StepFactsExtractionError",

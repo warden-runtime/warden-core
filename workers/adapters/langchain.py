@@ -35,7 +35,6 @@ from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_docum
 from common.step_facts import StepFactsExtractionError, extract_step_facts
 from common.step_output import business_data_from_step_output, wrap_step_output_data
 from common.tool_arg_bind import bound_arguments_from_step, overlay_bound_tool_arguments
-from common.tool_results import clip_tool_text_for_llm, resolve_tool_message_limit
 from common.utils import create_pydantic_model_from_schema
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -810,10 +809,6 @@ class LangChainAdapter(AgentAdapterPort):
             tool_name or "?",
         )
         serialized = json.dumps(inner, default=str)
-        clip_limit = resolve_tool_message_limit() or 0
-        recorded = (
-            clip_tool_text_for_llm(serialized, limit=clip_limit) if clip_limit else serialized
-        )
         return CompensationResult(
             output={
                 "rollback_status": "completed",
@@ -821,7 +816,7 @@ class LangChainAdapter(AgentAdapterPort):
                 "tool_results": [
                     {
                         "tool": tool_name or "?",
-                        "result": recorded,
+                        "result": serialized,
                     }
                 ],
             }
