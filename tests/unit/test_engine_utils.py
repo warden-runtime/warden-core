@@ -154,3 +154,23 @@ class TestValidatePromptVariables:
         with pytest.raises(ValueError) as exc_info:
             validate_prompt_variables("{{ a }} {{ b }}", {"a"})
         assert "b" in str(exc_info.value)
+
+    def test_accepts_for_loop_target_not_in_with(self):
+        validate_prompt_variables(
+            "{% for obj in objectives %}- {{ obj }}\n{% endfor %}",
+            {"objectives"},
+        )
+
+    def test_accepts_for_loop_index(self):
+        validate_prompt_variables(
+            "{% for obj in objectives %}{{ loop.index }}. {{ obj }}\n{% endfor %}",
+            {"objectives"},
+        )
+
+    def test_raises_when_for_body_uses_unbound_non_loop_var(self):
+        with pytest.raises(ValueError) as exc_info:
+            validate_prompt_variables(
+                "{% for obj in objectives %}{{ missing }} {{ obj }}{% endfor %}",
+                {"objectives"},
+            )
+        assert "missing" in str(exc_info.value)
