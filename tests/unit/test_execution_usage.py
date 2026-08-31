@@ -130,7 +130,6 @@ def test_worker_usage_accumulator_memory_stats():
             deepest_tier=2,
             groups_evicted=3,
             estimated_tokens_saved=100,
-            tier1_redactions=1,
         )
     )
     acc.add_memory_stats(
@@ -147,7 +146,6 @@ def test_worker_usage_accumulator_memory_stats():
         "groups_evicted": 4,
         "estimated_tokens_saved": 150,
         "max_tier": 3,
-        "tier1_redactions": 1,
     }
     merged = merge_execution_usage(worker=wire["worker"])
     assert merged["worker"]["memory"]["max_tier"] == 3

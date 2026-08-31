@@ -246,7 +246,7 @@ To remove comments after a live run, delete them in the GitHub issue UI. Warden 
 | HITL approve queued but saga stuck | `make doctor`, then re-run `warden review approve` to requeue the outbox row |
 | Missing API key for `openai` | Set `OPENAI_API_KEY` in `.env`, restart the worker (`docker compose up -d worker`), retry or start a new saga — or switch the manifest to `provider: local` (`WARDEN_LOCAL_LLM_BASE_URL`) or `provider: mock` |
 | Tool not in allowlist | Step `tools.allow` names must match GitHub MCP tool IDs exactly |
-| Slow / costly triage on large repos | `list_issues` JSON is clipped for LLM turns (default 8000 chars) but facts use the full payload; tune `WARDEN_REACT_TOOL_MESSAGE_LIMIT` or set `0` to disable clipping for debugging — see [Configuration → Worker tuning](configuration.md#worker-tuning) |
+| Slow / costly triage on large repos | Large `list_issues` JSON increases LLM cost and context pressure. Narrow MCP query params (pagination, filters), use `facts` on stable fields for branching, and tune step `max_turns` / optional `WARDEN_REACT_CONTEXT_LIMIT` — see [MCP and tools → Tool payload hygiene](../guides/manifests/mcp-and-tools.md#tool-payload-hygiene) |
 
 ## What's next
 

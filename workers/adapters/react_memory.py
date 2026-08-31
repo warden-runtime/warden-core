@@ -4,7 +4,7 @@ Golden-ratio ReAct transcript compression: anchors vs working memory turn groups
 Turn axis always applies (from ``max_turns``). Token axis applies when
 ``WARDEN_REACT_CONTEXT_LIMIT`` is set. Soft-borrow lets eternal anchors shrink
 WM targets (tokens and, when borrowing, the turn cap). LLM summarization is
-deferred; tiers are redact → digest → drop.
+deferred; tiers are digest → drop.
 """
 
 from __future__ import annotations
@@ -35,16 +35,6 @@ DIGEST_PREFIX = (
 _DIGEST_MARKER = "[Warden memory digest]"
 _DEFAULT_HEADROOM = 0.9
 _PER_MESSAGE_OVERHEAD_CHARS = 40
-_SENSITIVE_KEY_SUBSTR = (
-    "secret",
-    "password",
-    "token",
-    "api_key",
-    "apikey",
-    "credential",
-    "private_key",
-    "auth",
-)
 _REDACT_STATUS_RE = re.compile(r"status=(ok|error)\b")
 
 
@@ -88,7 +78,6 @@ class CompressionStats:
     estimated_tokens_before: int = 0
     estimated_tokens_after: int = 0
     estimated_tokens_saved: int = 0
-    tier1_redactions: int = 0
 
     def to_otel_attrs(self) -> dict[str, bool | int]:
         if not self.compressed:
@@ -98,22 +87,18 @@ class CompressionStats:
             "warden.memory.trigger_tier": self.deepest_tier,
             "warden.memory.groups_evicted": self.groups_evicted,
             "warden.memory.estimated_tokens_saved": self.estimated_tokens_saved,
-            "warden.memory.tier1_redactions": self.tier1_redactions,
         }
 
     def to_usage_memory(self) -> dict[str, int]:
         """Counters suitable for summing into ``execution_usage.worker.memory``."""
         if not self.compressed:
             return {}
-        out: dict[str, int] = {
+        return {
             "compressions": 1,
             "groups_evicted": self.groups_evicted,
             "estimated_tokens_saved": self.estimated_tokens_saved,
             "max_tier": self.deepest_tier,
         }
-        if self.tier1_redactions > 0:
-            out["tier1_redactions"] = self.tier1_redactions
-        return out
 
 
 def _empty_stats(
@@ -135,7 +120,6 @@ class TurnGroup:
 
     assistant_msg: ChatMessage
     tool_msgs: list[ChatMessage] = field(default_factory=list)
-    is_redacted: bool = False
 
     def to_messages(self) -> list[ChatMessage]:
         return [self.assistant_msg, *self.tool_msgs]
@@ -210,31 +194,6 @@ def serialize_for_estimate(messages: list[ChatMessage]) -> str:
 
 def _tool_call_as_dict(tc: ToolCall) -> dict[str, Any]:
     return {"name": tc.name, "args": tc.args, "id": tc.id}
-
-
-def _is_sensitive_key(name: str) -> bool:
-    lower = name.lower()
-    return any(s in lower for s in _SENSITIVE_KEY_SUBSTR)
-
-
-def format_tool_keys_peek(content: str) -> str:
-    """Return a safe keys=… token for Tier 1 placeholders."""
-    try:
-        parsed = json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        return "keys=unknown"
-
-    if isinstance(parsed, list):
-        return "keys=list"
-    if not isinstance(parsed, dict):
-        return "keys=unknown"
-    if not parsed:
-        return "keys=<empty>"
-
-    safe = [k for k in parsed if isinstance(k, str) and not _is_sensitive_key(k)]
-    if not safe:
-        return "keys=<redacted>"
-    return f"keys={', '.join(safe)}"
 
 
 def partition_messages(messages: list[ChatMessage]) -> tuple[list[ChatMessage], list[TurnGroup]]:
@@ -342,52 +301,6 @@ def _is_over_budget(
     return False
 
 
-def _redact_tool_message(tool_msg: ChatMessage, *, was_failure: bool) -> ChatMessage:
-    content = tool_msg.content or ""
-    keys_token = format_tool_keys_peek(content)
-    status = "error" if was_failure else "ok"
-    name = tool_msg.name or "unknown_tool"
-    placeholder = (
-        f"[Tool output redacted. tool={name} {keys_token} status={status}. "
-        f"Full payload retained in step tool_results for facts.]"
-    )
-    return tool_msg.model_copy(update={"content": placeholder})
-
-
-def _tier1_redact(
-    groups: list[TurnGroup],
-    *,
-    tool_redact_limit: int | None,
-    is_over: Any,
-) -> int:
-    """Redact oversized tool payloads in cold groups. Returns count of tool msgs redacted."""
-    if tool_redact_limit is None or tool_redact_limit <= 0:
-        return 0
-    redactions = 0
-    # Leave the last (hot) group untouched.
-    for i in range(max(0, len(groups) - 1)):
-        if not is_over():
-            break
-        group = groups[i]
-        if group.is_redacted:
-            continue
-        redacted_any = False
-        new_tools: list[ChatMessage] = []
-        for tool_msg in group.tool_msgs:
-            content = tool_msg.content or ""
-            if tool_msg.role == "tool" and len(content) > tool_redact_limit:
-                was_failure = tool_output_indicates_failure(content)
-                new_tools.append(_redact_tool_message(tool_msg, was_failure=was_failure))
-                redacted_any = True
-                redactions += 1
-            else:
-                new_tools.append(tool_msg)
-        if redacted_any:
-            group.tool_msgs = new_tools
-            group.is_redacted = True
-    return redactions
-
-
 def _tool_status_from_message(tool_msg: ChatMessage) -> str:
     content = tool_msg.content or ""
     match = _REDACT_STATUS_RE.search(content)
@@ -480,7 +393,6 @@ def compress_if_needed(
     max_turns: int,
     context_limit: int | None,
     estimator: CalibratedEstimator,
-    tool_redact_limit: int | None,
     headroom: float | None = None,
 ) -> tuple[list[ChatMessage], CompressionStats]:
     """
@@ -514,9 +426,6 @@ def compress_if_needed(
         )
 
     deepest_tier = 0
-    tier1_redactions = _tier1_redact(groups, tool_redact_limit=tool_redact_limit, is_over=is_over)
-    if tier1_redactions > 0:
-        deepest_tier = 1
     folded = 0
     dropped = 0
     if is_over():
@@ -553,7 +462,6 @@ def compress_if_needed(
         estimated_tokens_before=tokens_before,
         estimated_tokens_after=tokens_after,
         estimated_tokens_saved=saved,
-        tier1_redactions=tier1_redactions,
     )
     logger.debug(
         "ReAct memory compress: groups=%d→%d tier=%d saved_est=%d wm_turn_target=%d token_axis=%s",

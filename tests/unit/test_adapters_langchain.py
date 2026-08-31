@@ -810,8 +810,7 @@ async def test_run_compensation_single_tool_invokes_mcp_once_no_llm(mocker):
 
 
 @pytest.mark.asyncio
-async def test_run_compensation_single_tool_clips_large_recorded_result(mocker, monkeypatch):
-    monkeypatch.delenv("WARDEN_REACT_TOOL_MESSAGE_LIMIT", raising=False)
+async def test_run_compensation_single_tool_records_full_result(mocker):
     large_inner = {"status": "compensated", "detail": "x" * 9000}
     mock_tool = MagicMock()
     mock_tool.name = "undo"
@@ -840,7 +839,7 @@ async def test_run_compensation_single_tool_clips_large_recorded_result(mocker, 
         context={},
     )
     recorded = result.output.get("tool_results", [])[0]["result"]
-    assert len(recorded) <= 8000
+    assert len(recorded) > 8000
     assert result.output.get("data") == large_inner
 
 

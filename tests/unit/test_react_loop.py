@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -753,45 +752,13 @@ async def test_tool_results_store_full_payload_without_truncation():
     assert result.tool_results is not None
     assert result.tool_results[0]["result"] == large_payload
     assert len(result.tool_results[0]["result"]) > 8000
+    tool_messages = [m for m in result.transcript if m.role == "tool"]
+    assert len(tool_messages) == 1
+    assert tool_messages[0].content == large_payload
 
 
 @pytest.mark.asyncio
-async def test_llm_tool_message_clipped_while_tool_results_stay_full(monkeypatch):
-    monkeypatch.delenv("WARDEN_REACT_TOOL_MESSAGE_LIMIT", raising=False)
-    large_payload = (
-        '{"totalCount": 2, "issues": ['
-        + ",".join([json.dumps({"body": "b" * 3000}) for _ in range(6)])
-        + "]}"
-    )
-    assert len(large_payload) > 8000
-    mock_tool = MagicMock()
-    mock_tool.name = "lookup"
-    mock_tool.ainvoke = AsyncMock(return_value=large_payload)
-
-    llm = _ScriptedLLM(
-        [
-            ChatResponse(tool_calls=[ToolCall(name="lookup", args={"id": "1"}, id="1")]),
-            ChatResponse(
-                tool_calls=[ToolCall(name="_submit", args={"result": {"summary": "done"}}, id="2")]
-            ),
-        ]
-    )
-    result = await run_react_loop(
-        llm=llm,
-        initial_messages=[ChatMessage(role="human", content="go")],
-        mcp_tools=[mock_tool],
-        allowed_tool_names=["lookup"],
-        max_turns=10,
-    )
-    assert result.tool_results is not None
-    assert result.tool_results[0]["result"] == large_payload
-    tool_messages = [m for m in result.transcript if m.role == "tool"]
-    assert len(tool_messages) == 1
-    assert len(tool_messages[0].content or "") <= 8000
-    assert "_warden_clipped" in (tool_messages[0].content or "")
-
-
-def test_tool_call_args_to_dict_nested_and_scalar():
+async def test_tool_call_args_to_dict_nested_and_scalar():
     """Shared normalizer preserves nested dicts; wraps non-dict primitives."""
     nested = {"payment_id": "pay-1", "meta": {"amount": 100}}
     assert tool_call_args_to_dict(nested) == nested

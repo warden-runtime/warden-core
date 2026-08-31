@@ -399,7 +399,7 @@ There is no built-in reviewer UI — the kernel exposes CLI and HTTP only. For c
 
 | Field | Applies to | Default | Meaning |
 |-------|------------|---------|---------|
-| `max_turns` | **`react` only** | **10** (max **200**) | Cap on back-and-forth tool/LLM rounds. **`simple`** ignores it (always one LLM call). |
+| `max_turns` | **`react` only** | **25** (max **200**) | Cap on back-and-forth tool/LLM rounds. **`simple`** ignores it (always one LLM call). |
 | `max_step_tokens` | **`react` and `simple`** | unlimited (omit / null) | Financial guardrail: abort when accumulated provider-reported **`total_tokens`** (prompt + completion across the step) exceed this budget. |
 | `max_completion_tokens` | **`react` and `simple`** | no Warden override (omit / null) | Per-call generation cap passed to the provider as `max_tokens`. Distinct from `max_step_tokens`. |
 
@@ -503,7 +503,7 @@ Policy gates use a **different** CEL binding (no `steps` root) — see [Policies
 
 ## Tool facts (`facts`)
 
-On **`react`** reason steps only (`agent-adapter: simple` rejects `facts:` when you deploy), `facts` copies selected values out of **MCP tool JSON** into saga context after the ReAct loop finishes. Extraction uses whatever the agent actually called during the step — not the structured reason-step output in `output.data`.
+On **`react`** reason steps only (`agent-adapter: simple` rejects `facts:` when you deploy), `facts` copies selected values out of **MCP tool JSON** into saga context after the ReAct loop finishes. Extraction uses whatever the agent actually called during the step — not the structured reason-step output in `output.data`. The same full tool payload is stored in `tool_results` and sent to the LLM transcript at record time — see [MCP and tools → Tool payload hygiene](mcp-and-tools.md#tool-payload-hygiene).
 
 Each extractor has three parts:
 

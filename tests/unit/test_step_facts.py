@@ -7,13 +7,13 @@ import json
 import pytest
 from common.schemas.saga import StepFactsExtractor
 from common.step_facts import (
+    DEFAULT_TOOL_RESULT_RECORD_LIMIT,
     FACT_EXTRACTION_FAILED,
     TOOL_RESULT_TRUNCATED,
     StepFactsExtractionError,
     extract_step_facts,
     validate_facts_extractors,
 )
-from common.tool_results import DEFAULT_TOOL_RESULT_RECORD_LIMIT
 
 _LIST_ISSUES_SPEC = StepFactsExtractor(
     tool="list_issues",

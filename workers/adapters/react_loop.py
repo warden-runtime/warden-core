@@ -28,7 +28,6 @@ from common.tool_failure import (
     format_tool_invoke_exception,
     tool_invoke_exception_is_infrastructure,
 )
-from common.tool_results import clip_tool_text_for_llm, tool_message_limit_from_env
 from common.utils import (
     coerce_llm_json_from_schema,
     format_exception_chain,
@@ -101,12 +100,6 @@ def _resolve_log_preview_len(override: int | None) -> int:
     if override is not None:
         return max(0, override)
     return _content_preview_len()
-
-
-def _llm_tool_content(output: str, *, tool_message_limit: int | None) -> str:
-    if tool_message_limit is None:
-        return output
-    return clip_tool_text_for_llm(output, limit=tool_message_limit)
 
 
 @dataclass(frozen=True)
@@ -355,12 +348,11 @@ def _append_tool_role_message(
     *,
     tool_call: ToolCall,
     content: str,
-    tool_message_limit: int | None,
 ) -> None:
     messages.append(
         ChatMessage(
             role="tool",
-            content=_llm_tool_content(content, tool_message_limit=tool_message_limit),
+            content=content,
             tool_call_id=tool_call.id,
             name=tool_call.name,
         )
@@ -372,7 +364,6 @@ def _record_submit_must_be_alone(
     messages: list[ChatMessage],
     tool_call: ToolCall,
     tool_results: list[dict[str, Any]],
-    tool_message_limit: int | None,
 ) -> None:
     """Reject `_submit` that shares a turn with other tools; keep the loop running."""
     recorded = _SUBMIT_MUST_BE_ALONE_MESSAGE
@@ -381,7 +372,6 @@ def _record_submit_must_be_alone(
         messages,
         tool_call=tool_call,
         content=recorded,
-        tool_message_limit=tool_message_limit,
     )
 
 
@@ -398,7 +388,6 @@ async def _run_one_mcp_tool_call(
     tool_results: list[dict[str, Any]],
     strict_errors: bool,
     timing_acc: WorkerTimingAccumulator | None,
-    tool_message_limit: int | None,
     turn_index: int,
 ) -> None:
     tool_start = time.perf_counter() if timing_acc is not None else None
@@ -424,7 +413,6 @@ async def _run_one_mcp_tool_call(
     tool_results.append(
         {
             "tool": _mcp_fact_tool_name(tool_call, mcp_tools),
-            # Full payload for facts/JSONPath; do not truncate execution memory here.
             "result": recorded,
         },
     )
@@ -432,7 +420,6 @@ async def _run_one_mcp_tool_call(
         messages,
         tool_call=tool_call,
         content=recorded,
-        tool_message_limit=tool_message_limit,
     )
 
 
@@ -450,7 +437,6 @@ async def _execute_tool_batch(
     allow_submit: bool,
     strict_errors: bool,
     timing_acc: WorkerTimingAccumulator | None,
-    tool_message_limit: int | None,
     turn_index: int,
 ) -> None:
     """Run one assistant tool batch; reject mixed ``_submit`` calls, execute the rest."""
@@ -465,7 +451,6 @@ async def _execute_tool_batch(
                 messages=messages,
                 tool_call=tool_call,
                 tool_results=tool_results,
-                tool_message_limit=tool_message_limit,
             )
             continue
         await _run_one_mcp_tool_call(
@@ -477,7 +462,6 @@ async def _execute_tool_batch(
             tool_results=tool_results,
             strict_errors=strict_errors,
             timing_acc=timing_acc,
-            tool_message_limit=tool_message_limit,
             turn_index=turn_index,
         )
 
@@ -495,7 +479,6 @@ async def _process_tool_calls(
     merge_context: dict[str, Any],
     tool_results: list[dict[str, Any]],
     timing_acc: WorkerTimingAccumulator | None = None,
-    tool_message_limit: int | None = None,
     turn_index: int = 0,
 ) -> dict[str, Any] | None:
     """Append assistant message, run tool calls; return submit payload if `_submit` alone completes.
@@ -530,7 +513,6 @@ async def _process_tool_calls(
         allow_submit=True,
         strict_errors=True,
         timing_acc=timing_acc,
-        tool_message_limit=tool_message_limit,
         turn_index=turn_index,
     )
     return None
@@ -601,7 +583,6 @@ async def _react_loop_turn(
     max_step_tokens: int | None,
     turns_used: int,
     max_turns: int,
-    tool_message_limit: int | None = None,
     estimator: CalibratedEstimator | None = None,
     context_limit: int | None = None,
     context_headroom: float | None = None,
@@ -614,7 +595,6 @@ async def _react_loop_turn(
             max_turns=max_turns,
             context_limit=context_limit,
             estimator=estimator,
-            tool_redact_limit=tool_message_limit,
             headroom=context_headroom,
         )
         messages[:] = compressed
@@ -644,7 +624,6 @@ async def _react_loop_turn(
             merge_context=merge_context,
             tool_results=tool_results,
             timing_acc=timing_acc,
-            tool_message_limit=tool_message_limit,
             turn_index=turns_used,
         )
         if submit_payload is not None:
@@ -724,7 +703,6 @@ async def run_react_loop(
     messages = list(initial_messages)
     tool_results: list[dict[str, Any]] = []
     ctx = merge_context if merge_context is not None else {}
-    tool_message_limit = tool_message_limit_from_env()
     compression_on = memory_compression_enabled_from_env()
     estimator = CalibratedEstimator() if compression_on else None
     context_limit = context_limit_from_env() if compression_on else None
@@ -759,7 +737,6 @@ async def run_react_loop(
             max_step_tokens=max_step_tokens,
             turns_used=turns_used,
             max_turns=max_turns,
-            tool_message_limit=tool_message_limit,
             estimator=estimator,
             context_limit=context_limit,
             context_headroom=context_headroom,

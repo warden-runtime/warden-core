@@ -14,7 +14,7 @@ MAX_CHILDREN_HARD_CAP = 16
 AgentAdapterMode: TypeAlias = Literal["react", "simple"]
 DEFAULT_AGENT_ADAPTER: AgentAdapterMode = "react"
 
-DEFAULT_MAX_TURNS = 10
+DEFAULT_MAX_TURNS = 25
 MAX_TURNS_LIMIT = 200
 
 

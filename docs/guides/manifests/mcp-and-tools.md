@@ -131,6 +131,29 @@ Resource reads are read-only boundaries. They do not replace `tools.allow` for s
 
 The allowlist is the primary boundary for tool access. [Policies](policies.md) add a second layer — they evaluate step outputs at fixed phases before results are committed or external writes are dispatched.
 
+## Tool payload hygiene
+
+Warden does **not** truncate MCP tool returns in the ReAct loop. The same string is appended to the LLM transcript and stored in `tool_results` for [facts extraction](saga-manifests.md#tool-facts-facts). If a tool returns a payload that overwhelms the context window, fix the **tool contract** — not the orchestration engine.
+
+### Design patterns
+
+| Pattern | When to use |
+|---------|-------------|
+| **Pagination** | List endpoints accept `limit`, `offset`, `cursor`, or `page_size` so callers fetch one bounded page at a time. |
+| **Field projection** | Tools accept a `fields` or sparse-response flag and omit large nested blobs (issue bodies, file contents, audit trails). |
+| **Summary vs detail** | Expose a lightweight summary tool (counts, flags, ids) for branching and a separate detail tool when the agent needs one record. |
+
+### Saga authoring
+
+- Prefer **summary tools** in `tools.allow` when the step only needs counts or ids for `when.cel` / `facts`.
+- Use **`facts`** JSONPath on small stable fields (e.g. `total_count` from `list_issues`) instead of trusting `_submit` prose for branching — see the [GitHub MCP demo](../../getting-started/demo-github-mcp.md).
+- Bind saga **`with`** values onto tool args via **`tools.bind`** (e.g. fixed page size, repo scope) so the model cannot request unbounded pages.
+- When context is still tight after tool design: golden-ratio **memory compression** (digest/drop on **historical** turns only), step **`max_turns`**, and optional **`WARDEN_REACT_CONTEXT_LIMIT`** — see [Configuration → Worker tuning](../../getting-started/configuration.md#worker-tuning).
+
+### Third-party MCP servers
+
+If you do not control the server and a tool returns unbounded JSON, wrap it with a bounded proxy MCP server or narrow the step allowlist to safer tools. Warden will not slice or clip tool JSON at runtime.
+
 ## Designing for at-least-once delivery
 
 Warden delivers worker commands **at-least-once** — see [Architecture — Idempotency](../../advanced/architecture.md#idempotency) for claim reap and engine dedup. A worker that crashes *after* calling your external API but *before* emitting a result may run the same step again when the claim is reaped.

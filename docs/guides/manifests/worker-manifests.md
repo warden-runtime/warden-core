@@ -105,7 +105,7 @@ Everything beyond the [required fields](#required-fields) is optional. Common ad
 
 This setting lives on each **`kind: reason` step** in the saga YAML — not on the worker manifest.
 
-For a standard **`react`** step, the agent keeps calling tools until it invokes `_submit`. `max_turns` caps those rounds (default **10**, max **200**). Invalid `_submit` payloads that trigger schema soft-retries still draw from this budget — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback). **`simple`** steps make one LLM call and ignore this cap.
+For a standard **`react`** step, the agent keeps calling tools until it invokes `_submit`. `max_turns` caps those rounds (default **25**, max **200**). Invalid `_submit` payloads that trigger schema soft-retries still draw from this budget — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback). **`simple`** steps make one LLM call and ignore this cap.
 
 Compensation undo is a single MCP tool call (see [Compensation](compensation.md)); it does not use `max_turns`.
 

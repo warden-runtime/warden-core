@@ -234,14 +234,11 @@ Repo defaults are `./config/prompts`, `./config/policies`, `./config/schemas`, a
 
 ## Worker tuning
 
-These default to conservative values. Adjust as needed for your workload.
-
-ReAct tool responses can be large. `WARDEN_REACT_TOOL_MESSAGE_LIMIT` trades **token economy** against **context visibility** in the LLM transcript: a lower limit saves context window but clips the tail of tool payloads—the agent may miss data and reason from incomplete context. Set `0` to disable clipping entirely for deep debugging passes. Facts extraction always uses the full tool payload regardless of this limit.
+Adjust these for your workload and model context window. Large MCP tool returns are governed at the **tool contract** layer (pagination, field projection) — see [MCP and tools → Tool payload hygiene](../guides/manifests/mcp-and-tools.md#tool-payload-hygiene). Warden does not truncate tool payloads in the ReAct transcript.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WORKER_MAX_IN_FLIGHT` | `1` | Max concurrent step commands handled by **one worker process** (outbox consumer semaphore) |
-| `WARDEN_REACT_TOOL_MESSAGE_LIMIT` | `8000` | Max characters for tool-role messages in the ReAct LLM transcript; `0` disables clipping. Also used as the Tier 1 memory-redaction threshold |
 | `WARDEN_REACT_MEMORY_COMPRESSION` | `1` | Master switch for golden-ratio ReAct memory compression; set `0` / `false` / `off` to disable (A/B vs unbounded transcript) |
 | `WARDEN_REACT_CONTEXT_LIMIT` | unset / `0` | Optional token-axis budget for golden-ratio ReAct memory compression; `0` or unset = turn-axis only (when compression is on) |
 | `WARDEN_REACT_CONTEXT_HEADROOM` | `0.9` | Fraction of `WARDEN_REACT_CONTEXT_LIMIT` used for φ budgets (absorbs EMA estimator lag); clamped to `(0, 1]` |

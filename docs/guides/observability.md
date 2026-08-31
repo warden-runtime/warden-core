@@ -200,8 +200,7 @@ Reason steps may also set `max_step_tokens` (or worker env `WARDEN_MAX_STEP_TOKE
       "compressions": 2,
       "max_tier": 2,
       "groups_evicted": 3,
-      "estimated_tokens_saved": 4200,
-      "tier1_redactions": 1
+      "estimated_tokens_saved": 4200
     }
   }
 }
