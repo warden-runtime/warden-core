@@ -67,6 +67,7 @@ When you deploy a saga, the engine reads each prompt file and checks **`{{ ... }
 | `Hello {{ name }}` | `name` |
 | `Owner: {{ user.email }}` | `user` (object; nested access is Jinja on the bound value) |
 | `{% if focus_issue_number is not none %}…{% endif %}` | not checked statically — bind `focus_issue_number` anyway |
+| `{% for obj in objectives %}{{ obj }}{% endfor %}` | `objectives` (loop target `obj` and Jinja `loop` are allowed) |
 
 Extra `with` keys are allowed. Variables used only in `{% if %}`, `{% for %}`, or filters are **not** checked when you deploy; if you reference them at render time without a binding, the step fails in the worker.
 

@@ -15,13 +15,31 @@ logger = logging.getLogger(__name__)
 
 # Jinja variable pattern: {{ var }} or {{ var.attr.nested }}
 _JINJA_VAR_PATTERN = re.compile(r"\{\{\s*(\w+)(?:\.[\w.]*)?\s*\}\}")
+# {% for x in ... %} / {% for x, y in ... %} — loop targets are not step `with` keys.
+_JINJA_FOR_PATTERN = re.compile(
+    r"\{%-?\s*for\s+(\w+)(?:\s*,\s*(\w+))?\s+in\s+",
+    re.IGNORECASE,
+)
+
+
+def _jinja_for_loop_names(prompt_content: str) -> set[str]:
+    """Return names introduced by ``{% for %}`` (plus ``loop`` when any for exists)."""
+    names: set[str] = set()
+    for match in _JINJA_FOR_PATTERN.finditer(prompt_content):
+        names.add(match.group(1))
+        if match.group(2):
+            names.add(match.group(2))
+    if names:
+        names.add("loop")
+    return names
 
 
 def validate_prompt_variables(prompt_content: str, param_keys: Set[str]) -> None:
     """Ensure every Jinja variable in the prompt is provided by the step's `with` spec.
 
     Extracts {{ var }} and {{ var.attr }} and checks each top-level name is in
-    param_keys.
+    param_keys. Names bound by ``{% for x in … %}`` (and Jinja's ``loop``) are
+    treated as defined.
 
     Args:
         prompt_content: Raw prompt template (may contain Jinja).
@@ -31,7 +49,7 @@ def validate_prompt_variables(prompt_content: str, param_keys: Set[str]) -> None
         ValueError: If any used variable is not in param_keys.
     """
     used = set(_JINJA_VAR_PATTERN.findall(prompt_content))
-    missing = used - param_keys
+    missing = used - param_keys - _jinja_for_loop_names(prompt_content)
     if missing:
         raise ValueError(
             f"Prompt uses variable(s) not defined in step 'with': {sorted(missing)}. "
