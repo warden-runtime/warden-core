@@ -47,20 +47,20 @@ Unknown `provider` values fail at worker step runtime with `ValueError` from `bu
 
 Warden workers use the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) to talk to external APIs. List the servers your agent can reach under `tool_sources` in the worker manifest; saga steps narrow that list with their own `tools.allow`.
 
-When a worker picks up a step, it opens a connection for each source. For **`stdio`** sources, that means spawning a subprocess that stays alive until the step finishes or times out — stdin/stdout carry messages between the MCP server and your agent loop. For **`sse`** sources, the worker connects over HTTP to a server that's already running elsewhere.
+When a worker picks up a step, it opens a connection for each source. For **`stdio`** sources, that means spawning a subprocess that stays alive until the step finishes or times out — stdin/stdout carry messages between the MCP server and your agent loop. For **`streamable_http`** sources, the worker connects over Streamable HTTP to a server that's already running elsewhere.
 
 | Transport | Config | How it connects |
 |-----------|--------|-----------------|
-| `sse` (default) | `url` | HTTP SSE client to a running MCP server |
+| `streamable_http` (default) | `url` | Streamable HTTP client to a running MCP server |
 | `stdio` | `command`, `args` | Spawns a subprocess; MCP speaks over stdin/stdout |
 
-**SSE** — for an MCP server your worker reaches over the network (Compose service, k8s sidecar, hosted endpoint):
+**Streamable HTTP** — for an MCP server your worker reaches over the network (Compose service, k8s sidecar, hosted endpoint). The URL must target a [Streamable HTTP](https://modelcontextprotocol.io) endpoint (commonly `/mcp`), not a legacy SSE `/sse` path:
 
 ```yaml
 tool_sources:
   - name: my-mcp
-    transport: sse
-    url: http://mcp-service:8765/sse
+    transport: streamable_http
+    url: http://mcp-service:8765/mcp
     headers:
       Authorization: "Bearer ${ENV:COMPANY_MCP_TOKEN}"
       X-Api-Key: "${ENV:GATEWAY_KEY}"

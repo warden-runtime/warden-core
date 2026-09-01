@@ -26,6 +26,7 @@ from common.schemas.worker import WorkerBlueprint
 from common.step_facts import validate_facts_extractors
 from common.step_when import validate_when_cel_compile
 from common.worker_ref import WorkerIdentity, resolve_worker_from_compensation
+from pydantic import ValidationError
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
@@ -33,6 +34,20 @@ from tortoise.transactions import in_transaction
 from engine.utils import assert_reason_step_prompt
 
 logger = logging.getLogger(__name__)
+
+
+def _manifest_validation_error(exc: ValidationError) -> ValueError:
+    """Convert blueprint ValidationError into a deploy-time ValueError for API/CLI."""
+    messages: list[str] = []
+    for err in exc.errors():
+        loc = ".".join(str(segment) for segment in err.get("loc", ()))
+        msg = str(err.get("msg", "validation error"))
+        if msg.startswith("Value error, "):
+            msg = msg.removeprefix("Value error, ")
+        messages.append(f"{loc}: {msg}" if loc else msg)
+    if not messages:
+        return ValueError("Manifest validation failed.")
+    return ValueError(messages[0] if len(messages) == 1 else "; ".join(messages))
 
 
 def _saga_definition_body_payload(blueprint: SagaBlueprint) -> dict[str, Any]:
@@ -447,7 +462,8 @@ class RegistryService:
             Human-readable success message.
 
         Raises:
-            ValueError: Non-dict, unknown kind, or (for saga) missing required workers.
+            ValueError: Non-dict, unknown kind, schema validation failure, or (for saga)
+                missing required workers.
         """
         if not isinstance(data, dict):
             raise ValueError("Invalid manifest: root must be a mapping (e.g. kind, name, ...).")
@@ -460,7 +476,10 @@ class RegistryService:
         raise ValueError(f"Unknown manifest kind: {kind!r}.")
 
     async def _register_worker(self, data: dict[str, Any]) -> str:
-        blueprint = WorkerBlueprint(**data)
+        try:
+            blueprint = WorkerBlueprint(**data)
+        except ValidationError as exc:
+            raise _manifest_validation_error(exc) from exc
         worker_fields = _worker_definition_fields(blueprint)
 
         async with in_transaction() as conn:
@@ -484,7 +503,10 @@ class RegistryService:
         return f"Worker '{blueprint.name}' registered successfully"
 
     async def _register_saga(self, data: dict[str, Any]) -> str:
-        blueprint = SagaBlueprint(**data)
+        try:
+            blueprint = SagaBlueprint(**data)
+        except ValidationError as exc:
+            raise _manifest_validation_error(exc) from exc
 
         settings = get_settings()
         required_workers = await _collect_saga_registration_workers(blueprint, settings)

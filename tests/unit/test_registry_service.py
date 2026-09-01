@@ -1,4 +1,4 @@
-"""Unit tests for engine.registry.service.RegistryService."""
+"""Unit tests for engine.registry.service.RegistryService and manifest validation helpers."""
 
 import json
 
@@ -6,7 +6,7 @@ import pytest
 import yaml
 from common.config import get_settings
 from common.models import SagaDefinition, WorkerDefinition
-from engine.registry.service import RegistryService
+from engine.registry.service import RegistryService, _manifest_validation_error
 from pydantic import ValidationError
 
 WORKER_YAML = """
@@ -101,6 +101,38 @@ async def test_register_manifest_worker_versions_are_distinct_rows():
 
 
 @pytest.mark.asyncio
+async def test_register_manifest_worker_rejects_legacy_sse_transport():
+    """register_manifest rejects worker tool_sources with transport sse."""
+    service = RegistryService()
+    worker_yaml = """
+kind: worker
+name: legacy-sse-worker
+namespace: default
+version: "1.0.0"
+provider: mock
+model_name: demo
+system_prompt: You are helpful.
+tool_sources:
+  - name: hosted
+    transport: sse
+    url: http://mcp.example/sse
+"""
+    with pytest.raises(ValueError, match="transport 'sse' was removed") as exc_info:
+        await service.register_manifest(worker_yaml)
+    assert "tool_sources.0.transport" in str(exc_info.value)
+
+
+def test_manifest_validation_error_formats_pydantic_message():
+    from common.schemas.worker import MCPServerConfig
+
+    with pytest.raises(ValidationError) as exc_info:
+        MCPServerConfig(name="legacy", transport="sse", url="http://mcp.example/sse")
+
+    message = str(_manifest_validation_error(exc_info.value))
+    assert "transport: transport 'sse' was removed" in message
+
+
+@pytest.mark.asyncio
 async def test_register_manifest_saga_requires_workers():
     """register_manifest with kind saga raises when required workers not registered."""
     service = RegistryService()
@@ -180,7 +212,7 @@ steps:
         - name: tool_b
     timeout_seconds: 600
 """
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError):
         await service.register_manifest(bad_saga)
 
 
@@ -531,7 +563,7 @@ steps:
         - description: "missing uri field"
     timeout_seconds: 600
 """
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError):
         await service.register_manifest(saga_yaml)
 
 

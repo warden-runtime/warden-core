@@ -132,11 +132,11 @@ You normally do not run `make migrate` for a first boot — the one-shot **migra
 | `LOGGING_LEVEL` | engine, worker | Root JSON log level (`INFO` default; use `DEBUG` for ReAct transcript lines on `warden.react.transcript`) |
 | `WARDEN_LOCAL_LLM_BASE_URL` | worker | OpenAI-compatible local endpoint (optional; defaults to `http://localhost:11434/v1`) |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | worker | GitHub MCP demo only (stdio `env_inherit`) |
-| `${ENV:…}` in worker manifest | worker | SSE MCP auth — names like `COMPANY_MCP_TOKEN` referenced in `tool_sources[].headers`; set on worker, not in YAML |
+| `${ENV:…}` in worker manifest | worker | Streamable HTTP MCP auth — names like `COMPANY_MCP_TOKEN` referenced in `tool_sources[].headers`; set on worker, not in YAML |
 
 Under Compose, `.env` is injected when a container **starts**. After you add or change worker-scoped variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `WARDEN_LOCAL_LLM_BASE_URL`, MCP tokens), restart the worker — not the engine: `docker compose up -d worker`. A step that already failed with missing credentials stays failed until you retry it or start a new saga instance.
 
-For **hosted SSE MCP**, declare headers in the worker manifest with `${ENV:VAR}` placeholders and set `VAR` on the worker process. Example worker manifest:
+For **hosted Streamable HTTP MCP**, declare headers in the worker manifest with `${ENV:VAR}` placeholders and set `VAR` on the worker process. Example worker manifest:
 
 ```yaml
 headers:
@@ -148,7 +148,7 @@ headers:
 COMPANY_MCP_TOKEN=your-bearer-token
 ```
 
-See [MCP and tools → Hosted MCP authentication](../guides/manifests/mcp-and-tools.md#hosted-mcp-authentication-sse) and [Worker manifests](../guides/manifests/worker-manifests.md#mcp-tool-sources).
+See [MCP and tools → Hosted MCP authentication](../guides/manifests/mcp-and-tools.md#hosted-mcp-authentication-streamable-http) and [Worker manifests](../guides/manifests/worker-manifests.md#mcp-tool-sources).
 
 A minimal `.env` for Compose + host CLI:
 
