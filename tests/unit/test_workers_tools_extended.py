@@ -15,6 +15,7 @@ from workers.tools import (
     _env_names_from_docker_args,
     _format_mcp_exc,
     _list_resources_paginated,
+    _list_tools_paginated,
     _resolve_http_headers,
     _resolve_stdio_subprocess_env,
     _terminate_stdio_process_if_running,
@@ -733,6 +734,27 @@ async def test_list_resources_paginated_consumes_cursor_and_respects_max_pages()
     assert resources == ["file:///a", "file:///b"]
     assert session.list_resources.await_count == 2
     session.list_resources.assert_any_await(params=PaginatedRequestParams(cursor="n1"))
+
+
+@pytest.mark.asyncio
+async def test_list_tools_paginated_consumes_cursor_and_respects_max_pages():
+    from mcp.types import PaginatedRequestParams, Tool
+
+    page1 = MagicMock(
+        tools=[Tool(name="a", description="", input_schema={"type": "object"})], next_cursor="n1"
+    )
+    page2 = MagicMock(
+        tools=[Tool(name="b", description="", input_schema={"type": "object"})], next_cursor="n2"
+    )
+    page3 = MagicMock(
+        tools=[Tool(name="c", description="", input_schema={"type": "object"})], next_cursor=None
+    )
+    session = MagicMock()
+    session.list_tools = AsyncMock(side_effect=[page1, page2, page3])
+    tools = await _list_tools_paginated(session, timeout_s=1, max_pages=2, max_items=10)
+    assert [tool.name for tool in tools] == ["a", "b"]
+    assert session.list_tools.await_count == 2
+    session.list_tools.assert_any_await(params=PaginatedRequestParams(cursor="n1"))
 
 
 @pytest.mark.asyncio
