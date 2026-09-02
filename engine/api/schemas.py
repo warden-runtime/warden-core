@@ -12,6 +12,13 @@ class HealthResponse(BaseModel):
     status: str = Field(default="ok", description="Liveness: API process is up")
 
 
+class ReadinessResponse(BaseModel):
+    """Response for GET /v1/health/ready."""
+
+    status: Literal["ready"]
+    database: Literal["ok"]
+
+
 class StartSagaRequest(BaseModel):
     """Request body for POST /v1/sagas/start."""
 
@@ -21,7 +28,11 @@ class StartSagaRequest(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict, description="Initial saga context input")
     idempotency_key: str | None = Field(
         default=None,
-        description="Client idempotency key; when set, returns existing saga trace_id if one was already started with this key in this namespace.",
+        description=(
+            "Client idempotency key scoped to namespace, name, and version; when set, "
+            "returns the existing saga trace_id if one was already started with this key "
+            "for the same definition. Reusing the key for a different definition returns 409."
+        ),
     )
 
 
@@ -29,6 +40,34 @@ class StartSagaResponse(BaseModel):
     """Response body for POST /v1/sagas/start (202 Accepted)."""
 
     trace_id: str = Field(..., description="Created saga instance trace_id (32-char hex)")
+    created: bool = Field(
+        ...,
+        description="True when a new saga instance was created; false on idempotent replay.",
+    )
+
+
+class HumanDecisionResponse(BaseModel):
+    """Response for HITL decision enqueue (202 Accepted)."""
+
+    status: Literal["queued", "already_queued", "requeued"]
+    idempotency_key: str
+
+
+class HumanRetryResponse(BaseModel):
+    """Response for HITL step retry enqueue (202 Accepted)."""
+
+    status: Literal["queued", "already_queued", "requeued"]
+    idempotency_key: str
+    retry_token: str | None = None
+
+
+class RecoveryResponse(BaseModel):
+    """Response for operator recovery enqueue (202 Accepted)."""
+
+    status: Literal["ok", "scheduled", "claim_active", "requeued"]
+    idempotency_key: str | None = None
+    worker_command_key: str | None = None
+    recovery_token: str | None = None
 
 
 class ManifestDeployResponse(BaseModel):
@@ -132,6 +171,10 @@ class SagaDefinitionItem(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    body: dict[str, Any] | None = Field(
+        default=None,
+        description="Full manifest blueprint when include_body=true on by-id GET.",
+    )
 
 
 class SagaDefinitionListResponse(BaseModel):
@@ -140,6 +183,11 @@ class SagaDefinitionListResponse(BaseModel):
     items: list[SagaDefinitionItem]
     limit: int
     offset: int
+    has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")
+    total: int | None = Field(
+        default=None,
+        description="Total matching rows when include_total=true was requested.",
+    )
 
 
 class WorkerDefinitionItem(BaseModel):
@@ -152,6 +200,10 @@ class WorkerDefinitionItem(BaseModel):
     adapter: str
     created_at: datetime
     updated_at: datetime
+    body: dict[str, Any] | None = Field(
+        default=None,
+        description="Full manifest body when include_body=true on by-id GET.",
+    )
 
 
 class WorkerDefinitionListResponse(BaseModel):
@@ -160,6 +212,11 @@ class WorkerDefinitionListResponse(BaseModel):
     items: list[WorkerDefinitionItem]
     limit: int
     offset: int
+    has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")
+    total: int | None = Field(
+        default=None,
+        description="Total matching rows when include_total=true was requested.",
+    )
 
 
 class SagaInstanceItem(BaseModel):
@@ -180,6 +237,11 @@ class SagaInstanceListResponse(BaseModel):
     items: list[SagaInstanceItem]
     limit: int
     offset: int
+    has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")
+    total: int | None = Field(
+        default=None,
+        description="Total matching rows when include_total=true was requested.",
+    )
 
 
 class SagaStepInstanceItem(BaseModel):
@@ -221,6 +283,7 @@ class SagaStepInstanceListResponse(BaseModel):
     items: list[SagaStepInstanceItem]
     limit: int
     offset: int
+    has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")
 
 
 class SagaStepInstanceDetail(SagaStepInstanceItem):
@@ -263,3 +326,4 @@ class PendingReviewStepListResponse(BaseModel):
     items: list[PendingReviewStepItem]
     limit: int
     offset: int
+    has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")

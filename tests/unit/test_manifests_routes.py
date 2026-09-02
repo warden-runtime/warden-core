@@ -73,6 +73,25 @@ async def test_post_v1_manifests_200_json(mocker, app_manifests_no_db):
 
 
 @pytest.mark.asyncio
+async def test_post_v1_manifests_413_when_body_too_large(mocker, app_manifests_no_db, monkeypatch):
+    """POST /v1/manifests returns 413 when body exceeds MANIFEST_MAX_BODY_BYTES."""
+    monkeypatch.setenv("MANIFEST_MAX_BODY_BYTES", "64")
+    from common.config import get_settings
+
+    get_settings.cache_clear()
+
+    with TestClient(app_manifests_no_db) as c:
+        resp = c.post(
+            "/v1/manifests",
+            content="x" * 128,
+            headers={"Content-Type": "application/x-yaml"},
+        )
+    assert resp.status_code == 413
+    assert "exceeds limit" in resp.json()["detail"].lower()
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
 async def test_post_v1_manifests_400_on_validation_error(mocker, app_manifests_no_db):
     """POST /v1/manifests returns 400 when registry raises ValueError."""
     mock_registry = mocker.MagicMock()
@@ -91,3 +110,15 @@ async def test_post_v1_manifests_400_on_validation_error(mocker, app_manifests_n
     assert resp.status_code == 400
     assert "detail" in resp.json()
     assert "unknown" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_post_v1_manifests_415_unsupported_content_type(mocker, app_manifests_no_db):
+    """POST /v1/manifests returns 415 for unsupported Content-Type."""
+    with TestClient(app_manifests_no_db) as c:
+        resp = c.post(
+            "/v1/manifests",
+            content="kind: worker\nname: x\n",
+            headers={"Content-Type": "text/plain"},
+        )
+    assert resp.status_code == 415

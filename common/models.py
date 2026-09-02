@@ -265,7 +265,7 @@ class SagaInstance(models.Model):
         table = "saga_instances"
         unique_together = (
             ("namespace", "trace_id"),
-            ("namespace", "start_idempotency_key"),
+            ("namespace", "definition_id", "start_idempotency_key"),
         )
 
 

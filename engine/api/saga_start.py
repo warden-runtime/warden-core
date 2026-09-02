@@ -6,7 +6,7 @@ SAGA_STARTED so the engine consumer runs the state machine. All in one transacti
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 from common.config import get_settings
@@ -34,6 +34,11 @@ from common.topics import TOPIC_ORCHESTRATOR_EVENTS
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.transactions import in_transaction
 
+from engine.api.saga_errors import (
+    DefinitionNotFoundError,
+    InactiveSagaDefinitionError,
+    StartIdempotencyConflictError,
+)
 from engine.step_materialize import materialize_executable_steps
 
 logger = logging.getLogger(__name__)
@@ -41,6 +46,11 @@ logger = logging.getLogger(__name__)
 _DEFINITION_NOT_FOUND = (
     "SagaDefinition not found: namespace={namespace!r}, name={name!r}, version={version!r}"
 )
+
+
+class StartSagaResult(NamedTuple):
+    trace_id: str
+    created: bool
 
 
 async def resolve_executable_step_assets(
@@ -106,26 +116,46 @@ def _executable_shell_ids(frozen_steps: list[Any]) -> list[str]:
     return ids
 
 
-async def _existing_start_trace_id(
+async def _resolve_idempotent_start(
     *,
     namespace: str,
+    definition_id: str,
     idempotency_key: str | None,
     conn: BaseDBAsyncClient | None = None,
 ) -> str | None:
+    """Return an existing trace_id for this definition+key, or raise on cross-definition reuse."""
     if idempotency_key is None:
         return None
-    q = SagaInstance.filter(namespace=namespace, start_idempotency_key=idempotency_key)
-    if conn is not None:
-        q = q.using_db(conn)
-    existing = await q.first()
-    if existing is None:
-        return None
-    logger.info(
-        "Idempotent start: returning existing saga %s for key %s",
-        existing.trace_id,
-        idempotency_key,
+
+    q_same = SagaInstance.filter(
+        namespace=namespace,
+        definition_id=definition_id,
+        start_idempotency_key=idempotency_key,
     )
-    return existing.trace_id
+    if conn is not None:
+        q_same = q_same.using_db(conn)
+    existing_same = await q_same.first()
+    if existing_same is not None:
+        logger.info(
+            "Idempotent start: returning existing saga %s for key %s (definition %s)",
+            existing_same.trace_id,
+            idempotency_key,
+            definition_id,
+        )
+        return existing_same.trace_id
+
+    q_other = SagaInstance.filter(namespace=namespace, start_idempotency_key=idempotency_key)
+    if conn is not None:
+        q_other = q_other.using_db(conn)
+    existing_other = await q_other.first()
+    if existing_other is not None and existing_other.definition_id != definition_id:
+        raise StartIdempotencyConflictError(
+            namespace=namespace,
+            idempotency_key=idempotency_key,
+            existing_definition_id=existing_other.definition_id,
+        )
+
+    return None
 
 
 async def _require_saga_definition(
@@ -140,9 +170,9 @@ async def _require_saga_definition(
         q = q.using_db(conn)
     definition = await q.first()
     if definition is None:
-        raise ValueError(
-            _DEFINITION_NOT_FOUND.format(namespace=namespace, name=name, version=version)
-        )
+        raise DefinitionNotFoundError(namespace=namespace, name=name, version=version)
+    if not definition.is_active:
+        raise InactiveSagaDefinitionError(namespace=namespace, name=name, version=version)
     return definition
 
 
@@ -231,40 +261,48 @@ async def start_saga(
     version: str,
     input: dict[str, Any],
     idempotency_key: str | None = None,
-) -> str:
+) -> StartSagaResult:
     """Create saga and step instances from definition, emit SAGA_STARTED in one transaction.
 
-    When idempotency_key is provided, if a saga was already started with that key
-    in this namespace, returns its trace_id without creating a new saga.
+    When idempotency_key is provided, if a saga was already started with that key for
+    the same definition (namespace, name, version), returns its trace_id without
+    creating a new saga. Reusing a key for a different definition raises
+    StartIdempotencyConflictError.
 
     Delay-tail materialization: only the prefix through the first loop's iteration-1
     body (or the full linear blueprint when there is no loop) is created at start.
     """
-    existing_trace_id = await _existing_start_trace_id(
+    definition = await _require_saga_definition(namespace=namespace, name=name, version=version)
+    definition_id = str(definition.id)
+
+    existing_trace_id = await _resolve_idempotent_start(
         namespace=namespace,
+        definition_id=definition_id,
         idempotency_key=idempotency_key,
     )
     if existing_trace_id is not None:
-        return existing_trace_id
+        return StartSagaResult(existing_trace_id, created=False)
 
-    definition = await _require_saga_definition(namespace=namespace, name=name, version=version)
     settings = get_settings()
 
     async with in_transaction() as conn:
-        existing_trace_id = await _existing_start_trace_id(
-            namespace=namespace,
-            idempotency_key=idempotency_key,
-            conn=conn,
-        )
-        if existing_trace_id is not None:
-            return existing_trace_id
-
         definition = await _require_saga_definition(
             namespace=namespace,
             name=name,
             version=version,
             conn=conn,
         )
+        definition_id = str(definition.id)
+
+        existing_trace_id = await _resolve_idempotent_start(
+            namespace=namespace,
+            definition_id=definition_id,
+            idempotency_key=idempotency_key,
+            conn=conn,
+        )
+        if existing_trace_id is not None:
+            return StartSagaResult(existing_trace_id, created=False)
+
         trace_id = await _create_saga_and_steps(
             conn=conn,
             definition=definition,
@@ -278,4 +316,4 @@ async def start_saga(
         )
 
     logger.info("Started saga %s (namespace=%s, definition=%s)", trace_id, namespace, name)
-    return trace_id
+    return StartSagaResult(trace_id, created=True)

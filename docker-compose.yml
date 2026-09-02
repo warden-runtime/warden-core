@@ -105,6 +105,7 @@ services:
     environment:
       PATH: /app/.venv/bin:/usr/local/bin:/usr/bin:/bin
       PYTHONPATH: /app
+      ENGINE_API_HOST: "0.0.0.0"
       DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       LOGGING_LEVEL: INFO
       OTEL_SERVICE_NAME: engine

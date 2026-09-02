@@ -125,12 +125,14 @@ async def test_until_evaluation_failed_persists_loop_exhausted_status() -> None:
             body_steps=[_reason_step("attempt")],
         )
     )
-    trace_id = await start_saga(
-        namespace="default",
-        name=_SAGA_NAME,
-        version=_SAGA_VERSION,
-        input={},
-    )
+    trace_id = (
+        await start_saga(
+            namespace="default",
+            name=_SAGA_NAME,
+            version=_SAGA_VERSION,
+            input={},
+        )
+    ).trace_id
     attempt = await _start_and_kick(trace_id)
 
     with patch(
@@ -205,12 +207,14 @@ async def test_loop_exhausted_when_until_stays_false() -> None:
             body_steps=[_reason_step("attempt")],
         )
     )
-    trace_id = await start_saga(
-        namespace="default",
-        name=_SAGA_NAME,
-        version=_SAGA_VERSION,
-        input={},
-    )
+    trace_id = (
+        await start_saga(
+            namespace="default",
+            name=_SAGA_NAME,
+            version=_SAGA_VERSION,
+            input={},
+        )
+    ).trace_id
     attempt = await _start_and_kick(trace_id)
     await _complete_step(trace_id, attempt)
 

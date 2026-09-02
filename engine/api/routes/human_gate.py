@@ -1,16 +1,25 @@
 """HITL approval/rejection API routes."""
 
+from typing import Any
+
 from common.hitl_retry import HitlRetryLimitError
 from common.schemas.saga import WORKER_STEP_KINDS
 from fastapi import APIRouter, HTTPException, Query
 
 from engine.api import read_queries
+from engine.api.ids import (
+    validate_namespace,
+    validate_saga_step_path_params,
+    validation_http_exception,
+)
 from engine.api.pagination import validated_limit_offset
 from engine.api.schemas import (
     HumanApproveRequest,
     HumanDecisionRequest,
+    HumanDecisionResponse,
     HumanRejectRequest,
     HumanRetryRequest,
+    HumanRetryResponse,
     PendingReviewStepItem,
     PendingReviewStepListResponse,
 )
@@ -23,6 +32,12 @@ from engine.hitl_decisions import (
 )
 
 router = APIRouter(prefix="/sagas", tags=["hitl"])
+
+_MUTATION_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"description": "Step not found."},
+    409: {"description": "Conflict (e.g. step not awaiting human review)."},
+    422: {"description": "Invalid request."},
+}
 
 
 def _http_error_from_decision(exc: Exception) -> HTTPException:
@@ -45,11 +60,13 @@ async def pending_review_steps(
 ) -> PendingReviewStepListResponse:
     """List HITL-held steps awaiting human approval/rejection."""
     lim, off = validated_limit_offset(limit=limit, offset=offset)
+    if namespace is not None:
+        validate_namespace(namespace)
     step_kind = kind.strip().lower() if kind else None
     if step_kind is not None and step_kind not in WORKER_STEP_KINDS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"kind must be one of {', '.join(sorted(WORKER_STEP_KINDS))}.",
+        raise validation_http_exception(
+            f"kind must be one of {', '.join(sorted(WORKER_STEP_KINDS))}.",
+            loc=["query", "kind"],
         )
 
     rows = await read_queries.list_pending_review_steps(
@@ -83,7 +100,12 @@ async def pending_review_steps(
                 started_at=row.started_at,
             )
         )
-    return PendingReviewStepListResponse(items=items, limit=lim, offset=off)
+    return PendingReviewStepListResponse(
+        items=items,
+        limit=lim,
+        offset=off,
+        has_more=len(items) == lim,
+    )
 
 
 async def _enqueue_human_decision(**kwargs) -> dict[str, str]:
@@ -102,15 +124,23 @@ async def _enqueue_hitl_retry(**kwargs) -> dict[str, str]:
         raise _http_error_from_decision(e) from e
 
 
-@router.post("/{trace_id}/steps/{step_span_id}/decision", status_code=202)
+@router.post(
+    "/{trace_id}/steps/{step_span_id}/decision",
+    status_code=202,
+    response_model=HumanDecisionResponse,
+    responses=_MUTATION_RESPONSES,
+)
 async def decide_step(
     trace_id: str,
     step_span_id: str,
     body: HumanDecisionRequest,
     namespace: str = Query(default="default"),
-) -> dict[str, str]:
+) -> HumanDecisionResponse:
     """Submit one idempotent human decision for a HITL-held step."""
-    return await _enqueue_human_decision(
+    validate_saga_step_path_params(
+        trace_id=trace_id, step_span_id=step_span_id, namespace=namespace
+    )
+    data = await _enqueue_human_decision(
         trace_id=trace_id,
         step_span_id=step_span_id,
         namespace=namespace,
@@ -118,54 +148,82 @@ async def decide_step(
         output=body.output,
         error_details=body.error_details,
     )
+    return HumanDecisionResponse.model_validate(data)
 
 
-@router.post("/{trace_id}/steps/{step_span_id}/approve", status_code=202)
+@router.post(
+    "/{trace_id}/steps/{step_span_id}/approve",
+    status_code=202,
+    response_model=HumanDecisionResponse,
+    responses=_MUTATION_RESPONSES,
+)
 async def approve_step(
     trace_id: str,
     step_span_id: str,
     namespace: str = Query(default="default"),
     body: HumanApproveRequest | None = None,
-) -> dict[str, str]:
+) -> HumanDecisionResponse:
     """Approve a HITL-held step and enqueue HUMAN_APPROVED for the engine."""
-    return await _enqueue_human_decision(
+    validate_saga_step_path_params(
+        trace_id=trace_id, step_span_id=step_span_id, namespace=namespace
+    )
+    data = await _enqueue_human_decision(
         trace_id=trace_id,
         step_span_id=step_span_id,
         namespace=namespace,
         decision="APPROVE",
         output=body.output if body else None,
     )
+    return HumanDecisionResponse.model_validate(data)
 
 
-@router.post("/{trace_id}/steps/{step_span_id}/reject", status_code=202)
+@router.post(
+    "/{trace_id}/steps/{step_span_id}/reject",
+    status_code=202,
+    response_model=HumanDecisionResponse,
+    responses=_MUTATION_RESPONSES,
+)
 async def reject_step(
     trace_id: str,
     step_span_id: str,
     namespace: str = Query(default="default"),
     body: HumanRejectRequest | None = None,
-) -> dict[str, str]:
+) -> HumanDecisionResponse:
     """Reject a HITL-held step and enqueue HUMAN_REJECTED for the engine."""
-    return await _enqueue_human_decision(
+    validate_saga_step_path_params(
+        trace_id=trace_id, step_span_id=step_span_id, namespace=namespace
+    )
+    data = await _enqueue_human_decision(
         trace_id=trace_id,
         step_span_id=step_span_id,
         namespace=namespace,
         decision="REJECT",
         error_details=body.error_details if body else None,
     )
+    return HumanDecisionResponse.model_validate(data)
 
 
-@router.post("/{trace_id}/steps/{step_span_id}/retry", status_code=202)
+@router.post(
+    "/{trace_id}/steps/{step_span_id}/retry",
+    status_code=202,
+    response_model=HumanRetryResponse,
+    responses=_MUTATION_RESPONSES,
+)
 async def retry_step(
     trace_id: str,
     step_span_id: str,
     namespace: str = Query(default="default"),
     body: HumanRetryRequest | None = None,
-) -> dict[str, str]:
+) -> HumanRetryResponse:
     """Re-run a HITL-held step; preserves upstream saga context (state-preserved retry)."""
-    return await _enqueue_hitl_retry(
+    validate_saga_step_path_params(
+        trace_id=trace_id, step_span_id=step_span_id, namespace=namespace
+    )
+    data = await _enqueue_hitl_retry(
         trace_id=trace_id,
         step_span_id=step_span_id,
         namespace=namespace,
         retry_token=body.retry_token if body else None,
         retry_guidance=body.guidance if body else None,
     )
+    return HumanRetryResponse.model_validate(data)

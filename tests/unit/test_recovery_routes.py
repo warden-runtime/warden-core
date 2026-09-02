@@ -37,7 +37,7 @@ async def test_retry_step_route_returns_202(mocker, recovery_app: FastAPI):
             json={"force": True, "allow_destructive": True, "reason": "stuck"},
         )
     assert resp.status_code == 202
-    assert resp.json() == {"status": "requeued"}
+    assert resp.json()["status"] == "requeued"
 
 
 @pytest.mark.asyncio
@@ -82,7 +82,7 @@ async def test_retry_compensation_route_returns_202(mocker, recovery_app: FastAP
             json={"force": False, "reason": "stuck comp"},
         )
     assert resp.status_code == 202
-    assert resp.json() == {"status": "requeued"}
+    assert resp.json()["status"] == "requeued"
 
 
 @pytest.mark.asyncio

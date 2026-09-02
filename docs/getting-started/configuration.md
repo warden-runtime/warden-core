@@ -123,6 +123,9 @@ You normally do not run `make migrate` for a first boot — the one-shot **migra
 | `DB_URL` | **engine**, **worker**, migrations | **Both engine and worker** need Postgres for the outbox loop. Host: `127.0.0.1:5432`. Compose containers: built from `POSTGRES_*` → `postgres:5432` |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | `postgres` service (Compose) | Must match credentials in host `DB_URL` |
 | `ENGINE_URL` | **host CLI only** | `http://127.0.0.1:8000` from your machine (published port). Engine and worker containers do **not** use this variable—they coordinate through Postgres. If you run the CLI inside the Compose network, use `http://engine:8000` instead of loopback |
+| `ENGINE_API_HOST` | **engine** | Defaults to `127.0.0.1` when running the engine on the host. Docker Compose sets `0.0.0.0` so published port `8000` is reachable |
+| `ENGINE_OPENAPI_ENABLED` | **engine** | When `false`, disables `/docs` OpenAPI UI (default `true`) |
+| `MANIFEST_MAX_BODY_BYTES` | **engine** | Max `POST /v1/manifests` body size (default 2 MiB) |
 | `OPENAI_API_KEY` | worker | when `provider: openai` — not required for `provider: local` or `provider: mock`. Checked at **step runtime**, not at deploy |
 | `ANTHROPIC_API_KEY` | worker | when `provider: anthropic` — Claude via LangChain. Checked at **step runtime**, not at deploy |
 | `AZURE_OPENAI_API_KEY` | worker | when `provider: azure` — Azure OpenAI / Foundry API key. Checked at **step runtime**, not at deploy |

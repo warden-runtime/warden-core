@@ -32,8 +32,8 @@ from common.utils import status_value
 
 from engine.api.saga_start import (
     _create_saga_and_steps,
-    _existing_start_trace_id,
     _require_saga_definition,
+    _resolve_idempotent_start,
 )
 from engine.utils import resolve_parameters_spec
 
@@ -112,8 +112,15 @@ async def execute_spawn_sagas(
     children_out: list[dict[str, str]] = []
     for item_id, item in validated:
         idem_key = child_start_idempotency_key(saga.trace_id, step.step_id, item_id)
-        existing = await _existing_start_trace_id(
+        definition = await _require_saga_definition(
             namespace=saga.namespace,
+            name=spec.saga_name,
+            version=spec.saga_version,
+            conn=db_conn,
+        )
+        existing = await _resolve_idempotent_start(
+            namespace=saga.namespace,
+            definition_id=str(definition.id),
             idempotency_key=idem_key,
             conn=db_conn,
         )
@@ -130,12 +137,6 @@ async def execute_spawn_sagas(
                 for key, entry in spec.input.items()
             }
             child_input = resolve_parameters_spec(input_map, resolve_ctx)
-            definition = await _require_saga_definition(
-                namespace=saga.namespace,
-                name=spec.saga_name,
-                version=spec.saga_version,
-                conn=db_conn,
-            )
             child_trace_id = await _create_saga_and_steps(
                 conn=db_conn,
                 definition=definition,

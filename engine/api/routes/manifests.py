@@ -5,6 +5,7 @@ import json
 import logging
 
 import yaml
+from common.config import get_settings
 from fastapi import APIRouter, HTTPException, Request
 
 from engine.api.schemas import ManifestDeployResponse
@@ -13,6 +14,15 @@ from engine.registry.service import RegistryService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/manifests", tags=["manifests"])
+
+_ALLOWED_MANIFEST_MEDIA = frozenset(
+    {
+        "application/json",
+        "application/x-yaml",
+        "text/yaml",
+        "text/x-yaml",
+    }
+)
 
 
 @router.post(
@@ -26,6 +36,12 @@ router = APIRouter(prefix="/manifests", tags=["manifests"])
                 "missing worker references, schema errors)."
             ),
         },
+        413: {
+            "description": "Manifest body exceeds MANIFEST_MAX_BODY_BYTES.",
+        },
+        415: {
+            "description": "Unsupported Content-Type; use application/json or YAML media types.",
+        },
     },
 )
 async def post_manifests(request: Request) -> ManifestDeployResponse:
@@ -38,16 +54,30 @@ async def post_manifests(request: Request) -> ManifestDeployResponse:
         ManifestDeployResponse with a success message.
 
     Raises:
-        HTTPException: 400 on invalid body, unknown kind, or (saga) missing workers.
+        HTTPException: 413 when body is too large; 400 on invalid body, unknown kind, or (saga) missing workers.
     """
     body_bytes = await request.body()
+    max_bytes = get_settings().manifest_max_body_bytes
+    if len(body_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Manifest body exceeds limit of {max_bytes} bytes.",
+        )
+
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type not in _ALLOWED_MANIFEST_MEDIA:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "Unsupported Content-Type; use application/json, application/x-yaml, "
+                "text/yaml, or text/x-yaml."
+            ),
+        )
 
     try:
         if content_type == "application/json":
             data = json.loads(body_bytes.decode("utf-8"))
         else:
-            # YAML: application/x-yaml, text/yaml, or default
             raw = body_bytes.decode("utf-8")
             try:
                 data = await asyncio.to_thread(yaml.safe_load, raw)

@@ -74,6 +74,7 @@ Optional query parameters:
 | `is_active` | `true` / `false` |
 | `limit` | Page size (default 50, max 100) |
 | `offset` | Pagination offset |
+| `include_total` | When `true`, include `total` matching row count |
 
 The list endpoint does not filter by `version` — each item includes a `version` field, so pick the row you need client-side (often combine `namespace` + `name`) before calling `POST /v1/sagas/start` with an explicit `version`.
 
@@ -93,9 +94,12 @@ Response shape:
     }
   ],
   "limit": 50,
-  "offset": 0
+  "offset": 0,
+  "has_more": false
 }
 ```
+
+When `has_more` is `true`, more rows may exist — advance `offset` by `limit` for the next page.
 
 ## List worker definitions
 
@@ -109,9 +113,19 @@ Same pagination and `namespace` / `name` filters as sagas (no `is_active` on wor
 
 ```bash
 curl -sS "$ENGINE_URL/v1/definitions/sagas/<definition-uuid>"
+curl -sS "$ENGINE_URL/v1/definitions/sagas/<definition-uuid>?include_body=true"
 ```
 
-Returns **`404`** when the id is unknown.
+Add `include_body=true` to include the manifest `body` in the response.
+
+Returns **`404`** when the id is unknown; invalid UUID syntax → **422**.
+
+## Get one worker definition by id
+
+```bash
+curl -sS "$ENGINE_URL/v1/definitions/workers/<definition-uuid>"
+curl -sS "$ENGINE_URL/v1/definitions/workers/<definition-uuid>?include_body=true"
+```
 
 ## What's next
 

@@ -95,12 +95,14 @@ async def test_loop_smoke_until_true_exits_and_runs_tail() -> None:
         body=_LOOP_SMOKE_BODY,
     )
 
-    trace_id = await start_saga(
-        namespace="default",
-        name=_SAGA_NAME,
-        version=_SAGA_VERSION,
-        input={},
-    )
+    trace_id = (
+        await start_saga(
+            namespace="default",
+            name=_SAGA_NAME,
+            version=_SAGA_VERSION,
+            input={},
+        )
+    ).trace_id
     steps = await SagaStepInstance.filter(
         saga_trace_id=trace_id,
         compensates_span_id__isnull=True,

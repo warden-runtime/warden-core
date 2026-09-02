@@ -39,7 +39,7 @@ async def test_get_definitions_saga_by_id_404_invalid_uuid(read_app):
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/v1/definitions/sagas/not-a-uuid")
-    assert resp.status_code == 404
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -62,6 +62,34 @@ async def test_get_definitions_saga_by_id_200(read_app):
 
 
 @pytest.mark.asyncio
+async def test_get_definitions_worker_by_id_200_with_body(read_app):
+    from common.models import WorkerDefinition
+
+    row = await WorkerDefinition.create(
+        namespace="default",
+        name="by-id-worker",
+        version="1.0.0",
+        model_provider="mock",
+        model_name="demo",
+        system_prompt="You are a test worker.",
+        tool_sources=[{"name": "mock", "transport": "stdio", "command": "python"}],
+        adapter="langchain",
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            f"/v1/definitions/workers/{row.id}",
+            params={"include_body": "true"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "by-id-worker"
+    assert data["body"]["kind"] == "worker"
+    assert data["body"]["provider"] == "mock"
+    assert data["body"]["system_prompt"] == "You are a test worker."
+
+
+@pytest.mark.asyncio
 async def test_get_definitions_sagas_empty(read_app):
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -71,6 +99,7 @@ async def test_get_definitions_sagas_empty(read_app):
     assert data["items"] == []
     assert data["limit"] == 50
     assert data["offset"] == 0
+    assert data["has_more"] is False
 
 
 @pytest.mark.asyncio
@@ -79,7 +108,11 @@ async def test_get_definitions_sagas_limit_invalid(read_app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/v1/definitions/sagas", params={"limit": 0})
     assert resp.status_code == 422
-    assert "limit" in resp.json()["detail"].lower()
+    detail = resp.json()["detail"]
+    if isinstance(detail, list):
+        assert any("limit" in str(item.get("msg", "")).lower() for item in detail)
+    else:
+        assert "limit" in detail.lower()
 
 
 @pytest.mark.asyncio
@@ -101,8 +134,60 @@ async def test_get_sagas_invalid_status(read_app):
         resp = await client.get("/v1/sagas", params=[("status", "NOT_A_STATUS")])
     assert resp.status_code == 422
     detail = resp.json()["detail"]
-    assert isinstance(detail, str)
-    assert "Invalid" in detail or "invalid" in detail
+    if isinstance(detail, list):
+        assert any("invalid" in str(item.get("msg", "")).lower() for item in detail)
+    else:
+        assert "Invalid" in detail or "invalid" in detail
+
+
+@pytest.mark.asyncio
+async def test_get_sagas_failed_and_status_conflict(read_app):
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v1/sagas",
+            params=[("failed", "true"), ("status", "COMPLETED")],
+        )
+    assert resp.status_code == 400
+    assert "failed" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_get_sagas_in_flight_and_failed_conflict(read_app):
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v1/sagas",
+            params=[("in_flight", "true"), ("failed", "true")],
+        )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"].lower()
+    assert "in_flight" in detail or "failed" in detail
+
+
+@pytest.mark.asyncio
+async def test_get_sagas_failed_filters(read_app):
+    await SagaInstance.create(
+        trace_id="a" * 32,
+        namespace="default",
+        definition_id="def-1",
+        status=SagaStatus.COMPLETED,
+        context={},
+    )
+    await SagaInstance.create(
+        trace_id="b" * 32,
+        namespace="default",
+        definition_id="def-2",
+        status=SagaStatus.FAILED,
+        context={},
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/v1/sagas", params={"failed": "true"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    trace_ids = {it["trace_id"] for it in items}
+    assert trace_ids == {"b" * 32}
 
 
 @pytest.mark.asyncio

@@ -35,8 +35,21 @@ class Settings(BaseSettings):
         validation_alias="WORKER_COMMANDS_TOPIC",
         description="Topic for worker commands.",
     )
-    engine_api_host: str = Field(default="0.0.0.0", description="Engine API bind host.")
+    engine_api_host: str = Field(
+        default="127.0.0.1",
+        description="Engine API bind host. Use 0.0.0.0 in Docker Compose for published ports.",
+    )
     engine_api_port: int = Field(default=8000, description="Engine API bind port.")
+    engine_openapi_enabled: bool = Field(
+        default=True,
+        validation_alias="ENGINE_OPENAPI_ENABLED",
+        description="When false, disable /docs OpenAPI UI on the engine API.",
+    )
+    manifest_max_body_bytes: int = Field(
+        default=2_097_152,
+        validation_alias="MANIFEST_MAX_BODY_BYTES",
+        description="Maximum POST /v1/manifests request body size in bytes (default 2 MiB).",
+    )
     engine_url: str | None = Field(
         default=None,
         description="Engine API base URL (e.g. http://localhost:8000). Required for the warden CLI.",
