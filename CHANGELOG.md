@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Worker `tool_sources` no longer support legacy `transport: sse`. Use `streamable_http` (the default when `transport` is omitted) with a Streamable HTTP endpoint URL (commonly `/mcp`). Deploy rejects `sse` with a clear validation error.
 - Compensation YAML must declare **exactly one** tool in `tools.allow` (same as commit). Reason and commit steps share that single-tool undo path. Worker-manifest / DB `compensation_prompt` is removed (migration `008_drop_compensation_prompt.sql`).
 - Removed `WARDEN_REACT_TOOL_MESSAGE_LIMIT` and all client-side MCP tool-output clipping. Tool payloads flow unchanged to the LLM transcript and `tool_results` / facts extraction. Tier-1 memory redaction (coupled to the clip limit) is removed; golden-ratio compression still digest/drops **historical** turns.
+- Worker MCP client upgraded to **MCP Python SDK 2.x** (`mcp>=2.0,<3` on the worker extra). Rebuild worker images / re-run `uv sync --extra worker` after pulling. Client code uses v2 pagination (`PaginatedRequestParams`), streamable HTTP 2-tuple transports, and SDK snake_case protocol fields; the stdio mock fixture uses the v2 lowlevel `Server` handler API.
 
 ### Added
 
@@ -19,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Reason-step `tools.bind` (⊆ `with`): pin saga-resolved values onto ReAct MCP tool args (saga wins, ∩ tool `inputSchema`), strip those keys from the LLM-facing schema, and persist `tools_bind` on step rows (migration `009_tools_bind.sql`). Rejected on commit, compensation, and `agent-adapter: simple`.
 - `provider: azure` — Azure OpenAI / Microsoft Foundry via LangChain `ChatOpenAI` and the OpenAI-compatible `/openai/v1/` path (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`; worker `model_name` is the deployment name). Defaults to Chat Completions for prompt-cache friendliness; Responses API is opt-in via `WARDEN_AZURE_USE_RESPONSES_API`.
 - Submit-mode ReAct soft-feeds **recoverable** tool mismatches (e.g. `search_replace` `old_text not found` / non-unique match, missing path, patch-apply text failures) into the transcript with a one-line recovery hint instead of failing the step with `TOOL_OUTPUT_ERROR`. `apply_patch_sandbox` JSON rejects get the same hint. Transport/`MCP error` / invalid-argument failures remain hard. Override via `ToolLifecycleHooks.tool_output_is_recoverable`.
-- Submit-mode ReAct softens **recoverable tool invoke exceptions** (e.g. `IsADirectoryError`, Pydantic arg validation) by normalizing them to `Error:` tool payloads and reusing the same recoverability classifier; MCP `CallToolResult.isError` is honored at the tool wrapper. Infrastructure failures (`McpError`, connection/timeout, mixed `ExceptionGroup` with transport leaves) still raise `TOOL_INVOKE_FAILED`.
+- Submit-mode ReAct softens **recoverable tool invoke exceptions** (e.g. `IsADirectoryError`, Pydantic arg validation) by normalizing them to `Error:` tool payloads and reusing the same recoverability classifier; MCP `CallToolResult.isError` is honored at the tool wrapper. Infrastructure failures (`MCPError`, connection/timeout, mixed `ExceptionGroup` with transport leaves) still raise `TOOL_INVOKE_FAILED`.
 
 ### Fixed
 

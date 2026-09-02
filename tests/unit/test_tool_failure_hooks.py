@@ -139,7 +139,13 @@ def test_directory_errors_are_recoverable_with_hints():
 
 
 def test_tool_invoke_exception_is_infrastructure():
+    from mcp.shared.exceptions import MCPError
+
     assert tool_invoke_exception_is_infrastructure(ConnectionError("refused")) is True
+    assert (
+        tool_invoke_exception_is_infrastructure(MCPError(code=-1, message="Connection closed"))
+        is True
+    )
     assert tool_invoke_exception_is_infrastructure(IsADirectoryError("/testbed/docs")) is False
     assert tool_invoke_exception_is_infrastructure(FileNotFoundError("/missing")) is False
 

@@ -11,10 +11,16 @@ import asyncio
 import logging
 import sys
 
-import mcp.types as types
-from mcp.server import NotificationOptions, Server
-from mcp.server.models import InitializationOptions
+from mcp.server import InitializationOptions, NotificationOptions, Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,37 +29,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-server = Server("mock-mcp")
 
-
-@server.list_tools()
-async def list_tools() -> list[types.Tool]:
-    return [
-        types.Tool(
-            name="echo",
-            description="Echo a message back to the caller.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string"},
+async def handle_list_tools(
+    ctx: ServerRequestContext, params: PaginatedRequestParams | None
+) -> ListToolsResult:
+    return ListToolsResult(
+        tools=[
+            Tool(
+                name="echo",
+                description="Echo a message back to the caller.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "message": {"type": "string"},
+                    },
+                    "required": ["message"],
                 },
-                "required": ["message"],
-            },
-        )
-    ]
+            )
+        ]
+    )
 
 
-@server.call_tool()
-async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
-    if name != "echo":
-        raise ValueError(f"Unknown tool: {name!r}")
-    args = arguments or {}
+async def handle_call_tool(
+    ctx: ServerRequestContext, params: CallToolRequestParams
+) -> CallToolResult:
+    if params.name != "echo":
+        raise ValueError(f"Unknown tool: {params.name!r}")
+    args = params.arguments or {}
     message = args.get("message")
     if not isinstance(message, str) or not message.strip():
         raise ValueError("echo requires a non-empty string 'message'")
     text = f"echo: {message}"
     logger.info("echo tool called message=%r", message)
-    return [types.TextContent(type="text", text=text)]
+    return CallToolResult(content=[TextContent(type="text", text=text)], is_error=False)
+
+
+server = Server("mock-mcp", on_list_tools=handle_list_tools, on_call_tool=handle_call_tool)
 
 
 async def main() -> None:

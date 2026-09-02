@@ -104,9 +104,9 @@ def _leaf_exception_is_infrastructure(exc: BaseException) -> bool:
     if isinstance(exc, ExecutionStepError):
         return True
     try:
-        from mcp.shared.exceptions import McpError
+        from mcp.shared.exceptions import MCPError
 
-        if isinstance(exc, McpError):
+        if isinstance(exc, MCPError):
             return True
     except ImportError:
         pass

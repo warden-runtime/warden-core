@@ -240,7 +240,7 @@ def normalize_resource_content(contents: list[Any]) -> tuple[str, dict[str, Any]
 def _normalize_single_resource_content(content: Any) -> tuple[str, str | None, int]:
     """Normalize one MCP resource content entry to (text, mime, blob_bytes)."""
     content_type = getattr(content, "type", None)
-    mime_type = getattr(content, "mimeType", None)
+    mime_type = getattr(content, "mime_type", None)
     text_value = getattr(content, "text", None)
     blob_value = getattr(content, "blob", None)
 
