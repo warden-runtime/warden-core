@@ -7,7 +7,7 @@ import sys
 from asyncio import wait_for
 from collections.abc import Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 import anyio
 import anyio.lowlevel
@@ -39,9 +39,9 @@ from mcp.client.stdio import (
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.message import SessionMessage
-from mcp.types import JSONRPCMessage
+from mcp.types import JSONRPCMessage, PaginatedRequestParams
 from mcp.types import Tool as McpTool
-from pydantic import AnyUrl, BaseModel, Field, create_model
+from pydantic import BaseModel, Field, TypeAdapter, create_model
 from tortoise.backends.base.client import BaseDBAsyncClient
 from workers.resource_runtime import (
     READ_RESOURCE_TOOL_NAME,
@@ -59,6 +59,7 @@ from workers.tool_names import (
 )
 
 logger = logging.getLogger(__name__)
+_JSONRPC_MESSAGE_ADAPTER = TypeAdapter(JSONRPCMessage)
 _MCP_CALL_TIMEOUT_S = float(os.getenv("WARDEN_MCP_CALL_TIMEOUT_S", "10"))
 _RESOURCE_LIST_MAX_PAGES = int(os.getenv("WARDEN_MCP_RESOURCE_LIST_MAX_PAGES", "5"))
 _RESOURCE_LIST_MAX_ITEMS = int(os.getenv("WARDEN_MCP_RESOURCE_LIST_MAX_ITEMS", "1000"))
@@ -337,7 +338,10 @@ async def _list_resources_paginated(
     cursor: str | None = None
     for _ in range(max_pages):
         if cursor:
-            response = await wait_for(session.list_resources(cursor=cursor), timeout=timeout_s)
+            response = await wait_for(
+                session.list_resources(params=PaginatedRequestParams(cursor=cursor)),
+                timeout=timeout_s,
+            )
         else:
             response = await wait_for(session.list_resources(), timeout=timeout_s)
         resources = getattr(response, "resources", [])
@@ -345,8 +349,8 @@ async def _list_resources_paginated(
         if len(items) >= max_items:
             return items[:max_items]
         cursor = (
-            getattr(response, "nextCursor", None)
-            or getattr(response, "next_cursor", None)
+            getattr(response, "next_cursor", None)
+            or getattr(response, "nextCursor", None)
             or getattr(response, "cursor", None)
         )
         if not cursor:
@@ -375,7 +379,7 @@ async def _read_resource_from_sessions(
     for source_name, session in source_sessions:
         try:
             result = await wait_for(
-                session.read_resource(AnyUrl(uri)),
+                session.read_resource(uri),
                 timeout=_MCP_CALL_TIMEOUT_S,
             )
             text, meta = normalize_resource_content(list(result.contents))
@@ -1007,7 +1011,7 @@ async def _stdio_stdout_reader(
                 buffer = lines.pop()
                 for line in lines:
                     try:
-                        message = JSONRPCMessage.model_validate_json(line)
+                        message = _JSONRPC_MESSAGE_ADAPTER.validate_json(line)
                     except Exception as exc:
                         logger.exception("Failed to parse JSONRPC message from MCP stdio server")
                         await read_stream_writer.send(exc)
@@ -1056,12 +1060,15 @@ async def _tracked_stdio_client(params: StdioServerParameters):
     read_stream_writer, read_stream = anyio.create_memory_object_stream(0)
     write_stream, write_stream_reader = anyio.create_memory_object_stream(0)
     command = _get_executable_command(params.command)
-    process = await _create_platform_compatible_process(
-        command=command,
-        args=params.args,
-        env=_stdio_server_env(params),
-        errlog=sys.stderr,
-        cwd=params.cwd,
+    process = cast(
+        "Any",
+        await _create_platform_compatible_process(
+            command=command,
+            args=params.args,
+            env=_stdio_server_env(params),
+            errlog=sys.stderr,
+            cwd=params.cwd,
+        ),
     )
 
     async def stdout_reader() -> None:
@@ -1138,7 +1145,7 @@ async def _connect_to_source(
         http_client = create_mcp_http_client(headers=headers)
         await stack.enter_async_context(http_client)
 
-        read_stream, write_stream, _get_session_id = await stack.enter_async_context(
+        read_stream, write_stream = await stack.enter_async_context(
             streamable_http_client(url, http_client=http_client)
         )
 
@@ -1171,7 +1178,7 @@ def _convert_mcp_to_langchain(
     (and ``required``) while keeping the full MCP ``inputSchema`` in metadata for
     saga-wins bind overlay at invoke time.
     """
-    input_schema = mcp_tool.inputSchema or {}
+    input_schema = mcp_tool.input_schema or {}
     properties = input_schema.get("properties", {})
     required = input_schema.get("required", [])
     wire_name = llm_name if llm_name is not None else sanitize_mcp_tool_name(mcp_tool.name)
@@ -1204,9 +1211,9 @@ def _convert_mcp_to_langchain(
                 if content.type == "text":
                     output_text.append(content.text)
                 elif content.type == "image":
-                    output_text.append(f"[Image: {content.mimeType}]")
+                    output_text.append(f"[Image: {content.mime_type}]")
             text = "\n".join(output_text)
-            is_error = getattr(result, "isError", False)
+            is_error = result.is_error
             if isinstance(is_error, bool) and is_error:
                 if text.strip():
                     return f"Error: {text}"

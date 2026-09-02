@@ -48,12 +48,12 @@ def test_resource_allowlist_rejects_ambiguous_templates():
 def test_normalize_resource_content_flattens_text_and_blob():
     class _Text:
         type = "text"
-        mimeType = "text/plain"
+        mime_type = "text/plain"
         text = "hello"
 
     class _Blob:
         type = "blob"
-        mimeType = "application/octet-stream"
+        mime_type = "application/octet-stream"
         blob = "abc"
 
     text, meta = normalize_resource_content([_Text(), _Blob()])

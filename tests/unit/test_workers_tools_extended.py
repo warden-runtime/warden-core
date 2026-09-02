@@ -99,9 +99,7 @@ async def test_connect_to_source_streamable_http_passes_headers_to_http_client(m
     )
 
     mock_streams_cm = MagicMock()
-    mock_streams_cm.__aenter__ = AsyncMock(
-        return_value=(mock_read, mock_write, lambda: "session-id")
-    )
+    mock_streams_cm.__aenter__ = AsyncMock(return_value=(mock_read, mock_write))
     mock_streams_cm.__aexit__ = AsyncMock(return_value=None)
     mock_streamable_client = mocker.patch(
         "workers.tools.streamable_http_client",
@@ -375,7 +373,7 @@ async def test_convert_mcp_to_langchain_is_error_prefixes_error():
     mock_session.call_tool = AsyncMock(
         return_value=MagicMock(
             content=[TextContent(type="text", text="path is a directory")],
-            isError=True,
+            is_error=True,
         )
     )
 
@@ -724,14 +722,17 @@ async def test_build_tools_for_worker_read_resource_blocks_variable_mismatch_bef
 
 @pytest.mark.asyncio
 async def test_list_resources_paginated_consumes_cursor_and_respects_max_pages():
-    page1 = MagicMock(resources=[MagicMock(uri="file:///a")], nextCursor="n1")
-    page2 = MagicMock(resources=[MagicMock(uri="file:///b")], nextCursor="n2")
-    page3 = MagicMock(resources=[MagicMock(uri="file:///c")], nextCursor=None)
+    from mcp.types import PaginatedRequestParams
+
+    page1 = MagicMock(resources=[MagicMock(uri="file:///a")], next_cursor="n1")
+    page2 = MagicMock(resources=[MagicMock(uri="file:///b")], next_cursor="n2")
+    page3 = MagicMock(resources=[MagicMock(uri="file:///c")], next_cursor=None)
     session = MagicMock()
     session.list_resources = AsyncMock(side_effect=[page1, page2, page3])
     resources = await _list_resources_paginated(session, timeout_s=1, max_pages=2, max_items=10)
     assert resources == ["file:///a", "file:///b"]
     assert session.list_resources.await_count == 2
+    session.list_resources.assert_any_await(params=PaginatedRequestParams(cursor="n1"))
 
 
 @pytest.mark.asyncio

@@ -41,7 +41,7 @@ worker = [
     "langchain-openai>=1.2",
     "langchain-core>=1.4",
     "jsonpath-ng>=1.8",
-    "mcp>=1.26",
+    "mcp>=2.0,<3",
     "opentelemetry-instrumentation-httpx>=0.60b1",
     "langchain-anthropic>=1.4.0",
 ]
