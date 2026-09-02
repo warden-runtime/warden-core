@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ModelProvider(StrEnum):
@@ -14,13 +14,30 @@ class ModelProvider(StrEnum):
 
 class MCPServerConfig(BaseModel):
     name: str
-    transport: str = "sse"  # "sse" or "stdio"
-    url: str | None = None  # sse execution
-    command: str | None = None  # local binary execution (stdio)
+    transport: Literal["streamable_http", "stdio"] = "streamable_http"
+    url: str | None = None  # streamable_http: MCP HTTP endpoint
+    command: str | None = None  # stdio: local binary execution
     args: list[str] = Field(default_factory=list)  # stdio: arguments to command
     cwd: str | None = None  # stdio: working directory for the process
     env: dict[str, str] | None = None  # stdio: environment variables for the process
-    headers: dict[str, str] | None = None  # sse: HTTP headers (e.g. Authorization) for sse_client
+    headers: dict[str, str] | None = None  # streamable_http: HTTP headers (e.g. Authorization)
+
+    @field_validator("transport", mode="before")
+    @classmethod
+    def reject_legacy_sse(cls, value: object) -> object:
+        if isinstance(value, str) and value.lower() == "sse":
+            raise ValueError("transport 'sse' was removed; use 'streamable_http'")
+        return value
+
+    @model_validator(mode="after")
+    def validate_transport_fields(self) -> Self:
+        if self.transport == "streamable_http":
+            if not (self.url and str(self.url).strip()):
+                raise ValueError("streamable_http transport requires a non-empty url")
+        elif self.transport == "stdio":
+            if not (self.command and str(self.command).strip()):
+                raise ValueError("stdio transport requires a non-empty command")
+        return self
 
 
 class WorkerBlueprint(BaseModel):

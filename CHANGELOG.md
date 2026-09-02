@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Breaking
 
+- Worker `tool_sources` no longer support legacy `transport: sse`. Use `streamable_http` (the default when `transport` is omitted) with a Streamable HTTP endpoint URL (commonly `/mcp`). Deploy rejects `sse` with a clear validation error.
 - Compensation YAML must declare **exactly one** tool in `tools.allow` (same as commit). Reason and commit steps share that single-tool undo path. Worker-manifest / DB `compensation_prompt` is removed (migration `008_drop_compensation_prompt.sql`).
 - Removed `WARDEN_REACT_TOOL_MESSAGE_LIMIT` and all client-side MCP tool-output clipping. Tool payloads flow unchanged to the LLM transcript and `tool_results` / facts extraction. Tier-1 memory redaction (coupled to the clip limit) is removed; golden-ratio compression still digest/drops **historical** turns.
 

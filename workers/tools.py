@@ -28,7 +28,6 @@ from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_body
 from common.utils import format_exception_chain, resolve_bindable_json_type
 from langchain_core.tools import StructuredTool
 from mcp import ClientSession
-from mcp.client.sse import sse_client
 from mcp.client.stdio import (
     PROCESS_TERMINATION_TIMEOUT,
     StdioServerParameters,
@@ -37,6 +36,8 @@ from mcp.client.stdio import (
     _terminate_process_tree,
     get_default_environment,
 )
+from mcp.client.streamable_http import streamable_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 from mcp.types import Tool as McpTool
@@ -61,7 +62,7 @@ logger = logging.getLogger(__name__)
 _MCP_CALL_TIMEOUT_S = float(os.getenv("WARDEN_MCP_CALL_TIMEOUT_S", "10"))
 _RESOURCE_LIST_MAX_PAGES = int(os.getenv("WARDEN_MCP_RESOURCE_LIST_MAX_PAGES", "5"))
 _RESOURCE_LIST_MAX_ITEMS = int(os.getenv("WARDEN_MCP_RESOURCE_LIST_MAX_ITEMS", "1000"))
-_SSE_HEADER_ENV_RE = re.compile(r"\$\{(?:ENV:)?([A-Z0-9_]+)\}", re.IGNORECASE)
+_HTTP_HEADER_ENV_RE = re.compile(r"\$\{(?:ENV:)?([A-Z0-9_]+)\}", re.IGNORECASE)
 WARDEN_TOOL_INPUT_SCHEMA_ATTR = "warden_input_schema"
 WARDEN_TOOL_MCP_NAME_ATTR = "warden_mcp_name"
 
@@ -162,7 +163,7 @@ def _resolve_stdio_subprocess_env(source_config: dict[str, Any]) -> dict[str, st
     return env
 
 
-def _interpolate_sse_header_value(raw: str) -> str:
+def _interpolate_http_header_value(raw: str) -> str:
     """Replace ``${ENV:VAR}`` / ``${VAR}`` placeholders from the worker process env."""
 
     def _replace(match: re.Match[str]) -> str:
@@ -170,17 +171,17 @@ def _interpolate_sse_header_value(raw: str) -> str:
         value = os.environ.get(env_name)
         if value is None:
             logger.warning(
-                "SSE header references unset environment variable %s; substituting empty string",
+                "HTTP header references unset environment variable %s; substituting empty string",
                 env_name,
             )
             return ""
         return value
 
-    return _SSE_HEADER_ENV_RE.sub(_replace, raw)
+    return _HTTP_HEADER_ENV_RE.sub(_replace, raw)
 
 
-def _resolve_sse_headers(source_config: dict[str, Any]) -> dict[str, str] | None:
-    """Build SSE client headers from manifest map, resolving ``${ENV:VAR}`` placeholders."""
+def _resolve_http_headers(source_config: dict[str, Any]) -> dict[str, str] | None:
+    """Build HTTP client headers from manifest map, resolving ``${ENV:VAR}`` placeholders."""
     explicit = source_config.get("headers")
     if not isinstance(explicit, dict) or not explicit:
         return None
@@ -189,8 +190,8 @@ def _resolve_sse_headers(source_config: dict[str, Any]) -> dict[str, str] | None
         if not isinstance(key, str) or value is None:
             continue
         text = str(value)
-        if _SSE_HEADER_ENV_RE.search(text):
-            text = _interpolate_sse_header_value(text)
+        if _HTTP_HEADER_ENV_RE.search(text):
+            text = _interpolate_http_header_value(text)
         headers[key] = text
     return headers or None
 
@@ -1124,18 +1125,22 @@ async def _connect_stdio_source(
 async def _connect_to_source(
     source_config: dict[str, Any], stack: AsyncExitStack
 ) -> ClientSession | None:
-    """Connect to MCP server via SSE or Stdio; register with stack for cleanup."""
-    transport_type = source_config.get("transport", "sse").lower()
+    """Connect to MCP server via Streamable HTTP or Stdio; register with stack for cleanup."""
+    transport_type = source_config.get("transport", "streamable_http").lower()
 
-    if transport_type == "sse":
+    if transport_type == "streamable_http":
         url = source_config.get("url")
         if not url:
-            logger.error("SSE source missing URL: %s", source_config)
+            logger.error("streamable_http source missing URL: %s", source_config)
             return None
 
-        headers = _resolve_sse_headers(source_config)
-        streams = await stack.enter_async_context(sse_client(url, headers=headers))
-        read_stream, write_stream = streams
+        headers = _resolve_http_headers(source_config)
+        http_client = create_mcp_http_client(headers=headers)
+        await stack.enter_async_context(http_client)
+
+        read_stream, write_stream, _get_session_id = await stack.enter_async_context(
+            streamable_http_client(url, http_client=http_client)
+        )
 
         session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
         await session.initialize()

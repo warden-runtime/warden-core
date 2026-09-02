@@ -15,7 +15,7 @@ from workers.tools import (
     _env_names_from_docker_args,
     _format_mcp_exc,
     _list_resources_paginated,
-    _resolve_sse_headers,
+    _resolve_http_headers,
     _resolve_stdio_subprocess_env,
     _terminate_stdio_process_if_running,
     build_tools_for_worker,
@@ -39,61 +39,74 @@ async def test_build_tools_for_worker_empty_sources_returns_empty_list():
     assert result == []
 
 
-def test_resolve_sse_headers_returns_none_when_missing_or_empty():
-    assert _resolve_sse_headers({}) is None
-    assert _resolve_sse_headers({"headers": {}}) is None
+def test_resolve_http_headers_returns_none_when_missing_or_empty():
+    assert _resolve_http_headers({}) is None
+    assert _resolve_http_headers({"headers": {}}) is None
 
 
-def test_resolve_sse_headers_coerces_string_values():
-    headers = _resolve_sse_headers({"headers": {"Authorization": "Bearer abc", "X-Custom": "1"}})
+def test_resolve_http_headers_coerces_string_values():
+    headers = _resolve_http_headers({"headers": {"Authorization": "Bearer abc", "X-Custom": "1"}})
     assert headers == {"Authorization": "Bearer abc", "X-Custom": "1"}
 
 
-def test_resolve_sse_headers_interpolates_env_prefix_placeholder(monkeypatch):
+def test_resolve_http_headers_interpolates_env_prefix_placeholder(monkeypatch):
     monkeypatch.setenv("COMPANY_MCP_TOKEN", "secret-token")
-    headers = _resolve_sse_headers(
+    headers = _resolve_http_headers(
         {"headers": {"Authorization": "Bearer ${ENV:COMPANY_MCP_TOKEN}"}}
     )
     assert headers == {"Authorization": "Bearer secret-token"}
 
 
-def test_resolve_sse_headers_interpolates_bare_env_placeholder(monkeypatch):
+def test_resolve_http_headers_interpolates_bare_env_placeholder(monkeypatch):
     monkeypatch.setenv("GATEWAY_KEY", "gw-key")
-    headers = _resolve_sse_headers({"headers": {"X-Api-Key": "${GATEWAY_KEY}"}})
+    headers = _resolve_http_headers({"headers": {"X-Api-Key": "${GATEWAY_KEY}"}})
     assert headers == {"X-Api-Key": "gw-key"}
 
 
-def test_resolve_sse_headers_missing_env_substitutes_empty(monkeypatch):
-    monkeypatch.delenv("MISSING_SSE_TOKEN", raising=False)
-    headers = _resolve_sse_headers(
-        {"headers": {"Authorization": "Bearer ${ENV:MISSING_SSE_TOKEN}"}}
+def test_resolve_http_headers_missing_env_substitutes_empty(monkeypatch):
+    monkeypatch.delenv("MISSING_HTTP_TOKEN", raising=False)
+    headers = _resolve_http_headers(
+        {"headers": {"Authorization": "Bearer ${ENV:MISSING_HTTP_TOKEN}"}}
     )
     assert headers == {"Authorization": "Bearer "}
 
 
 @pytest.mark.asyncio
-async def test_connect_to_source_sse_missing_url_returns_none():
-    """_connect_to_source returns None when transport is SSE and url is missing."""
+async def test_connect_to_source_streamable_http_missing_url_returns_none():
+    """_connect_to_source returns None when transport is streamable_http and url is missing."""
     async with AsyncExitStack() as stack:
         result = await _connect_to_source(
-            source_config={"transport": "sse", "name": "test"},
+            source_config={"transport": "streamable_http", "name": "test"},
             stack=stack,
         )
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_connect_to_source_sse_passes_headers_to_sse_client(mocker):
-    """_connect_to_source forwards manifest headers to mcp sse_client."""
+async def test_connect_to_source_streamable_http_passes_headers_to_http_client(mocker):
+    """_connect_to_source forwards manifest headers to create_mcp_http_client."""
     mock_read = MagicMock()
     mock_write = MagicMock()
     mock_session = MagicMock()
     mock_session.initialize = AsyncMock()
 
+    mock_http_client = MagicMock()
+    mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
+    mock_http_client.__aexit__ = AsyncMock(return_value=None)
+    mock_create_client = mocker.patch(
+        "workers.tools.create_mcp_http_client",
+        return_value=mock_http_client,
+    )
+
     mock_streams_cm = MagicMock()
-    mock_streams_cm.__aenter__ = AsyncMock(return_value=(mock_read, mock_write))
+    mock_streams_cm.__aenter__ = AsyncMock(
+        return_value=(mock_read, mock_write, lambda: "session-id")
+    )
     mock_streams_cm.__aexit__ = AsyncMock(return_value=None)
-    mock_sse_client = mocker.patch("workers.tools.sse_client", return_value=mock_streams_cm)
+    mock_streamable_client = mocker.patch(
+        "workers.tools.streamable_http_client",
+        return_value=mock_streams_cm,
+    )
 
     mock_session_cm = MagicMock()
     mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
@@ -102,17 +115,18 @@ async def test_connect_to_source_sse_passes_headers_to_sse_client(mocker):
 
     source_config = {
         "name": "hosted-mcp",
-        "transport": "sse",
-        "url": "http://mcp.example/sse",
+        "transport": "streamable_http",
+        "url": "http://mcp.example/mcp",
         "headers": {"Authorization": "Bearer test-token"},
     }
 
     async with AsyncExitStack() as stack:
         await _connect_to_source(source_config, stack)
 
-    mock_sse_client.assert_called_once_with(
-        "http://mcp.example/sse",
-        headers={"Authorization": "Bearer test-token"},
+    mock_create_client.assert_called_once_with(headers={"Authorization": "Bearer test-token"})
+    mock_streamable_client.assert_called_once_with(
+        "http://mcp.example/mcp",
+        http_client=mock_http_client,
     )
 
 
@@ -393,7 +407,9 @@ async def test_build_tools_for_worker_with_mocked_connect_and_list_tools(mocker)
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "sse", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         result = await build_tools_for_worker(
@@ -429,7 +445,7 @@ async def test_build_tools_for_worker_raises_mcp_unavailable_when_all_sources_fa
 
     worker_def = MagicMock(spec=WorkerDefinition)
     worker_def.tool_sources = [
-        {"name": "test-mcp", "transport": "sse", "url": "http://test-mcp:8765/sse"},
+        {"name": "test-mcp", "transport": "streamable_http", "url": "http://test-mcp:8765/mcp"},
     ]
 
     with pytest.raises(ExecutionStepError) as exc_info:
@@ -471,8 +487,8 @@ async def test_build_tools_for_worker_second_source_succeeds_if_first_fails(mock
 
     worker_def = MagicMock(spec=WorkerDefinition)
     worker_def.tool_sources = [
-        {"name": "bad-mcp", "transport": "sse", "url": "http://bad:1/sse"},
-        {"name": "good-mcp", "transport": "sse", "url": "http://good:2/sse"},
+        {"name": "bad-mcp", "transport": "streamable_http", "url": "http://bad:1/mcp"},
+        {"name": "good-mcp", "transport": "streamable_http", "url": "http://good:2/mcp"},
     ]
 
     async with AsyncExitStack() as stack:
@@ -618,7 +634,9 @@ async def test_build_tools_for_worker_adds_read_resource_when_resource_specs_set
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "sse", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         result = await build_tools_for_worker(
@@ -652,7 +670,9 @@ async def test_build_tools_for_worker_read_resource_enforces_allowlist(mocker):
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "sse", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         tools = await build_tools_for_worker(
@@ -684,7 +704,9 @@ async def test_build_tools_for_worker_read_resource_blocks_variable_mismatch_bef
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "sse", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
     context = {"saga_vars": {"tenant_id": "tenant-a"}}
     async with AsyncExitStack() as stack:
         tools = await build_tools_for_worker(
@@ -767,7 +789,9 @@ async def test_build_tools_underscore_allowlist_matches_dotted_mcp(mocker):
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "sse", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         result = await build_tools_for_worker(
@@ -802,7 +826,9 @@ async def test_build_tools_dotted_allowlist_matches_dotted_mcp(mocker):
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "sse", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         result = await build_tools_for_worker(

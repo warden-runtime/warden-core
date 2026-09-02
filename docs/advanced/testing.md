@@ -124,7 +124,7 @@ The suite never calls real inference providers or live MCP servers during unit o
 - **LLM provider wiring** — `build_llm(provider="mock", …)` returns `MockChatAdapter`, a scripted responder that parses prompt text and emits predictable tool calls. See `tests/unit/test_llm_factory.py` and `tests/unit/test_llm_mock.py`.
 - **Reason-step logic** — pass a small `_ScriptedLLM` (or patch `build_llm`) to exercise the ReAct loop without network I/O. See `tests/unit/test_react_loop.py` and `tests/unit/test_adapters_langchain.py`.
 - **Engine ↔ worker wiring** — integration tests patch `workers.logic.resolve_adapter` with a fake adapter whose `run_step` / `run_commit` / `run_compensation` return canned outputs. See `patch_successful_run_step` in `tests/integration/test_worker_engine_wiring.py`.
-- **MCP tool plumbing** — unit tests mock MCP sessions and `call_tool` responses rather than opening SSE/stdio transports. See `tests/unit/test_workers_tools_extended.py`.
+- **MCP tool plumbing** — unit tests mock MCP sessions and `call_tool` responses rather than opening Streamable HTTP/stdio transports. See `tests/unit/test_workers_tools_extended.py`.
 
 For a hands-on stack that uses the mock LLM and mock MCP server end-to-end, see [Demo: Mock LLM and MCP](../getting-started/demo-mock-llm-and-mcp.md).
 :::

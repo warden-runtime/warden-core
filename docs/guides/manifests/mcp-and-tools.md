@@ -8,28 +8,28 @@ pagination_next: guides/manifests/when-cel
 
 Workers reach external systems through MCP servers declared on the worker manifest. Saga steps then narrow that surface with per-step allowlists. For a full stdio walkthrough on the dev stack, see [Demo: GitHub MCP](../../getting-started/demo-github-mcp.md); for manifest fields, start with [Worker manifests](worker-manifests.md).
 
-Two layers always apply: **`tool_sources`** on the worker (what MCP endpoints the worker can open) and **`tools.allow`** on each saga step (what a given step may call). Transport choice is the main variable — SSE when something else hosts the server, stdio when the worker should start it. The sections below cover auth headers, tool and resource allowlists, policy interaction, and designing tools for at-least-once delivery.
+Two layers always apply: **`tool_sources`** on the worker (what MCP endpoints the worker can open) and **`tools.allow`** on each saga step (what a given step may call). Transport choice is the main variable — Streamable HTTP when something else hosts the server, stdio when the worker should start it. The sections below cover auth headers, tool and resource allowlists, policy interaction, and designing tools for at-least-once delivery.
 
-## Transport: SSE vs stdio
+## Transport: Streamable HTTP vs stdio
 
 | Transport | When to use | Connection cost |
 |-----------|-------------|-----------------|
-| **`sse` (default)** | Team already hosts the MCP server (Compose service, k8s sidecar, API gateway) | HTTP connect + MCP `initialize` — no subprocess spawn |
+| **`streamable_http` (default)** | Team already hosts the MCP server (Compose service, k8s sidecar, API gateway) | HTTP connect + MCP `initialize` — no subprocess spawn |
 | **`stdio`** | Worker should start the server (local binary, mock fixture, `docker run`) | New process per step connection (~150–200 ms typical) |
 
 Keep in mind that it's your worker process that needs a clear network line to the MCP server, not the core Warden engine. You'll want to make sure your firewall rules, container networks, and DNS settings allow the worker container to talk directly to that server endpoint.
 
 YAML examples: [Worker manifests → MCP tool sources](worker-manifests.md#mcp-tool-sources).
 
-## Hosted MCP authentication (SSE)
+## Hosted MCP authentication (Streamable HTTP)
 
-When an MCP server sits behind an API gateway or expects bearer-token auth, set `headers` on the SSE `tool_sources` entry. **Do not** put production tokens in manifest YAML — reference worker environment variables:
+When an MCP server sits behind an API gateway or expects bearer-token auth, set `headers` on the Streamable HTTP `tool_sources` entry. **Do not** put production tokens in manifest YAML — reference worker environment variables:
 
 ```yaml
 tool_sources:
   - name: company-tools
-    transport: sse
-    url: https://mcp.internal.example.com/sse
+    transport: streamable_http
+    url: https://mcp.internal.example.com/mcp
     headers:
       Authorization: "Bearer ${ENV:COMPANY_MCP_TOKEN}"
       X-Api-Key: "${ENV:GATEWAY_KEY}"
@@ -169,7 +169,7 @@ Next up: [Conditional branching (`when.cel`)](when-cel.md) — learn how to skip
 
 ## Related
 
-- [Worker manifests → MCP tool sources](worker-manifests.md#mcp-tool-sources) — SSE vs stdio, `${ENV:…}` header placeholders, stdio secrets (`config/worker.minimal.yaml`, `config/worker.github-demo.yaml`)
+- [Worker manifests → MCP tool sources](worker-manifests.md#mcp-tool-sources) — Streamable HTTP vs stdio, `${ENV:…}` header placeholders, stdio secrets (`config/worker.minimal.yaml`, `config/worker.github-demo.yaml`)
 - [Architecture](../../advanced/architecture.md) — transactional outbox and idempotency mechanisms
 - [GitHub MCP demo](../../getting-started/demo-github-mcp.md) — Docker stdio on the dev stack (`/var/run/docker.sock`, compose env)
 - [Saga manifests](saga-manifests.md) — `tools.allow` and `with` bindings per step
