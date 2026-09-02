@@ -133,6 +133,21 @@ def _worker_definition_fields(blueprint: WorkerBlueprint) -> dict[str, Any]:
     }
 
 
+def worker_manifest_body_from_row(row: WorkerDefinition) -> dict[str, Any]:
+    """Reconstruct a deploy-shaped worker manifest from persisted columns."""
+    return {
+        "kind": "worker",
+        "name": row.name,
+        "namespace": row.namespace,
+        "version": row.version,
+        "provider": row.model_provider,
+        "model_name": row.model_name,
+        "system_prompt": row.system_prompt,
+        "tool_sources": row.tool_sources or [],
+        "adapter": row.adapter,
+    }
+
+
 async def _upsert_worker_definition(
     *,
     blueprint: WorkerBlueprint,

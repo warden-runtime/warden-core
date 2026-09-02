@@ -9,6 +9,11 @@ from fastapi import APIRouter, HTTPException, Query
 from engine.api import read_queries
 from engine.api.ids import validate_namespace, validate_step_span_id, validate_trace_id
 from engine.api.pagination import validated_limit_offset
+from engine.api.saga_errors import (
+    DefinitionNotFoundError,
+    InactiveSagaDefinitionError,
+    StartIdempotencyConflictError,
+)
 from engine.api.saga_start import start_saga
 from engine.api.schemas import (
     SagaInstanceItem,
@@ -31,16 +36,25 @@ router = APIRouter(prefix="/sagas", tags=["sagas"])
 def _resolve_list_saga_statuses(
     *,
     in_flight: bool | None,
+    failed: bool | None,
     status_list: list[str],
 ) -> list[SagaStatus] | None:
-    if in_flight is True and len(status_list) > 0:
+    filter_flags = sum(flag is True for flag in (in_flight, failed))
+    if filter_flags > 1:
         raise HTTPException(
             status_code=400,
-            detail="Do not combine in_flight=true with status filters; use one or the other.",
+            detail="Use only one of in_flight=true, failed=true, or explicit status filters.",
+        )
+    if filter_flags == 1 and len(status_list) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Do not combine in_flight/failed with status filters; use one or the other.",
         )
     try:
         if in_flight is True:
             return read_queries.in_flight_statuses()
+        if failed is True:
+            return [SagaStatus.FAILED]
         if len(status_list) > 0:
             return read_queries.parse_saga_statuses(status_list)
         return None
@@ -74,6 +88,16 @@ async def get_sagas(
             description="When true, filter to non-terminal in-flight statuses (mutually exclusive with status).",
         ),
     ] = None,
+    failed: Annotated[
+        bool | None,
+        Query(
+            description="When true, filter to FAILED sagas only (mutually exclusive with in_flight and status).",
+        ),
+    ] = None,
+    include_total: Annotated[
+        bool,
+        Query(description="Include total matching row count."),
+    ] = False,
     limit: Annotated[int | None, Query()] = None,
     offset: Annotated[int | None, Query()] = None,
 ) -> SagaInstanceListResponse:
@@ -87,6 +111,7 @@ async def get_sagas(
         validate_namespace(namespace)
     statuses = _resolve_list_saga_statuses(
         in_flight=in_flight,
+        failed=failed,
         status_list=list(status) if status is not None else [],
     )
 
@@ -110,7 +135,21 @@ async def get_sagas(
         )
         for r in rows
     ]
-    return SagaInstanceListResponse(items=items, limit=lim, offset=off)
+    total = None
+    if include_total:
+        total = await read_queries.count_saga_instances(
+            namespace=namespace,
+            trace_id=trace_id,
+            parent_trace_id=parent_trace_id,
+            statuses=statuses,
+        )
+    return SagaInstanceListResponse(
+        items=items,
+        limit=lim,
+        offset=off,
+        has_more=len(items) == lim,
+        total=total,
+    )
 
 
 @router.get("/steps", response_model=SagaStepInstanceListResponse)
@@ -153,7 +192,12 @@ async def get_saga_steps(
         offset=off,
     )
     items = [saga_step_instance_item_from_row(r) for r in rows]
-    return SagaStepInstanceListResponse(items=items, limit=lim, offset=off)
+    return SagaStepInstanceListResponse(
+        items=items,
+        limit=lim,
+        offset=off,
+        has_more=len(items) == lim,
+    )
 
 
 @router.get("/{trace_id}/steps/{step_span_id}", response_model=SagaStepInstanceDetail)
@@ -198,18 +242,20 @@ async def post_sagas_start(body: StartSagaRequest) -> StartSagaResponse:
         StartSagaResponse with trace_id.
 
     Raises:
-        HTTPException: 404 if definition not found; 400 on other ValueError.
+        HTTPException: 404 if definition not found; 409 on idempotency conflict or inactive definition; 400 on other ValueError.
     """
     try:
-        trace_id = await start_saga(
+        result = await start_saga(
             namespace=body.namespace,
             name=body.name,
             version=body.version,
             input=body.input,
             idempotency_key=body.idempotency_key,
         )
-        return StartSagaResponse(trace_id=trace_id)
+        return StartSagaResponse(trace_id=result.trace_id, created=result.created)
+    except DefinitionNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (StartIdempotencyConflictError, InactiveSagaDefinitionError) as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=404, detail=str(e)) from e
         raise HTTPException(status_code=400, detail=str(e)) from e

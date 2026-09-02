@@ -279,7 +279,9 @@ async def bootstrap_running_saga(
     version: str,
 ) -> tuple[str, list[SagaStepInstance]]:
     """``start_saga`` plus ``SAGA_STARTED`` ingest; returns trace id and ordered steps."""
-    trace_id = await start_saga(namespace=namespace, name=name, version=version, input={})
+    trace_id = (
+        await start_saga(namespace=namespace, name=name, version=version, input={})
+    ).trace_id
     await process_saga_event(
         {
             "event_type": "SAGA_STARTED",
@@ -461,12 +463,14 @@ async def test_two_step_reason_saga_happy_path(
     two_step_saga_definition: None,
 ) -> None:
     """start_saga → SAGA_STARTED → DO_STEP → mocked worker → STEP_COMPLETED → … → COMPLETED."""
-    trace_id = await start_saga(
-        namespace="default",
-        name=INTEGRATION_SAGA_NAME,
-        version=INTEGRATION_SAGA_VERSION,
-        input={},
-    )
+    trace_id = (
+        await start_saga(
+            namespace="default",
+            name=INTEGRATION_SAGA_NAME,
+            version=INTEGRATION_SAGA_VERSION,
+            input={},
+        )
+    ).trace_id
 
     await process_saga_event(
         {
@@ -543,12 +547,14 @@ async def test_one_step_reason_saga_worker_failure_emits_saga_failed(
     one_step_fail_saga_definition: None,
 ) -> None:
     """DO_STEP → mocked ``run_step`` raises → STEP_FAILED outbox → engine marks saga FAILED."""
-    trace_id = await start_saga(
-        namespace="default",
-        name=INTEGRATION_ONE_STEP_FAIL_NAME,
-        version=INTEGRATION_ONE_STEP_FAIL_VERSION,
-        input={},
-    )
+    trace_id = (
+        await start_saga(
+            namespace="default",
+            name=INTEGRATION_ONE_STEP_FAIL_NAME,
+            version=INTEGRATION_ONE_STEP_FAIL_VERSION,
+            input={},
+        )
+    ).trace_id
 
     await process_saga_event(
         {

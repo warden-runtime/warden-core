@@ -9,7 +9,9 @@ from common.db_startup import assert_core_schema_ready
 from common.plugins.registry import get_registry
 from common.plugins.tortoise_modules import model_modules_for_registry
 from common.telemetry import instrument_fastapi_app
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from tortoise.contrib.fastapi import RegisterTortoise
 
 from engine.api.routes.definitions import router as definitions_router
@@ -55,17 +57,42 @@ async def lifespan(app: FastAPI):
     logger.info("Engine API shutdown.")
 
 
-app = FastAPI(
-    title="Engine API",
-    description="Control-plane API for starting and managing sagas and deploying manifests.",
-    lifespan=lifespan,
-)
-# Versioned surface: /v1/sagas/..., /v1/manifests/..., /v1/health
-app.include_router(health_router, prefix="/v1")
-app.include_router(sagas_router, prefix="/v1")
-app.include_router(definitions_router, prefix="/v1")
-app.include_router(human_gate_router, prefix="/v1")
-app.include_router(recovery_router, prefix="/v1")
-app.include_router(manifests_router, prefix="/v1")
-# Inbound trace context must be active before plugin routers handle requests.
-instrument_fastapi_app(app)
+def create_app() -> FastAPI:
+    settings = get_settings()
+    application = FastAPI(
+        title="Engine API",
+        description="Control-plane API for starting and managing sagas and deploying manifests.",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.engine_openapi_enabled else None,
+        redoc_url=None,
+    )
+
+    @application.exception_handler(RequestValidationError)
+    async def request_validation_handler(
+        _request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+    @application.exception_handler(HTTPException)
+    async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+        detail = exc.detail
+        if exc.status_code == 422 and isinstance(detail, str):
+            detail = [{"loc": ["body"], "msg": detail, "type": "value_error"}]
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": detail},
+            headers=getattr(exc, "headers", None),
+        )
+
+    application.include_router(health_router, prefix="/v1")
+    application.include_router(sagas_router, prefix="/v1")
+    application.include_router(definitions_router, prefix="/v1")
+    application.include_router(human_gate_router, prefix="/v1")
+    application.include_router(recovery_router, prefix="/v1")
+    application.include_router(manifests_router, prefix="/v1")
+    instrument_fastapi_app(application)
+    return application
+
+
+app = create_app()

@@ -50,7 +50,27 @@ async def get_saga_definition_by_id(*, definition_id: str) -> SagaDefinition | N
         uid = uuid.UUID(definition_id.strip())
     except ValueError:
         return None
-    return await SagaDefinition.filter(id=uid).first()
+    return await get_saga_definition_by_uuid(definition_id=uid)
+
+
+async def get_saga_definition_by_uuid(*, definition_id: uuid.UUID) -> SagaDefinition | None:
+    return await SagaDefinition.filter(id=definition_id).first()
+
+
+async def count_saga_definitions(
+    *,
+    namespace: str | None,
+    name: str | None,
+    is_active: bool | None,
+) -> int:
+    q: Any = SagaDefinition.all()
+    if namespace is not None:
+        q = q.filter(namespace=namespace)
+    if name is not None:
+        q = q.filter(name=name)
+    if is_active is not None:
+        q = q.filter(is_active=is_active)
+    return await q.count()
 
 
 async def list_worker_definitions(
@@ -67,6 +87,42 @@ async def list_worker_definitions(
         q = q.filter(name=name)
     q = q.order_by("-updated_at", "-created_at", "id")
     return await q.offset(offset).limit(limit)
+
+
+async def get_worker_definition_by_uuid(*, definition_id: uuid.UUID) -> WorkerDefinition | None:
+    return await WorkerDefinition.filter(id=definition_id).first()
+
+
+async def count_worker_definitions(
+    *,
+    namespace: str | None,
+    name: str | None,
+) -> int:
+    q: Any = WorkerDefinition.all()
+    if namespace is not None:
+        q = q.filter(namespace=namespace)
+    if name is not None:
+        q = q.filter(name=name)
+    return await q.count()
+
+
+async def count_saga_instances(
+    *,
+    namespace: str | None,
+    trace_id: str | None,
+    statuses: list[SagaStatus] | None,
+    parent_trace_id: str | None = None,
+) -> int:
+    q: Any = SagaInstance.all()
+    if namespace is not None:
+        q = q.filter(namespace=namespace)
+    if trace_id is not None:
+        q = q.filter(trace_id=trace_id)
+    if parent_trace_id is not None:
+        q = q.filter(parent_trace_id=parent_trace_id)
+    if statuses is not None:
+        q = q.filter(status__in=statuses)
+    return await q.count()
 
 
 async def list_saga_instances(

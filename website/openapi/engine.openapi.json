@@ -92,6 +92,30 @@
         "title": "HumanDecisionRequest",
         "type": "object"
       },
+      "HumanDecisionResponse": {
+        "description": "Response for HITL decision enqueue (202 Accepted).",
+        "properties": {
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "already_queued",
+              "requeued"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "idempotency_key"
+        ],
+        "title": "HumanDecisionResponse",
+        "type": "object"
+      },
       "HumanRejectRequest": {
         "description": "Optional body for human rejection.",
         "properties": {
@@ -144,6 +168,41 @@
           }
         },
         "title": "HumanRetryRequest",
+        "type": "object"
+      },
+      "HumanRetryResponse": {
+        "description": "Response for HITL step retry enqueue (202 Accepted).",
+        "properties": {
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "retry_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Token"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "already_queued",
+              "requeued"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "idempotency_key"
+        ],
+        "title": "HumanRetryResponse",
         "type": "object"
       },
       "ManifestDeployResponse": {
@@ -287,6 +346,11 @@
       "PendingReviewStepListResponse": {
         "description": "Response for GET /v1/sagas/pending-review.",
         "properties": {
+          "has_more": {
+            "description": "True when len(items) == limit (more pages may exist).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/PendingReviewStepItem"
@@ -306,14 +370,102 @@
         "required": [
           "items",
           "limit",
-          "offset"
+          "offset",
+          "has_more"
         ],
         "title": "PendingReviewStepListResponse",
+        "type": "object"
+      },
+      "ReadinessResponse": {
+        "description": "Response for GET /v1/health/ready.",
+        "properties": {
+          "database": {
+            "const": "ok",
+            "title": "Database",
+            "type": "string"
+          },
+          "status": {
+            "const": "ready",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "database"
+        ],
+        "title": "ReadinessResponse",
+        "type": "object"
+      },
+      "RecoveryResponse": {
+        "description": "Response for operator recovery enqueue (202 Accepted).",
+        "properties": {
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "recovery_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Token"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "scheduled",
+              "claim_active",
+              "requeued"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "worker_command_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Command Key"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RecoveryResponse",
         "type": "object"
       },
       "SagaDefinitionItem": {
         "description": "One row in GET /v1/definitions/sagas.",
         "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full manifest blueprint when include_body=true on by-id GET.",
+            "title": "Body"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -361,6 +513,11 @@
       "SagaDefinitionListResponse": {
         "description": "Response for GET /v1/definitions/sagas.",
         "properties": {
+          "has_more": {
+            "description": "True when len(items) == limit (more pages may exist).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SagaDefinitionItem"
@@ -375,12 +532,25 @@
           "offset": {
             "title": "Offset",
             "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching rows when include_total=true was requested.",
+            "title": "Total"
           }
         },
         "required": [
           "items",
           "limit",
-          "offset"
+          "offset",
+          "has_more"
         ],
         "title": "SagaDefinitionListResponse",
         "type": "object"
@@ -445,6 +615,11 @@
       "SagaInstanceListResponse": {
         "description": "Response for GET /v1/sagas.",
         "properties": {
+          "has_more": {
+            "description": "True when len(items) == limit (more pages may exist).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SagaInstanceItem"
@@ -459,12 +634,25 @@
           "offset": {
             "title": "Offset",
             "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching rows when include_total=true was requested.",
+            "title": "Total"
           }
         },
         "required": [
           "items",
           "limit",
-          "offset"
+          "offset",
+          "has_more"
         ],
         "title": "SagaInstanceListResponse",
         "type": "object"
@@ -818,6 +1006,11 @@
       "SagaStepInstanceListResponse": {
         "description": "Response for GET /v1/sagas/steps.",
         "properties": {
+          "has_more": {
+            "description": "True when len(items) == limit (more pages may exist).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SagaStepInstanceItem"
@@ -837,7 +1030,8 @@
         "required": [
           "items",
           "limit",
-          "offset"
+          "offset",
+          "has_more"
         ],
         "title": "SagaStepInstanceListResponse",
         "type": "object"
@@ -854,7 +1048,7 @@
                 "type": "null"
               }
             ],
-            "description": "Client idempotency key; when set, returns existing saga trace_id if one was already started with this key in this namespace.",
+            "description": "Client idempotency key scoped to namespace, name, and version; when set, returns the existing saga trace_id if one was already started with this key for the same definition. Reusing the key for a different definition returns 409.",
             "title": "Idempotency Key"
           },
           "input": {
@@ -890,6 +1084,11 @@
       "StartSagaResponse": {
         "description": "Response body for POST /v1/sagas/start (202 Accepted).",
         "properties": {
+          "created": {
+            "description": "True when a new saga instance was created; false on idempotent replay.",
+            "title": "Created",
+            "type": "boolean"
+          },
           "trace_id": {
             "description": "Created saga instance trace_id (32-char hex)",
             "title": "Trace Id",
@@ -897,7 +1096,8 @@
           }
         },
         "required": [
-          "trace_id"
+          "trace_id",
+          "created"
         ],
         "title": "StartSagaResponse",
         "type": "object"
@@ -949,6 +1149,19 @@
             "title": "Adapter",
             "type": "string"
           },
+          "body": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full manifest body when include_body=true on by-id GET.",
+            "title": "Body"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -992,6 +1205,11 @@
       "WorkerDefinitionListResponse": {
         "description": "Response for GET /v1/definitions/workers.",
         "properties": {
+          "has_more": {
+            "description": "True when len(items) == limit (more pages may exist).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/WorkerDefinitionItem"
@@ -1006,12 +1224,25 @@
           "offset": {
             "title": "Offset",
             "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching rows when include_total=true was requested.",
+            "title": "Total"
           }
         },
         "required": [
           "items",
           "limit",
-          "offset"
+          "offset",
+          "has_more"
         ],
         "title": "WorkerDefinitionListResponse",
         "type": "object"
@@ -1082,6 +1313,18 @@
               ],
               "description": "Filter by active flag.",
               "title": "Is Active"
+            }
+          },
+          {
+            "description": "Include total matching row count.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include total matching row count.",
+              "title": "Include Total",
+              "type": "boolean"
             }
           },
           {
@@ -1158,6 +1401,18 @@
               "title": "Definition Id",
               "type": "string"
             }
+          },
+          {
+            "description": "When true, include the full manifest blueprint in body.",
+            "in": "query",
+            "name": "include_body",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When true, include the full manifest blueprint in body.",
+              "title": "Include Body",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -1230,6 +1485,18 @@
             }
           },
           {
+            "description": "Include total matching row count.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include total matching row count.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -1290,6 +1557,61 @@
         ]
       }
     },
+    "/v1/definitions/workers/{definition_id}": {
+      "get": {
+        "description": "Return one worker definition by primary key UUID.",
+        "operationId": "get_definitions_worker_by_id_v1_definitions_workers__definition_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition_id",
+            "required": true,
+            "schema": {
+              "title": "Definition Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "When true, include the full manifest body.",
+            "in": "query",
+            "name": "include_body",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When true, include the full manifest body.",
+              "title": "Include Body",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDefinitionItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Definitions Worker By Id",
+        "tags": [
+          "definitions"
+        ]
+      }
+    },
     "/v1/health": {
       "get": {
         "description": "Return 200 when the API process is serving (after lifespan when using full app).",
@@ -1312,9 +1634,31 @@
         ]
       }
     },
+    "/v1/health/ready": {
+      "get": {
+        "description": "Return 200 when the API can reach Postgres; 503 otherwise.",
+        "operationId": "get_readiness_v1_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Readiness",
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/v1/manifests": {
       "post": {
-        "description": "Register a worker or saga manifest. Accepts YAML or JSON body.\n\nBody must define a mapping with `kind` (worker | saga) and kind-specific\nfields. Same schema as the file-based manifests used by the CLI.\n\nReturns:\n    ManifestDeployResponse with a success message.\n\nRaises:\n    HTTPException: 400 on invalid body, unknown kind, or (saga) missing workers.",
+        "description": "Register a worker or saga manifest. Accepts YAML or JSON body.\n\nBody must define a mapping with `kind` (worker | saga) and kind-specific\nfields. Same schema as the file-based manifests used by the CLI.\n\nReturns:\n    ManifestDeployResponse with a success message.\n\nRaises:\n    HTTPException: 413 when body is too large; 400 on invalid body, unknown kind, or (saga) missing workers.",
         "operationId": "post_manifests_v1_manifests_post",
         "responses": {
           "200": {
@@ -1329,6 +1673,12 @@
           },
           "400": {
             "description": "Manifest validation failed (invalid YAML/JSON, unknown kind, missing worker references, schema errors)."
+          },
+          "413": {
+            "description": "Manifest body exceeds MANIFEST_MAX_BODY_BYTES."
+          },
+          "415": {
+            "description": "Unsupported Content-Type; use application/json or YAML media types."
           }
         },
         "summary": "Post Manifests",
@@ -1433,6 +1783,36 @@
               ],
               "description": "When true, filter to non-terminal in-flight statuses (mutually exclusive with status).",
               "title": "In Flight"
+            }
+          },
+          {
+            "description": "When true, filter to FAILED sagas only (mutually exclusive with in_flight and status).",
+            "in": "query",
+            "name": "failed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When true, filter to FAILED sagas only (mutually exclusive with in_flight and status).",
+              "title": "Failed"
+            }
+          },
+          {
+            "description": "Include total matching row count.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include total matching row count.",
+              "title": "Include Total",
+              "type": "boolean"
             }
           },
           {
@@ -1614,7 +1994,7 @@
     },
     "/v1/sagas/start": {
       "post": {
-        "description": "Start a saga from a registered definition; returns 202 with trace_id.\n\nCreates saga and step instances in a transaction and emits SAGA_STARTED.\n\nArgs:\n    body: Namespace, name, version, and input for the saga.\n\nReturns:\n    StartSagaResponse with trace_id.\n\nRaises:\n    HTTPException: 404 if definition not found; 400 on other ValueError.",
+        "description": "Start a saga from a registered definition; returns 202 with trace_id.\n\nCreates saga and step instances in a transaction and emits SAGA_STARTED.\n\nArgs:\n    body: Namespace, name, version, and input for the saga.\n\nReturns:\n    StartSagaResponse with trace_id.\n\nRaises:\n    HTTPException: 404 if definition not found; 409 on idempotency conflict or inactive definition; 400 on other ValueError.",
         "operationId": "post_sagas_start_v1_sagas_start_post",
         "requestBody": {
           "content": {
@@ -1896,25 +2276,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Approve Step V1 Sagas  Trace Id  Steps  Step Span Id  Approve Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HumanDecisionResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Step not found."
+          },
+          "409": {
+            "description": "Conflict (e.g. step not awaiting human review)."
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "Invalid request."
           }
         },
         "summary": "Approve Step",
@@ -1972,25 +2347,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Decide Step V1 Sagas  Trace Id  Steps  Step Span Id  Decision Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HumanDecisionResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Step not found."
+          },
+          "409": {
+            "description": "Conflict (e.g. step not awaiting human review)."
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "Invalid request."
           }
         },
         "summary": "Decide Step",
@@ -2055,25 +2425,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Reject Step V1 Sagas  Trace Id  Steps  Step Span Id  Reject Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HumanDecisionResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Step not found."
+          },
+          "409": {
+            "description": "Conflict (e.g. step not awaiting human review)."
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "Invalid request."
           }
         },
         "summary": "Reject Step",
@@ -2138,25 +2503,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Retry Step V1 Sagas  Trace Id  Steps  Step Span Id  Retry Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HumanRetryResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Step not found."
+          },
+          "409": {
+            "description": "Conflict (e.g. step not awaiting human review)."
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "Invalid request."
           }
         },
         "summary": "Retry Step",
@@ -2221,15 +2581,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Operator Retry Compensation V1 Sagas  Trace Id  Steps  Step Span Id  Retry Compensation Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RecoveryResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "Step or saga not found."
+          },
+          "409": {
+            "description": "Recovery conflict (wrong status, stale claim, etc.)."
           },
           "422": {
             "content": {
@@ -2304,15 +2666,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Operator Retry Step V1 Sagas  Trace Id  Steps  Step Span Id  Retry Step Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RecoveryResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "Step or saga not found."
+          },
+          "409": {
+            "description": "Recovery conflict (wrong status, stale claim, etc.)."
           },
           "422": {
             "content": {

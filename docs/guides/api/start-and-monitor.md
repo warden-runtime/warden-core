@@ -38,8 +38,10 @@ curl -sS -X POST "$ENGINE_URL/v1/sagas/start" \
 Response (**202 Accepted**):
 
 ```json
-{ "trace_id": "7f3a9c2e1b4d8f0a6e5c3b2a1d9f8e7c" }
+{ "trace_id": "7f3a9c2e1b4d8f0a6e5c3b2a1d9f8e7c", "created": true }
 ```
+
+`created` is `false` when the same `(namespace, name, version, idempotency_key)` was already used — the response still returns the existing `trace_id`.
 
 ### Request body
 
@@ -51,12 +53,12 @@ Definition lookup uses composite key `(namespace, name, version)`. Omitted `name
 | `version` | yes | Saga definition version |
 | `namespace` | yes (defaults to `"default"` if omitted) | Definition namespace |
 | `input` | no (default `{}`) | Initial saga context object |
-| `idempotency_key` | no | Duplicate starts with the same `(namespace, idempotency_key)` pair return the existing `trace_id` |
+| `idempotency_key` | no | Duplicate starts with the same `(namespace, name, version, idempotency_key)` return the existing `trace_id`. Reusing a key for a different definition in the same namespace returns **409**. |
 
 When you start a saga, Warden stores your payload under the **`input`** key in saga context — not at the context root. Manifest bindings use JSONPath like `$.input.repo`; `when.cel` and policy CEL expose the same shape as top-level `input` (for example `input.owner`). See [Saga manifests → Bindings](../manifests/saga-manifests.md#bindings-with).
 
-:::tip[Namespace-scoped idempotency]
-Start idempotency keys are **not global**. The same `idempotency_key` string in two different `namespace` values starts two independent saga instances — there is no cross-namespace collision.
+:::tip[Definition-scoped idempotency]
+Start idempotency keys are scoped to **`(namespace, name, version)`** — not global across all saga definitions. The same `idempotency_key` string in two different namespaces starts two independent instances. Reusing a key for a **different** definition in the same namespace is rejected with **409**.
 :::
 
 CLI equivalent: `warden start saga -n minimal-saga -v 0.0.1 --namespace default`.
