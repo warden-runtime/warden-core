@@ -407,7 +407,9 @@ async def test_build_tools_for_worker_with_mocked_connect_and_list_tools(mocker)
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         result = await build_tools_for_worker(
@@ -632,7 +634,9 @@ async def test_build_tools_for_worker_adds_read_resource_when_resource_specs_set
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         result = await build_tools_for_worker(
@@ -666,7 +670,9 @@ async def test_build_tools_for_worker_read_resource_enforces_allowlist(mocker):
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         tools = await build_tools_for_worker(
@@ -698,7 +704,9 @@ async def test_build_tools_for_worker_read_resource_blocks_variable_mismatch_bef
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
     context = {"saga_vars": {"tenant_id": "tenant-a"}}
     async with AsyncExitStack() as stack:
         tools = await build_tools_for_worker(
@@ -781,7 +789,9 @@ async def test_build_tools_underscore_allowlist_matches_dotted_mcp(mocker):
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         result = await build_tools_for_worker(
@@ -816,7 +826,9 @@ async def test_build_tools_dotted_allowlist_matches_dotted_mcp(mocker):
     )
 
     worker_def = MagicMock(spec=WorkerDefinition)
-    worker_def.tool_sources = [{"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}]
+    worker_def.tool_sources = [
+        {"name": "mcp1", "transport": "streamable_http", "url": "http://localhost"}
+    ]
 
     async with AsyncExitStack() as stack:
         result = await build_tools_for_worker(
