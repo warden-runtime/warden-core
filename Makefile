@@ -6,7 +6,7 @@ COMPOSE ?= docker compose
 .PHONY: help sync-dev up up-db stop down clean reset \
 	build rebuild logs ps doctor migrate migrate-compose \
 	run-engine \
-	check check-boundary lint ruff radon typecheck audit-deps audit-semgrep audit tests upgrade \
+	check check-boundary lint ruff radon vulture typecheck audit-deps audit-semgrep audit tests upgrade \
 	docs-api docs-check
 
 .DEFAULT_GOAL := help
@@ -106,6 +106,9 @@ ruff:
 
 radon:
 	@./scripts/check_xenon_kernel.sh
+
+vulture: ## Find unused code (kernel packages; see [tool.vulture] in pyproject.toml)
+	uv run vulture
 
 typecheck:
 	@./scripts/check_pyright.sh

@@ -1,10 +1,5 @@
 import asyncio
 import logging
-from typing import TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-    from types import ModuleType
 
 from common.config import get_settings
 from common.db_startup import assert_core_schema_ready
@@ -31,13 +26,9 @@ async def init_db():
     safe_url = db_url.split("@")[-1] if "@" in db_url else "db_host"
     logger.info("Worker attempting connection to DB at ...@%s", safe_url)
 
-    modules_config = cast(
-        "dict[str, Iterable[str | ModuleType]]",
-        {"models": model_modules_for_registry()},
-    )
     while True:
         try:
-            await Tortoise.init(db_url=db_url, modules=modules_config)
+            await Tortoise.init(db_url=db_url, modules={"models": model_modules_for_registry()})
 
             # CRITICAL ARCHITECTURAL NOTE:
             # We do NOT run await Tortoise.generate_schemas() here.

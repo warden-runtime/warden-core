@@ -5,7 +5,6 @@ from collections.abc import Set
 from typing import Any
 
 from common.prompts import (  # noqa: F401 — re-exported for tests and callers
-    assert_prompt_file_exists,
     load_prompt_content,
     resolve_prompts_root,
 )

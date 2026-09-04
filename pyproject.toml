@@ -61,6 +61,7 @@ dev = [
     "ruff>=0.8",
     "radon>=6.0",
     "xenon>=0.9",
+    "vulture>=2.14",
     "pip-audit>=2.7",
     "semgrep>=1.60",
     "pyright>=1.1",
@@ -143,4 +144,42 @@ typeCheckingMode = "standard"
 reportIncompatibleVariableOverride = false
 reportMissingTypeStubs = false
 reportPrivateImportUsage = false
+
+[tool.vulture]
+min_confidence = 80
+paths = ["common", "engine", "workers", "cli.py"]
+exclude = [
+    "*/__pycache__/*",
+    # Protocol stubs: unused parameter names are the public hook surface.
+    "common/plugins/protocols.py",
+]
+# Framework / plugin surfaces: attribute access and string dispatch look unused to Vulture.
+ignore_decorators = [
+    "@app.*",
+    "@router.*",
+    "@*.get",
+    "@*.post",
+    "@*.put",
+    "@*.patch",
+    "@*.delete",
+    "@*.websocket",
+    "@field_validator",
+    "@model_validator",
+    "@classmethod",
+    "@staticmethod",
+    "@property",
+]
+ignore_names = [
+    "cls",
+    "args",
+    "kwargs",
+    "request",
+    "db",
+    "session",
+    "Meta",
+    "Config",
+    "model_config",
+    # Jinja BaseLoader.get_source — required name for pyright override match.
+    "environment",
+]
 

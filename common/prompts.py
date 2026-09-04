@@ -59,11 +59,6 @@ def load_prompt_content(prompts_root: str, prompt_ref: str) -> str:
     return resolved_prompt_path(prompts_root, prompt_ref).read_text(encoding="utf-8")
 
 
-def assert_prompt_file_exists(prompts_root: str, prompt_ref: str) -> None:
-    """Verify the prompt file exists without reading its body."""
-    resolved_prompt_path(prompts_root, prompt_ref)
-
-
 def _parse_prompt_ast(env: Environment, source: str, *, prompt_ref: str) -> nodes.Template:
     try:
         return env.parse(source)
