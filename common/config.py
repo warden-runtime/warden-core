@@ -57,7 +57,10 @@ class Settings(BaseSettings):
     prompts_root: str | None = Field(
         default=None,
         validation_alias="PROMPTS_ROOT",
-        description="Base directory for file-based prompt templates; required when steps use prompt_ref.",
+        description=(
+            "Base directory for reason-step Jinja templates; required on the engine "
+            "when steps set prompt (register + saga-start freeze into prompt_definition)."
+        ),
     )
 
     @field_validator("prompts_root", mode="before")
@@ -74,7 +77,8 @@ class Settings(BaseSettings):
         validation_alias="SKILLS_ROOT",
         description=(
             "Base directory for worker-scoped skill markdown files "
-            "(SKILLS_ROOT/<worker_name>/<skill_id>.md); required when steps use skills.allow."
+            "(SKILLS_ROOT/<worker_name>/<skill_id>.md); required on the engine "
+            "when steps use skills.allow (register + saga-start freeze)."
         ),
     )
 
@@ -90,17 +94,26 @@ class Settings(BaseSettings):
     policies_root: str | None = Field(
         default=None,
         validation_alias="POLICIES_ROOT",
-        description="Base directory for policy YAML files (CEL); required when a commit step sets policy.",
+        description=(
+            "Base directory for policy YAML files (CEL); required on the engine "
+            "when a step sets policy (register + saga-start freeze)."
+        ),
     )
     schemas_root: str | None = Field(
         default=None,
         validation_alias="SCHEMAS_ROOT",
-        description="Base directory for step output_schema JSON file paths; required when a step sets output_schema.",
+        description=(
+            "Base directory for step output_schema JSON files; required on the engine "
+            "when a step sets output_schema (register + saga-start freeze)."
+        ),
     )
     compensations_root: str | None = Field(
         default=None,
         validation_alias="COMPENSATIONS_ROOT",
-        description="Base directory for compensation YAML file paths; required when a step sets compensation.",
+        description=(
+            "Base directory for compensation YAML files; required on the engine "
+            "when a step sets compensation (register + saga-start freeze)."
+        ),
     )
     env: str = Field(
         default="development",

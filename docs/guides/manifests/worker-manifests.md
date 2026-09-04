@@ -54,7 +54,7 @@ When a worker picks up a step, it opens a connection for each source. For **`std
 | `streamable_http` (default) | `url` | Streamable HTTP client to a running MCP server |
 | `stdio` | `command`, `args` | Spawns a subprocess; MCP speaks over stdin/stdout |
 
-**Streamable HTTP** — for an MCP server your worker reaches over the network (Compose service, k8s sidecar, hosted endpoint). The URL must target a [Streamable HTTP](https://modelcontextprotocol.io) endpoint (commonly `/mcp`), not a legacy SSE `/sse` path:
+**Streamable HTTP** — for an MCP server your worker reaches over the network (Compose service, k8s sidecar, hosted endpoint). The URL must target a [Streamable HTTP](https://modelcontextprotocol.io) endpoint (commonly `/mcp`), not an SSE `/sse` path:
 
 ```yaml
 tool_sources:

@@ -77,13 +77,12 @@ def _load_policy_artifact_sync(
 
 
 async def load_policy_artifact(*, policies_root: str | None, policy_name: str) -> PolicyArtifact:
-    """Load policy YAML from ``POLICIES_ROOT`` using explicit path or legacy stem fallback.
+    """Load policy YAML from ``POLICIES_ROOT``.
 
     Args:
         policies_root: Base directory for policy files; if None or empty, raises.
-        policy_name: Relative path under ``POLICIES_ROOT`` (e.g. ``gate.yaml`` or
-            ``team-a/gate.yaml``). Legacy stem-only refs (no extension) resolve via
-            ``{ref}.yaml`` when the exact path is missing.
+        policy_name: Relative path under ``POLICIES_ROOT`` with extension
+            (e.g. ``gate.yaml`` or ``team-a/gate.yaml``).
 
     Returns:
         PolicyArtifact with ``cel_source`` for compilation.

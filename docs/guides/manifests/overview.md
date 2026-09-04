@@ -55,7 +55,7 @@ Step and worker manifests point at on-disk files by **path relative to a `*_ROOT
 
 Always use paths **with file extensions** as shown in the table (skill ids map to `{id}.md`). Subdirectories are allowed (`teams/marketing/gate.yaml`). How the **engine** resolves `*_ROOT` on the host vs in Compose: [Configuration → Disk artifact roots](../../getting-started/configuration.md#disk-artifact-roots).
 
-When you deploy a **step** (or a saga that link-checks those fields), the engine checks that referenced prompt, policy, schema, skill, and compensation files exist on disk. At saga **start**, the engine freezes prompts, skills, policies, schemas, and compensation into the instance; workers execute against those embeds (not a live re-read of `*_ROOT`).
+When you deploy a **step** (or a saga that link-checks those fields), the engine checks that referenced prompt, policy, schema, skill, and compensation files exist on disk. At saga **start**, the engine freezes prompts, skills, policies, schemas, and compensation into the instance; workers execute against those embeds.
 
 ## Authoring pipeline
 

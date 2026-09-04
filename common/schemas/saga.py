@@ -255,9 +255,8 @@ class _SagaStepBase(BaseModel):
         description=(
             "Relative path under POLICIES_ROOT to a policy YAML file "
             "(e.g. github-issue-comment.yaml or team-a/gate.yaml). "
-            "Legacy stem-only refs without .yaml still resolve via {ref}.yaml. "
             "At saga start the engine freezes the resolved CEL into "
-            "``policy_definition``; runtime gates use that embed, not a live disk re-read. "
+            "``policy_definition``; runtime gates evaluate that embed. "
             "The engine evaluates ``cel`` against a normalized binding with ``phase``, "
             "``input``, ``arguments``, ``output``, ``saga``, ``step``, ``worker``, "
             "and ``tool``. Reason step phase is ``after_reason``; commit step phase "

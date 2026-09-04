@@ -69,7 +69,7 @@ On reason steps with live inference, the envelope grows with LLM + tool time plu
 
 :::note
 
-With `OUTBOX_WAKE_ENABLED=true` (default in `.env.example` for local compose), the Postgres outbox consumer waits on topic-scoped `LISTEN/NOTIFY` after an empty poll, with `OUTBOX_POLL_INTERVAL_S` (default 1s) as a **safety** timeout. Under load, claim latency is roughly DB RTT — not half a poll interval. When wake is off, the consumer sleeps `OUTBOX_POLL_INTERVAL_S` after every empty poll (legacy behavior).
+With `OUTBOX_WAKE_ENABLED=true` (default in `.env.example` for local compose), the Postgres outbox consumer waits on topic-scoped `LISTEN/NOTIFY` after an empty poll, with `OUTBOX_POLL_INTERVAL_S` (default 1s) as a **safety** timeout. Under load, claim latency is roughly DB RTT — not half a poll interval. When wake is off, the consumer sleeps `OUTBOX_POLL_INTERVAL_S` after every empty poll.
 
 Even on a fast mock step, `dispatch_to_ingest_ms` still counts the **whole step** — worker claim and execution, the worker writing its result to the outbox, and the engine picking that result up. With wake enabled that handoff is usually tens of milliseconds locally; with wake off, poll jitter often lands between a few hundred milliseconds and about two seconds.
 

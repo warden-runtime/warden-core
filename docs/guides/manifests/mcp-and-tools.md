@@ -57,7 +57,7 @@ Skills are **worker-scoped playbooks** on disk under `SKILLS_ROOT/<worker_name>/
 
 On **`react`** reason steps, optional `skills.allow` lists skill ids the step may load. At saga **start**, the engine freezes each allowed skill’s frontmatter + body onto `frozen_steps` / the step row as `skills_definition`. At execute time the worker:
 
-1. Reads frozen skill documents from `skills_definition` (no live `SKILLS_ROOT` read)
+1. Reads frozen skill documents from `skills_definition`
 2. Unions those `allowed_tools` with the step’s `tools.allow` (**extras**) into the effective MCP allowlist (raw and sanitized MCP ids collapse to one entry; extras win for schemas)
 3. Injects a virtual **`load_skill`** tool (bodies from the freeze) and puts `allowed_skills: [{name, description}, …]` into the step prompt context (static index)
 

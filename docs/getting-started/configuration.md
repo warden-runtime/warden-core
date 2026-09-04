@@ -222,19 +222,19 @@ After changing `.env` or Compose networking, restart the worker (`docker compose
 
 ## Disk artifact roots
 
-Worker and saga **manifest YAML** is stored in Postgres when you `warden deploy`. Prompts, policies, output schemas, skills, and compensation files stay on disk as authoring artifacts. Deploy link-checks paths; saga **start** (and child spawn) freezes policy CEL, compensation blocks, `output_schema` JSON, Jinja prompts (static includes inlined), and skill payloads onto the instance. Runtime gates / materialize / workers use those embeds — they do not re-read the roots mid-run:
+Worker and saga **manifest YAML** is stored in Postgres when you `warden deploy`. Prompts, policies, output schemas, skills, and compensation files stay on disk as authoring artifacts. Deploy link-checks paths; saga **start** (and child spawn) freezes policy CEL, compensation blocks, `output_schema` JSON, Jinja prompts (static includes inlined), and skill payloads onto the instance. Runtime gates, materialize, and workers use those embeds:
 
 | Variable | Resolves | Consumer |
 |----------|----------|----------|
 | `PROMPTS_ROOT` | `prompt: foo.j2` → `{root}/foo.j2` | engine (register + saga start freeze) |
 | `SKILLS_ROOT` | `skills.allow: [{name: triage}]` → `{root}/<worker>/triage.md` | engine (register + saga start freeze) |
-| `POLICIES_ROOT` | `policy: gate.yaml` → `{root}/gate.yaml` (legacy stem `gate` → `{root}/gate.yaml`) | engine (register + saga start freeze) |
+| `POLICIES_ROOT` | `policy: gate.yaml` → `{root}/gate.yaml` | engine (register + saga start freeze) |
 | `SCHEMAS_ROOT` | `output_schema: triage.json` → `{root}/triage.json` | engine (register + saga start freeze) |
 | `COMPENSATIONS_ROOT` | `compensation: disburse_undo.yaml` → `{root}/disburse_undo.yaml` | engine (register + saga start freeze) |
 
-Each value is a path relative to the root — subdirectories are allowed (e.g. `policy: teams/marketing/gate.yaml`). For `policy`, prefer an explicit path with extension; stem-only refs without an extension still resolve via `{ref}.yaml` when the exact path is missing (one deploy-time warning per unique legacy ref).
+Each value is a path relative to the root — subdirectories are allowed (e.g. `policy: teams/marketing/gate.yaml`). Use paths **with file extensions**.
 
-Repo defaults are `./config/prompts`, `./config/policies`, `./config/schemas`, and `./config/compensations`.
+Repo defaults under `./config/` are `prompts`, `skills`, `policies`, `schemas`, and `compensations`.
 
 ## Worker tuning
 

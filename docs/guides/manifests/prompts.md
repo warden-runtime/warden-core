@@ -6,7 +6,7 @@ pagination_next: guides/manifests/mcp-and-tools
 
 # Prompts
 
-A `reason` step uses a [Jinja2](https://jinja.palletsprojects.com/en/stable/templates/) template to build the user prompt that goes to the LLM. Prompt **files** live on disk under `PROMPTS_ROOT`; your **step** manifest points at a relative path (`prompt: triage.j2`). At saga **start**, the engine freezes the template (with static `{% include %}` inlined) onto the instance as `prompt_definition`. The worker renders that frozen string with resolved `with` bindings — it does not re-read `PROMPTS_ROOT` mid-run.
+A `reason` step uses a [Jinja2](https://jinja.palletsprojects.com/en/stable/templates/) template to build the user prompt that goes to the LLM. Prompt **files** live on disk under `PROMPTS_ROOT`; your **step** manifest points at a relative path (`prompt: triage.j2`). At saga **start**, the engine freezes the template (with static `{% include %}` inlined) onto the instance as `prompt_definition`. The worker renders that frozen string with resolved `with` bindings.
 
 Commit steps never use prompt files — they call one MCP tool with resolved `with` arguments. Compensation undo steps use YAML under `COMPENSATIONS_ROOT` (not saga prompt templates) — see [Compensation](compensation.md).
 
@@ -68,19 +68,19 @@ Prompt **refs** stay as paths on disk. At saga start the engine copies the resol
 | Engine | Saga start / child spawn | Freeze template (+ static includes) into `prompt_definition` |
 | Worker | Step execution | Render frozen `prompt_definition` with resolved bindings |
 
-The **engine** needs `PROMPTS_ROOT` at register and start. Workers do not re-read prompt files for step execution. In Compose, `./config/prompts` mounts at `/app/prompts` on the engine — leave `PROMPTS_ROOT` unset in `.env` so container paths win. On the host CLI, export `PROMPTS_ROOT=./config/prompts`. See [Manifests and artifacts](overview.md) and [Configuration → Disk artifact roots](../../getting-started/configuration.md#disk-artifact-roots).
+The **engine** needs `PROMPTS_ROOT` at register and start. In Compose, `./config/prompts` mounts at `/app/prompts` on the engine — leave `PROMPTS_ROOT` unset in `.env` so container paths win. On the host CLI, export `PROMPTS_ROOT=./config/prompts`. See [Manifests and artifacts](overview.md) and [Configuration → Disk artifact roots](../../getting-started/configuration.md#disk-artifact-roots).
 
 When `PROMPTS_ROOT` is set, the engine fails fast at startup if the path is not a readable directory.
 
 ## Deploy-time validation
 
-When you deploy a saga, the engine reads each prompt file and checks **`{{ ... }}` expressions**. Every top-level name in the template must have a matching key in `with`:
+When you deploy a **step**, the engine reads the prompt file and checks **`{{ ... }}` expressions**. Every top-level name in the template must have a matching key in the step's `inputs` (bound from the saga `with` block):
 
-| Template | Required `with` key |
-|----------|---------------------|
+| Template | Required `inputs` / `with` key |
+|----------|-------------------------------|
 | `Hello {{ name }}` | `name` |
 | `Owner: {{ user.email }}` | `user` (object; nested access is Jinja on the bound value) |
-| `{% if focus_issue_number is not none %}…{% endif %}` | not checked statically — bind `focus_issue_number` anyway |
+| `{% if focus_issue_number is not none %}…{% endif %}` | not checked statically — declare and bind `focus_issue_number` anyway |
 | `{% for obj in objectives %}{{ obj }}{% endfor %}` | `objectives` (loop target `obj` and Jinja `loop` are allowed) |
 
 Extra `with` keys are allowed. Variables used only in `{% if %}`, `{% for %}`, or filters are **not** checked when you deploy; if you reference them at render time without a binding, the step fails in the worker.
@@ -91,7 +91,7 @@ Common registration errors:
 |---------|--------|
 | `prompts_root is not configured` | Engine has no `PROMPTS_ROOT` while a reason step sets `prompt` |
 | `Prompt file not found: …` | File missing or wrong root on the **engine** |
-| `Prompt uses variable(s) not defined in step 'with': …` | `{{ var }}` in template with no matching `with` key |
+| `Prompt uses variable(s) not defined in step 'with': …` | `{{ var }}` in template with no matching step `inputs` key |
 | `Invalid prompt …` / `escapes PROMPTS_ROOT` | Absolute path or `..` in the `prompt` field |
 
 ## Template context
@@ -206,7 +206,6 @@ The minimal saga uses a one-line smoke-test template to verify engine registrati
 |---------|------------|
 | Registration 400: prompt file not found | Engine `PROMPTS_ROOT` or mount; see [Troubleshooting](../../getting-started/troubleshooting.md) |
 | Start fails: `prompts_root is not configured` / freeze error | Set/mount `PROMPTS_ROOT` on the **engine** before saga start |
-| Step fails: missing `prompt_definition` | Instance was created before prompt freeze; restart the saga after upgrading |
 | Step fails: `Jinja render failed` | Missing `with` key or wrong type at schedule time (often a JSONPath to a step that has not completed) |
 | Step fails: `Jinja render blocked unsafe construct` | Template used a sandboxed-forbidden attribute or helper; remove SSTI-style / introspection syntax |
 | Agent ignores tools | Check `tools.allow` on the step and worker MCP config — not the prompt file alone |

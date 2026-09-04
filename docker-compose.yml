@@ -15,9 +15,9 @@
 # PATH and break /app/.venv (pydantic missing, watchfiles not found). Compose sets PATH
 # explicitly for those services.
 #
-# PROMPTS_ROOT / SKILLS_ROOT: set on the engine only (register + saga start freeze). Do not
-# point .env PROMPTS_ROOT at a host path for Compose — that path is wrong inside containers.
-# Leave PROMPTS_ROOT unset in .env for Docker, or use ./config/prompts only for host CLI tools.
+# Disk artifact roots (*_ROOT): set on the engine only (register + saga start freeze). Do not
+# point .env PROMPTS_ROOT (or other roots) at a host path for Compose — that path is wrong
+# inside containers. Leave them unset in .env for Docker; use ./config/… only for host CLI.
 #
 # Worker Docker socket: stdio MCP demos (e.g. github-mcp-server) spawn `docker run` against
 # the host daemon via /var/run/docker.sock. Set GITHUB_PERSONAL_ACCESS_TOKEN in .env when needed.

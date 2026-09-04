@@ -553,7 +553,7 @@ tools:
     - name: issue_read
 ```
 
-When you start a saga, Warden resolves `config/<schema-file>.json`, freezes the object onto instance `frozen_steps` as `output_schema_definition`, and copies it onto the step row `output_schema`. Loop mint and materialize read that embed only — they do not re-read `SCHEMAS_ROOT`. The worker validates output **before** sending `STEP_COMPLETED`. Warden validates again when it ingests that completion event.
+When you start a saga, Warden resolves `config/<schema-file>.json`, freezes the object onto instance `frozen_steps` as `output_schema_definition`, and copies it onto the step row `output_schema`. Loop mint and materialize read that embed. The worker validates output **before** sending `STEP_COMPLETED`. Warden validates again when it ingests that completion event.
 
 Without `output_schema`: **`react`** still requires a non-empty `_submit` payload (any JSON shape); **`simple`** uses the built-in fallback requiring `summary`.
 

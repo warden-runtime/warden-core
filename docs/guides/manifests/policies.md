@@ -31,7 +31,7 @@ version: "1"
 cel: "phase == 'before_commit' && step.kind == 'commit' && step.id == 'post-comment' && tool.name == 'add_issue_comment' && arguments.owner == input.owner && arguments.repo == input.repo && arguments.issue_number > 0 && size(arguments.body) > 0 && size(arguments.body) <= 8000 && arguments.body.contains('## Warden triage')"
 ```
 
-`warden deploy` validates that each referenced policy file exists and that its CEL compiles. At saga **start**, the engine freezes `{name, version, cel}` into the instance `frozen_steps` (and onto the step row as `policy_definition`), same pattern as compensation embeds. Runtime gates evaluate that frozen CEL — they do not re-read `POLICIES_ROOT`. Keep policy files on disk where the **engine** can read them at start/deploy — see [Configuration](../../getting-started/configuration.md) for `POLICIES_ROOT` and Compose mounts.
+`warden deploy` validates that each referenced policy file exists and that its CEL compiles. At saga **start**, the engine freezes `{name, version, cel}` into the instance `frozen_steps` (and onto the step row as `policy_definition`), same pattern as compensation embeds. Runtime gates evaluate that frozen CEL. Keep policy files on disk where the **engine** can read them at start/deploy — see [Configuration](../../getting-started/configuration.md) for `POLICIES_ROOT` and Compose mounts.
 
 CEL expressions evaluate to `true` or `false` — in a policy gate, `true` passes and `false` denies. For syntax, operators, and functions, see the [CEL documentation](https://cel.dev).
 
