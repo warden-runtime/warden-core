@@ -12,7 +12,6 @@ from common.compensation_context import (
     compensation_parameter_context,
     effective_forward_step_output,
 )
-from common.config import get_settings
 from common.contracts import (
     CommandType,
     CompensationFailedEvent,
@@ -41,9 +40,8 @@ from common.processed_command_claim import (
     verify_claim_before_emit,
 )
 from common.processed_command_reap import reap_stale_claim_by_key
-from common.prompts import load_prompt_content
 from common.schemas.worker import WorkerBlueprint, parse_worker_blueprint
-from common.telemetry import run_in_executor_with_log_context, trace_boundary
+from common.telemetry import trace_boundary
 from common.topics import TOPIC_ORCHESTRATOR_EVENTS
 from common.worker_ref import assert_worker_snapshot_version, require_worker_definition
 from opentelemetry.propagate import inject
@@ -76,6 +74,7 @@ class _PreparedExecution:
     tool_specs: list[dict[str, Any]]
     resource_specs: list[Any]
     skill_specs: list[dict[str, Any]]
+    skills_definition: list[dict[str, Any]]
     output_schema: dict[str, Any] | None
     prompt_template: str | None
     step_output: dict[str, Any] | None
@@ -117,6 +116,7 @@ async def _prepare_compensation_command(
         tool_specs=merge_tool_specs(cmd.tool_specs, comp_step.tools_allow),
         resource_specs=merge_resource_specs(cmd.resource_specs, comp_step.resources_allow),
         skill_specs=[],
+        skills_definition=[],
         output_schema=None,
         prompt_template=None,
         step_output=effective_forward_step_output(forward),
@@ -132,15 +132,22 @@ async def _prepare_compensation_command(
     )
 
 
-async def _load_do_step_prompt(cmd: DoStepCommand) -> str:
-    prompts_root = get_settings().prompts_root
-    if not prompts_root or not str(prompts_root).strip():
-        raise ValueError("prompts_root is not configured; set PROMPTS_ROOT on the worker service.")
-    return await run_in_executor_with_log_context(
-        load_prompt_content,
-        prompts_root,
-        cmd.prompt_ref,
+async def _load_do_step_prompt(cmd: DoStepCommand, step: Any) -> str:
+    """Return frozen prompt text from the step row (no live PROMPTS_ROOT read)."""
+    frozen = getattr(step, "prompt_definition", None)
+    if isinstance(frozen, str) and frozen.strip():
+        return frozen
+    raise ValueError(
+        f"Step {cmd.step_span_id} has no prompt_definition; "
+        "cannot execute reason step without a start-frozen prompt template."
     )
+
+
+def _skills_definition_from_step(step: Any) -> list[dict[str, Any]]:
+    raw = getattr(step, "skills_definition", None)
+    if not isinstance(raw, list):
+        return []
+    return [entry for entry in raw if isinstance(entry, dict)]
 
 
 def _facts_extractors_from_step(step: Any) -> list[dict[str, Any]]:
@@ -162,7 +169,7 @@ async def _prepare_forward_command(
     )
     prompt_template: str | None = None
     if isinstance(cmd, DoStepCommand):
-        prompt_template = await _load_do_step_prompt(cmd)
+        prompt_template = await _load_do_step_prompt(cmd, step)
     output_schema = step.output_schema if isinstance(step.output_schema, dict) else None
     skill_wire = getattr(cmd, "skill_specs", None) if isinstance(cmd, DoStepCommand) else None
     skill_full = getattr(step, "skills_allow", None)
@@ -170,6 +177,7 @@ async def _prepare_forward_command(
         tool_specs=merge_tool_specs(cmd.tool_specs, step.tools_allow),
         resource_specs=merge_resource_specs(cmd.resource_specs, step.resources_allow),
         skill_specs=merge_skill_specs(skill_wire, skill_full),
+        skills_definition=_skills_definition_from_step(step),
         output_schema=output_schema,
         prompt_template=prompt_template,
         step_output=None,
@@ -822,12 +830,11 @@ async def _prepare_worker_command_execution(
         "execution_scope": scope,
         "worker_definition": worker_definition,
         "resource_specs": prepared.resource_specs,
+        "skills_definition": prepared.skills_definition,
         "saga_vars": prepared.saga_vars,
         "timing": timing_acc,
         "usage": usage_acc,
     }
-    if isinstance(cmd, DoStepCommand) and getattr(cmd, "prompt_ref", None):
-        injection_context["prompt_ref"] = cmd.prompt_ref
 
     try:
         adapter = resolve_adapter(

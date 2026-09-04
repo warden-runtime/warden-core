@@ -15,7 +15,6 @@ import anyio.lowlevel
 from anyio.abc import Process
 from anyio.streams.text import TextReceiveStream
 from common.agent_adapter import ExecutionStepError
-from common.config import get_settings
 from common.error_details import build_step_error_details
 from common.governance import execute_with_governance
 from common.plugins.context import (
@@ -26,7 +25,7 @@ from common.plugins.context import (
 from common.plugins.registry import get_registry
 from common.resource_specs import ResourceSpec
 from common.schemas.worker import WorkerBlueprint
-from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_body
+from common.skills import LOAD_SKILL_TOOL_NAME
 from common.utils import format_exception_chain, resolve_bindable_json_type
 from langchain_core.tools import StructuredTool
 from mcp import ClientSession
@@ -251,10 +250,11 @@ def _skill_ids_from_specs(skill_specs: list[dict[str, Any]] | None) -> list[str]
 
 def _build_load_skill_tool(
     *,
-    worker_name: str,
     allowed_skill_ids: list[str],
+    skills_by_name: dict[str, str] | None = None,
 ) -> StructuredTool:
     allowed = set(allowed_skill_ids)
+    bodies = skills_by_name or {}
 
     async def _execute_load_skill(name: str) -> str:
         skill_id = (name or "").strip()
@@ -268,13 +268,17 @@ def _build_load_skill_tool(
                     allowed_skills=sorted(allowed),
                 ),
             )
-        try:
-            return load_skill_body(get_settings().skills_root or "", worker_name, skill_id)
-        except SkillLoadError as e:
-            details = build_step_error_details(code=e.code, message=e.message)
-            if e.skill:
-                details["skill"] = e.skill
-            raise ExecutionStepError(e.message, error_details=details) from e
+        body = bodies.get(skill_id)
+        if not isinstance(body, str):
+            raise ExecutionStepError(
+                f"Skill {skill_id!r} missing from start-frozen skills_definition",
+                error_details=build_step_error_details(
+                    code="SKILL_NOT_FOUND",
+                    message=f"Skill {skill_id!r} missing from start-frozen skills_definition",
+                    skill=skill_id,
+                ),
+            )
+        return body
 
     return StructuredTool.from_function(
         coroutine=_execute_load_skill,
@@ -690,18 +694,33 @@ def _reject_loaded_mcp_load_skill(loaded_tool_names: set[str]) -> None:
         )
 
 
+def _skills_bodies_from_context(context: dict[str, Any] | None) -> dict[str, str]:
+    raw = (context or {}).get("skills_definition")
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, str] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        body = entry.get("body")
+        if name and isinstance(body, str):
+            out[name] = body
+    return out
+
+
 def _append_load_skill_tool(
     tools: list[StructuredTool],
     *,
-    worker_def: Any,
     skill_ids: list[str],
+    skills_by_name: dict[str, str] | None = None,
 ) -> None:
     if not skill_ids:
         return
     tools.append(
         _build_load_skill_tool(
-            worker_name=str(worker_def.name),
             allowed_skill_ids=skill_ids,
+            skills_by_name=skills_by_name,
         )
     )
 
@@ -721,6 +740,7 @@ async def build_tools_for_worker(
     hook_kw = _hook_kwargs(context)
     allowlist = compile_resource_allowlist(resource_specs)
     skill_ids = _skill_ids_from_specs(skill_specs)
+    skills_by_name = _skills_bodies_from_context(context)
     final_tools: list[StructuredTool] = []
     spec_by_name = _spec_by_name_rejecting_load_skill(tool_specs)
     allowed_tools = list(spec_by_name.keys())
@@ -749,7 +769,11 @@ async def build_tools_for_worker(
             hook_kw=hook_kw,
             allowed_tools=allowed_tools,
         )
-        _append_load_skill_tool(tools, worker_def=worker_def, skill_ids=skill_ids)
+        _append_load_skill_tool(
+            tools,
+            skill_ids=skill_ids,
+            skills_by_name=skills_by_name,
+        )
         return tools
 
     for source in tool_sources:
@@ -821,7 +845,11 @@ async def build_tools_for_worker(
             )
         )
 
-    _append_load_skill_tool(final_tools, worker_def=worker_def, skill_ids=skill_ids)
+    _append_load_skill_tool(
+        final_tools,
+        skill_ids=skill_ids,
+        skills_by_name=skills_by_name,
+    )
     return final_tools
 
 

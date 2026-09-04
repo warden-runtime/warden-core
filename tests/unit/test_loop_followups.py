@@ -87,15 +87,14 @@ async def _seed_worker_and_saga(body: dict) -> None:
 
 
 async def _start_and_kick(trace_id: str) -> SagaStepInstance:
-    with patch("engine.logic.assert_prompt_file_exists"):
-        await process_saga_event(
-            {
-                "event_type": "SAGA_STARTED",
-                "saga_trace_id": trace_id,
-                "namespace": "default",
-                "step_span_id": None,
-            }
-        )
+    await process_saga_event(
+        {
+            "event_type": "SAGA_STARTED",
+            "saga_trace_id": trace_id,
+            "namespace": "default",
+            "step_span_id": None,
+        }
+    )
     step = (
         await SagaStepInstance.filter(
             saga_trace_id=trace_id,
@@ -112,16 +111,15 @@ async def _start_and_kick(trace_id: str) -> SagaStepInstance:
 async def _complete_step(
     trace_id: str, step: SagaStepInstance, *, data: dict | None = None
 ) -> None:
-    with patch("engine.logic.assert_prompt_file_exists"):
-        await process_saga_event(
-            {
-                "event_type": "STEP_COMPLETED",
-                "saga_trace_id": trace_id,
-                "namespace": "default",
-                "step_span_id": step.span_id,
-                "output": {"data": data or {"ok": True}},
-            }
-        )
+    await process_saga_event(
+        {
+            "event_type": "STEP_COMPLETED",
+            "saga_trace_id": trace_id,
+            "namespace": "default",
+            "step_span_id": step.span_id,
+            "output": {"data": data or {"ok": True}},
+        }
+    )
 
 
 @pytest.mark.asyncio

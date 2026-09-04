@@ -34,9 +34,6 @@ async def main():
     load_plugins_from_env()
     wire_messaging_from_registry()
 
-    from common.prompts import validate_prompts_root_if_configured
-
-    validate_prompts_root_if_configured()
     logger.info("Starting Worker service...")
 
     await init_db()

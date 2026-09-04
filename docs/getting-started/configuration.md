@@ -14,7 +14,7 @@ Copy `.env.example` to `.env` at the repo root and set the variables in the tabl
 
 Warden splits work across processes that may not share the same filesystem view. Under `make up`, engine and worker run in containers while you typically run the CLI on the host.
 
-**Rule of thumb:** The **CLI** needs access to **manifest YAML** (paths you pass to `warden deploy -f …`). The **engine** and **worker** need access to **prompts, policies, schemas, and compensations** via `*_ROOT` inside their process environment—not your host `./config/...` paths unless Compose mounts those files at the container roots below.
+**Rule of thumb:** The **CLI** needs access to **manifest YAML** (paths you pass to `warden deploy -f …`). The **engine** needs access to **prompts, policies, schemas, skills, and compensations** via `*_ROOT` inside its process environment for register and saga-start freeze—not your host `./config/...` paths unless Compose mounts those files at the container roots below. Workers execute from frozen embeds and do not need those roots at runtime.
 
 ### Dev stack (`make up`)
 
@@ -25,24 +25,24 @@ Engine and worker run in containers; you run `warden` on the host.
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | `.env` — read by Compose `postgres` service | same values bootstrap the DB on first volume init |
 | `DB_URL` | `postgres://...@127.0.0.1:5432/engine_db` (host CLI, `make migrate`) | Built by Compose → `...@postgres:5432/...` (**engine + worker**) |
 | `ENGINE_URL` | `http://127.0.0.1:8000` (**CLI only**) | not set — engine/worker use Postgres, not HTTP to each other |
-| `PROMPTS_ROOT` | **Leave unset** in `.env` | `/app/prompts` (set in `docker-compose.yml`) |
-| `SKILLS_ROOT` | **Leave unset** in `.env` | `/app/skills` |
+| `PROMPTS_ROOT` | **Leave unset** in `.env` | `/app/prompts` (engine; set in `docker-compose.yml`) |
+| `SKILLS_ROOT` | **Leave unset** in `.env` | `/app/skills` (engine) |
 | `POLICIES_ROOT` | **Leave unset** in `.env` | `/app/policies` |
 | `SCHEMAS_ROOT` | **Leave unset** in `.env` | `/app/schemas` |
 | `COMPENSATIONS_ROOT` | **Leave unset** in `.env` | `/app/compensations` |
 
-Compose mounts your repo's `./config/` tree into each container. The host path and container path are different names for the same files:
+Compose mounts your repo's `./config/` tree into the **engine** container. The host path and container path are different names for the same files:
 
 | Repo path (host disk) | Mount inside container | Read by |
 |-----------------------|------------------------|---------|
-| `./config/prompts/` | `/app/prompts` | engine (register + validate), worker (execute) |
-| `./config/skills/` | `/app/skills` | engine (register + validate), worker (execute) |
+| `./config/prompts/` | `/app/prompts` | engine (register + start freeze) |
+| `./config/skills/` | `/app/skills` | engine (register + start freeze) |
 | `./config/policies/` | `/app/policies` | engine |
 | `./config/schemas/` | `/app/schemas` | engine |
 | `./config/compensations/` | `/app/compensations` | engine |
 
 :::warning[Do not mix host paths into `.env` for Compose]
-If you set `PROMPTS_ROOT=./config/prompts` in `.env`, Compose injects that value into containers via `env_file` — but `./config/prompts` does not exist *inside* the container filesystem. The compose file already sets `PROMPTS_ROOT=/app/prompts` and mounts `./config/prompts` there. **Leave `PROMPTS_ROOT`, `SKILLS_ROOT`, `POLICIES_ROOT`, `SCHEMAS_ROOT`, and `COMPENSATIONS_ROOT` unset in `.env` for standard `make up` workflows** so containers use those compose-defined paths instead of a host-relative path that does not resolve inside the image.
+If you set `PROMPTS_ROOT=./config/prompts` in `.env`, Compose injects that value into containers via `env_file` — but `./config/prompts` does not exist *inside* the container filesystem. The compose file already sets `PROMPTS_ROOT=/app/prompts` (and the other `*_ROOT`s) on the **engine** and mounts `./config/…` there. **Leave `PROMPTS_ROOT`, `SKILLS_ROOT`, `POLICIES_ROOT`, `SCHEMAS_ROOT`, and `COMPENSATIONS_ROOT` unset in `.env` for standard `make up` workflows** so the engine uses those compose-defined paths instead of a host-relative path that does not resolve inside the image.
 :::
 
 `warden deploy -f config/saga.minimal.yaml` reads YAML from your host working tree. After deploy, manifest bodies live in Postgres; prompt, policy, schema, and compensation **files** stay on disk and must be visible at the container `*_ROOT` paths above.
@@ -57,7 +57,8 @@ Same host `DB_URL`, in-compose `postgres:5432`, and container `*_ROOT` paths as 
 |----------|----------|---------------|
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | `.env` for Compose substitution | `postgres` service bootstrap |
 | `DB_URL` | `127.0.0.1:5432` | `postgres:5432` (**engine + worker**) |
-| `PROMPTS_ROOT` | leave unset in `.env` | `/app/prompts` |
+| `PROMPTS_ROOT` | leave unset in `.env` | `/app/prompts` (engine) |
+| `SKILLS_ROOT` | leave unset in `.env` | `/app/skills` (engine) |
 | `POLICIES_ROOT` | leave unset in `.env` | `/app/policies` |
 | `SCHEMAS_ROOT` | leave unset in `.env` | `/app/schemas` |
 | `COMPENSATIONS_ROOT` | leave unset in `.env` | `/app/compensations` |
@@ -221,12 +222,12 @@ After changing `.env` or Compose networking, restart the worker (`docker compose
 
 ## Disk artifact roots
 
-Worker and saga **manifest YAML** is stored in Postgres when you `warden deploy`. Prompts, policies, output schemas, and compensation files stay on disk. Deploy link-checks paths; saga **start** (and child spawn) freezes policy CEL, compensation blocks, and `output_schema` JSON onto the instance. Runtime gates / materialize / loop mint use those embeds — they do not re-read the roots mid-run:
+Worker and saga **manifest YAML** is stored in Postgres when you `warden deploy`. Prompts, policies, output schemas, skills, and compensation files stay on disk as authoring artifacts. Deploy link-checks paths; saga **start** (and child spawn) freezes policy CEL, compensation blocks, `output_schema` JSON, Jinja prompts (static includes inlined), and skill payloads onto the instance. Runtime gates / materialize / workers use those embeds — they do not re-read the roots mid-run:
 
 | Variable | Resolves | Consumer |
 |----------|----------|----------|
-| `PROMPTS_ROOT` | `prompt: foo.j2` → `{root}/foo.j2` | engine (register), worker (execute) |
-| `SKILLS_ROOT` | `skills.allow: [{name: triage}]` → `{root}/<worker>/triage.md` | engine (register), worker (execute) |
+| `PROMPTS_ROOT` | `prompt: foo.j2` → `{root}/foo.j2` | engine (register + saga start freeze) |
+| `SKILLS_ROOT` | `skills.allow: [{name: triage}]` → `{root}/<worker>/triage.md` | engine (register + saga start freeze) |
 | `POLICIES_ROOT` | `policy: gate.yaml` → `{root}/gate.yaml` (legacy stem `gate` → `{root}/gate.yaml`) | engine (register + saga start freeze) |
 | `SCHEMAS_ROOT` | `output_schema: triage.json` → `{root}/triage.json` | engine (register + saga start freeze) |
 | `COMPENSATIONS_ROOT` | `compensation: disburse_undo.yaml` → `{root}/disburse_undo.yaml` | engine (register + saga start freeze) |

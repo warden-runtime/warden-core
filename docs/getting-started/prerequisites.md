@@ -31,17 +31,18 @@ The CLI talks to the engine over HTTP. Step execution flows engine → outbox �
 
 ### File resolution
 
-Workflow definitions deploy into Postgres; prompts, policies, and schemas stay on disk. If your sagas use reason steps, make sure both the engine and worker can see your prompts directory — the engine checks those files when you register a workflow, and the worker loads the templates when it runs a step. Under `make up`, leave `PROMPTS_ROOT` unset in `.env`: Compose sets `/app/prompts` inside containers and mounts `./config/prompts` there.
+Workflow definitions deploy into Postgres; prompts, policies, skills, and schemas stay on disk as authoring artifacts. If your sagas use reason steps, make sure the **engine** can see your prompts (and skills) directory — it checks those files when you register a workflow and freezes them onto the instance at saga start. Workers render from the frozen embeds. Under `make up`, leave `PROMPTS_ROOT` unset in `.env`: Compose sets `/app/prompts` on the **engine** and mounts `./config/prompts` there.
 
 ```text
                ┌────────────────────────────────────────┐
                │         Your host / disk volume        │
                │  (PROMPTS_ROOT, POLICIES_ROOT, etc.)   │
-               └───────────┬────────────────┬───────────┘
-                           │                │
-            reads schemas/ │                │ reads Jinja2
-            policies       │                │ prompts at runtime
-                           ▼                ▼
+               └───────────┬────────────────────────────┘
+                           │
+            reads schemas/ │
+            policies/      │ freezes prompts & skills
+            prompts/skills │ at saga start
+                           ▼
                      ┌──────────┐      ┌──────────┐
  [ warden CLI ] ────►│  Engine  │      │  Worker  │
                      └────┬─────┘      └────▲─────┘
@@ -50,14 +51,14 @@ Workflow definitions deploy into Postgres; prompts, policies, and schemas stay o
                   YAML    ▼                 │ claims work via
                      ┌──────────────────────┴─────┐
                      │          Postgres          │
-                     │  (worker/step/saga_definitions) │
+                     │  (definitions + frozen embeds) │
                      └────────────────────────────┘
 ```
 
 <details>
 <summary>Why Postgres and disk split?</summary>
 
-When you deploy a manifest, Warden saves that blueprint to Postgres so it can start execution instances later. Prompts, policies, and schemas stay as files under your `*_ROOT` paths — usually tracked in Git. Keeping them as plain files makes it easy to review diffs and run templates through your normal CI/CD pipelines.
+When you deploy a manifest, Warden saves that blueprint to Postgres so it can start execution instances later. Prompts, skills, policies, and schemas stay as files under your `*_ROOT` paths — usually tracked in Git. The **engine** freezes those artifacts onto each saga instance at start; workers execute from the embeds. Keeping authoring files on disk makes it easy to review diffs and run templates through your normal CI/CD pipelines.
 
 See [Component identity](../concepts/terminology.md#component-identity) for how definitions and running instances are keyed.
 

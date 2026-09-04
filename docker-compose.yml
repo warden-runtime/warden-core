@@ -15,7 +15,7 @@
 # PATH and break /app/.venv (pydantic missing, watchfiles not found). Compose sets PATH
 # explicitly for those services.
 #
-# PROMPTS_ROOT: engine/worker set PROMPTS_ROOT=/app/prompts below (overrides .env). Do not
+# PROMPTS_ROOT / SKILLS_ROOT: set on the engine only (register + saga start freeze). Do not
 # point .env PROMPTS_ROOT at a host path for Compose — that path is wrong inside containers.
 # Leave PROMPTS_ROOT unset in .env for Docker, or use ./config/prompts only for host CLI tools.
 #
@@ -171,16 +171,13 @@ services:
       OTLP_ENDPOINT: http://jaeger:4317
       OTLP_INSECURE: "true"
       OTEL_TRACES_EXPORTER: otlp_proto_grpc
-      PROMPTS_ROOT: /app/prompts
-      SKILLS_ROOT: /app/skills
     # Mount source only (not full repo root): a bind mount of `.:/app` would hide the
     # image's `/app/.venv` from `uv sync` in the Dockerfile; the worker would then
     # depend on a host venv and often exit immediately if `.venv` is missing or stale.
+    # Prompts/skills are frozen onto step rows at saga start — no worker disk mounts needed.
     volumes:
       - ./common:/app/common
       - ./workers:/app/workers
-      - ./config/prompts:/app/prompts:ro
-      - ./config/skills:/app/skills:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:

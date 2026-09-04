@@ -33,23 +33,44 @@ def _frozen_dict_asset(step_model: Any, clean: dict[str, Any], field: str) -> di
     return raw if isinstance(raw, dict) else None
 
 
-def _reason_fields(step_model: ReasonSagaStep | Any) -> dict[str, Any]:
+def _frozen_list_asset(clean: dict[str, Any], field: str) -> list[Any] | None:
+    raw = clean.get(field)
+    return raw if isinstance(raw, list) else None
+
+
+def _frozen_str_asset(clean: dict[str, Any], field: str) -> str | None:
+    raw = clean.get(field)
+    if isinstance(raw, str) and raw.strip():
+        return raw
+    return None
+
+
+def _reason_fields(
+    step_model: ReasonSagaStep | Any,
+    *,
+    prompt_definition: str | None = None,
+    skills_definition: list[Any] | None = None,
+) -> dict[str, Any]:
     if not isinstance(step_model, ReasonSagaStep):
         return {
             "max_step_tokens": None,
             "max_completion_tokens": None,
             "agent_adapter": "react",
             "prompt_ref": None,
+            "prompt_definition": None,
             "facts_extractors": [],
+            "skills_definition": None,
         }
     return {
         "max_step_tokens": step_model.max_step_tokens,
         "max_completion_tokens": step_model.max_completion_tokens,
         "agent_adapter": step_model.agent_adapter,
         "prompt_ref": step_model.prompt,
+        "prompt_definition": prompt_definition,
         "facts_extractors": (
             [f.model_dump() for f in step_model.facts] if step_model.facts else []
         ),
+        "skills_definition": skills_definition,
     }
 
 
@@ -68,6 +89,8 @@ def _step_create_fields(
     iteration_int = int(iteration) if iteration is not None else None
     compensation_definition = _frozen_dict_asset(step_model, clean, "compensation_definition")
     output_schema = _frozen_dict_asset(step_model, clean, "output_schema_definition")
+    skills_definition = _frozen_list_asset(clean, "skills_definition")
+    prompt_definition = _frozen_str_asset(clean, "prompt_definition")
     base = {
         "span_id": uuid.uuid4().hex[:16],
         "saga_trace_id": saga.trace_id,
@@ -153,7 +176,13 @@ def _step_create_fields(
             "hitl_retry_guidance": step_model.hitl_retry_guidance if step_model.hitl else None,
         }
     )
-    base.update(_reason_fields(step_model))
+    base.update(
+        _reason_fields(
+            step_model,
+            prompt_definition=prompt_definition,
+            skills_definition=skills_definition,
+        )
+    )
     return base
 
 

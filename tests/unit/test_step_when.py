@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 from common.models import (
     OutboxEvent,
@@ -80,8 +78,7 @@ async def _schedule_after(
             .first()
         )
         assert locked is not None
-        with patch("engine.logic.assert_prompt_file_exists"):
-            await _schedule_next_forward_step(locked, after_seq, db_conn=conn)
+        await _schedule_next_forward_step(locked, after_seq, db_conn=conn)
         return locked
 
 

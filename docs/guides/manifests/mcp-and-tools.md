@@ -55,13 +55,13 @@ Syntax and examples: [Worker manifests](worker-manifests.md) for `tool_sources`,
 
 Skills are **worker-scoped playbooks** on disk under `SKILLS_ROOT/<worker_name>/<skill_id>.md` (YAML frontmatter + markdown body). They are not MCP tools.
 
-On **`react`** reason steps, optional `skills.allow` lists skill ids the step may load. At execute time the worker:
+On **`react`** reason steps, optional `skills.allow` lists skill ids the step may load. At saga **start**, the engine freezes each allowed skill’s frontmatter + body onto `frozen_steps` / the step row as `skills_definition`. At execute time the worker:
 
-1. Loads each skill’s frontmatter (`name`, `description`, `allowed_tools`)
+1. Reads frozen skill documents from `skills_definition` (no live `SKILLS_ROOT` read)
 2. Unions those `allowed_tools` with the step’s `tools.allow` (**extras**) into the effective MCP allowlist (raw and sanitized MCP ids collapse to one entry; extras win for schemas)
-3. Injects a virtual **`load_skill`** tool and puts `allowed_skills: [{name, description}, …]` into the step prompt context (static index)
+3. Injects a virtual **`load_skill`** tool (bodies from the freeze) and puts `allowed_skills: [{name, description}, …]` into the step prompt context (static index)
 
-Do **not** list `load_skill` in `tools.allow` or skill `allowed_tools` — it is reserved like `_submit`. Missing or malformed skill files fail the step with `SKILL_NOT_FOUND` / `SKILL_INVALID` **before** any LLM turn. Incompatible with **`agent-adapter: simple`**. Commit steps and compensation undo YAML do not use skills.
+Do **not** list `load_skill` in `tools.allow` or skill `allowed_tools` — it is reserved like `_submit`. Missing, malformed, or empty-body skill files fail **saga start** hydrate (or registration) with `SKILL_NOT_FOUND` / `SKILL_INVALID`. Keep skill files where the **engine** can read `SKILLS_ROOT` at register/start. Incompatible with **`agent-adapter: simple`**. Commit steps and compensation undo YAML do not use skills.
 
 ```yaml
 # step catalog (reason)

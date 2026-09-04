@@ -109,7 +109,7 @@ On a run, **`triage`** loads the prompt, calls read-only MCP tools, and validate
 make up
 ```
 
-`make up` starts Postgres, runs migrations, then brings up engine and worker. The engine mounts `config/` for policies, schemas, compensations, and prompts; the worker mounts prompts and the Docker socket for MCP.
+`make up` starts Postgres, runs migrations, then brings up engine and worker. The engine mounts `config/` for policies, schemas, compensations, prompts, and skills; workers execute from start-frozen embeds (no prompt/skill disk mounts).
 
 If services look stuck, run `make doctor`.
 

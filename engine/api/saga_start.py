@@ -133,6 +133,8 @@ async def _create_saga_and_steps(
     schemas_root: str | None,
     compensations_root: str | None,
     policies_root: str | None = None,
+    prompts_root: str | None = None,
+    skills_root: str | None = None,
     parent_trace_id: str | None = None,
 ) -> str:
     if not isinstance(definition.body, dict):
@@ -148,6 +150,8 @@ async def _create_saga_and_steps(
         compensations_root=compensations_root,
         policies_root=policies_root,
         schemas_root=schemas_root,
+        prompts_root=prompts_root,
+        skills_root=skills_root,
     )
     segment, loop_state = take_initial_materialization_segment(frozen_steps)
     loop_definitions = build_loop_definitions(frozen_steps)
@@ -267,6 +271,8 @@ async def start_saga(
             schemas_root=settings.schemas_root,
             compensations_root=settings.compensations_root,
             policies_root=settings.policies_root,
+            prompts_root=settings.prompts_root,
+            skills_root=settings.skills_root,
         )
 
     logger.info("Started saga %s (namespace=%s, definition=%s)", trace_id, namespace, name)

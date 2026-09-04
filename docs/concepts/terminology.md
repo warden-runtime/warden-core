@@ -86,8 +86,8 @@ Warden uses three different verbs on purpose:
 | Verb | Layer | Meaning |
 |------|--------|---------|
 | **Hydrate** | Catalog → runtime graph | Resolve saga `use:` refs into an execution-ready `HydratedSagaBlueprint` / instance `frozen_steps` (deploy link-check or start freeze). |
-| **Render** | Jinja prompts | Fill a prompt template with resolved `with` values (`render_prompt_file` / `resolve_step_prompt`). |
-| **Prepare** / **init** | Worker command | Load the step row and prompt template before adapter setup (`worker_init_ms`), then tool/adapter setup (`setup_ms`). |
+| **Render** | Jinja prompts | Fill the start-frozen `prompt_definition` with resolved `with` values (`resolve_step_prompt`). Deploy-time helpers may still call `render_prompt_file` against disk. |
+| **Prepare** / **init** | Worker command | Load the step row and frozen prompt embed before adapter setup (`worker_init_ms`), then tool/adapter setup (`setup_ms`). |
 
 ## Component identity
 

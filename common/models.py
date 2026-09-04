@@ -192,6 +192,13 @@ class SagaStepInstance(models.Model):
             "(name under SKILLS_ROOT/<worker>/)."
         ),
     )
+    skills_definition = fields.JSONField(
+        null=True,
+        description=(
+            "Resolved skill documents (name, description, allowed_tools, body) frozen at "
+            "saga start from SKILLS_ROOT; worker load_skill uses this embed."
+        ),
+    )
     parameters_spec = fields.JSONField(
         default=dict,
         description="Step ``with`` map: argument name → {from: JSONPath} or {value: literal}.",
@@ -201,6 +208,13 @@ class SagaStepInstance(models.Model):
         description="Evaluated arguments passed to the worker after JSONPath resolution.",
     )
     prompt_ref = fields.CharField(max_length=512, null=True)
+    prompt_definition = fields.TextField(
+        null=True,
+        description=(
+            "Inlined Jinja prompt template frozen at saga start from PROMPTS_ROOT "
+            "(static includes expanded); worker renders this embed."
+        ),
+    )
     output_payload = fields.JSONField(
         null=True,
         description="STEP_COMPLETED/FAILED worker output object; business data under output.data when set.",

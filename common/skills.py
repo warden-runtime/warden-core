@@ -1,4 +1,4 @@
-"""Load worker-scoped skill files from SKILLS_ROOT (shared by engine registration and workers)."""
+"""Load worker-scoped skill files from SKILLS_ROOT (engine register + start freeze)."""
 
 from __future__ import annotations
 
@@ -242,6 +242,60 @@ def assert_skill_files_exist(
         resolved_skill_path(root, worker_name, skill_id)
 
 
+def skills_definition_by_name(
+    skills_def: list[Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Index frozen skill documents by ``name`` (last write wins)."""
+    by_name: dict[str, dict[str, Any]] = {}
+    for entry in skills_def or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if name:
+            by_name[name] = entry
+    return by_name
+
+
+def skill_embed_is_complete(doc: dict[str, Any]) -> bool:
+    """True when a frozen skill dict has a non-empty body and an ``allowed_tools`` list."""
+    body = doc.get("body")
+    tools = doc.get("allowed_tools")
+    return isinstance(body, str) and bool(body.strip()) and isinstance(tools, list)
+
+
+def skills_coverage_gaps(
+    skill_ids: list[str], by_name: dict[str, dict[str, Any]]
+) -> tuple[list[str], list[str]]:
+    """Return (missing_ids, incomplete_ids) for ``skills.allow`` vs frozen embeds."""
+    missing = [sid for sid in skill_ids if sid not in by_name]
+    invalid = [
+        sid for sid in skill_ids if sid in by_name and not skill_embed_is_complete(by_name[sid])
+    ]
+    return missing, invalid
+
+
+def skill_document_to_definition(doc: SkillDocument) -> dict[str, Any]:
+    """Serialize a loaded skill into the frozen ``skills_definition`` shape."""
+    return {
+        "name": doc.name,
+        "description": doc.description,
+        "allowed_tools": list(doc.allowed_tools),
+        "body": doc.body,
+    }
+
+
+def assert_skill_document_complete(doc: SkillDocument, *, skill_id: str) -> None:
+    """Raise when a loaded skill cannot be frozen for execution."""
+    entry = skill_document_to_definition(doc)
+    if skill_embed_is_complete(entry):
+        return
+    raise SkillLoadError(
+        "SKILL_INVALID",
+        f"Skill {skill_id!r} cannot be frozen: need non-empty body and allowed_tools list",
+        skill=skill_id,
+    )
+
+
 def validate_skill_files_at_register(
     skills_root: str | None,
     worker_name: str,
@@ -250,9 +304,10 @@ def validate_skill_files_at_register(
     """Register-time: files exist and frontmatter parses; return loaded docs."""
     if not skill_ids:
         return []
+    root = resolve_skills_root(skills_root)
     docs: list[SkillDocument] = []
     for skill_id in skill_ids:
-        docs.append(load_skill_document(skills_root or "", worker_name, skill_id))
+        docs.append(load_skill_document(root, worker_name, skill_id))
     return docs
 
 

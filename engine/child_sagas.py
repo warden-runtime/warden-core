@@ -154,6 +154,8 @@ async def _spawn_one_child(
             schemas_root=settings.schemas_root,
             compensations_root=settings.compensations_root,
             policies_root=settings.policies_root,
+            prompts_root=settings.prompts_root,
+            skills_root=settings.skills_root,
             parent_trace_id=saga.trace_id,
         )
 

@@ -32,7 +32,7 @@ from common.plugins.registry import get_registry
 from common.resource_specs import ResourceSpec
 from common.schemas.saga import DEFAULT_MAX_TURNS
 from common.schemas.worker import WorkerBlueprint
-from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_document
+from common.skills import LOAD_SKILL_TOOL_NAME, skills_definition_by_name
 from common.step_facts import StepFactsExtractionError, extract_step_facts
 from common.step_output import business_data_from_step_output, wrap_step_output_data
 from common.tool_arg_bind import bound_arguments_from_step, overlay_bound_tool_arguments
@@ -58,21 +58,39 @@ from workers.utils import resolve_step_prompt
 logger = logging.getLogger(__name__)
 
 
-def _execution_error_from_skill_load(exc: SkillLoadError) -> ExecutionStepError:
-    details = build_step_error_details(code=exc.code, message=exc.message)
-    if exc.skill:
-        details["skill"] = exc.skill
-    return ExecutionStepError(exc.message, error_details=details)
+def _skill_tool_names_from_doc(doc: dict[str, Any]) -> list[str]:
+    tools_raw = doc.get("allowed_tools") or []
+    if not isinstance(tools_raw, list):
+        return []
+    return [str(t) for t in tools_raw if str(t).strip()]
+
+
+def _require_frozen_skill_doc(
+    *,
+    skill_id: str,
+    by_name: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    doc = by_name.get(skill_id)
+    if doc is None:
+        raise ExecutionStepError(
+            f"Skill {skill_id!r} is not in skills_definition for this step",
+            error_details=build_step_error_details(
+                code="SKILL_NOT_FOUND",
+                message=f"Skill {skill_id!r} missing from start-frozen skills_definition",
+                skill=skill_id,
+            ),
+        )
+    return doc
 
 
 def _resolve_skills_for_step(
     *,
-    worker_name: str,
     skill_specs: list[dict[str, Any]],
     extras: list[dict[str, Any]],
+    skills_definition: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Load skill metas from disk, union tools, return (effective_tool_specs, allowed_skills index)."""
-    skills_root = get_settings().skills_root
+    """Build tool union + allowed_skills index from frozen skill documents."""
+    by_name = skills_definition_by_name(skills_definition)
     skill_tool_names: list[str] = []
     index: list[dict[str, str]] = []
     for spec in skill_specs:
@@ -81,12 +99,14 @@ def _resolve_skills_for_step(
         skill_id = str(spec.get("name") or "").strip()
         if not skill_id:
             continue
-        try:
-            doc = load_skill_document(skills_root or "", worker_name, skill_id)
-        except SkillLoadError as e:
-            raise _execution_error_from_skill_load(e) from e
-        skill_tool_names.extend(doc.allowed_tools)
-        index.append({"name": doc.name, "description": doc.description})
+        doc = _require_frozen_skill_doc(skill_id=skill_id, by_name=by_name)
+        skill_tool_names.extend(_skill_tool_names_from_doc(doc))
+        index.append(
+            {
+                "name": str(doc.get("name") or skill_id),
+                "description": str(doc.get("description") or ""),
+            }
+        )
     effective = union_tool_specs_with_skill_tools(extras=extras, skill_tool_names=skill_tool_names)
     return effective, index
 
@@ -531,7 +551,6 @@ class LangChainAdapter(AgentAdapterPort):
             final_input = resolve_step_prompt(
                 prompt_template=prompt_template,
                 template_context=template_context,
-                context=ctx,
             )
             logger.info("Resolved prompt template: %s", final_input)
             return await self._run_simple_step(
@@ -554,10 +573,22 @@ class LangChainAdapter(AgentAdapterPort):
         effective_tool_specs = list(tool_specs or [])
         allowed_skills_index: list[dict[str, str]] = []
         if skills:
+            skills_definition = ctx.get("skills_definition") if isinstance(ctx, dict) else None
+            if not isinstance(skills_definition, list):
+                raise ExecutionStepError(
+                    "Step has skills.allow but injection context has no skills_definition; "
+                    "saga start must freeze skill payloads onto the step row.",
+                    error_details=build_step_error_details(
+                        code="SKILL_NOT_FOUND",
+                        message=(
+                            "Missing start-frozen skills_definition in worker injection context"
+                        ),
+                    ),
+                )
             effective_tool_specs, allowed_skills_index = _resolve_skills_for_step(
-                worker_name=str(self._worker_definition.name),
                 skill_specs=skills,
                 extras=effective_tool_specs,
+                skills_definition=skills_definition,
             )
 
         spec_names = [name for t in effective_tool_specs if isinstance(name := t.get("name"), str)]
@@ -595,7 +626,6 @@ class LangChainAdapter(AgentAdapterPort):
             final_input = resolve_step_prompt(
                 prompt_template=prompt_template,
                 template_context=template_context,
-                context=ctx,
             )
             logger.info("Resolved prompt template: %s", final_input)
 

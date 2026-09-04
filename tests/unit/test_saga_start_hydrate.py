@@ -76,12 +76,15 @@ async def test_start_saga_hydrates_use_refs_into_frozen_steps() -> None:
     assert frozen["id"] == "step1"
     assert frozen["worker"] == "hydrate-worker"
     assert frozen["prompt"] == "noop.j2"
+    assert frozen.get("prompt_definition")
+    assert "No-op prompt" in frozen["prompt_definition"]
     assert frozen["step_definition_name"] == "hydrate-step"
     assert frozen["step_definition_version"] == "1.0.0"
 
     step = await SagaStepInstance.get(saga_trace_id=result.trace_id, step_id="step1")
     assert step.step_definition_name == "hydrate-step"
     assert step.worker == "hydrate-worker"
+    assert step.prompt_definition == frozen["prompt_definition"]
 
 
 @pytest.mark.asyncio
@@ -228,9 +231,11 @@ steps:
 @pytest.mark.asyncio
 async def test_child_spawn_hydrates_child_definition_into_own_frozen_steps() -> None:
     """Child start resolves the child saga's use: refs into the child instance freeze."""
+    from common.config import get_settings
     from engine.api.saga_start import _create_saga_and_steps
     from tortoise.transactions import in_transaction
 
+    settings = get_settings()
     service = RegistryService()
     await service.register_manifest(WORKER_YAML)
     await service.register_manifest(STEP_YAML)
@@ -263,6 +268,8 @@ steps:
             idempotency_key=None,
             schemas_root=None,
             compensations_root=None,
+            prompts_root=settings.prompts_root,
+            skills_root=settings.skills_root,
             parent_trace_id="a" * 32,
         )
 
@@ -270,4 +277,5 @@ steps:
     assert child.parent_trace_id == "a" * 32
     assert child.frozen_steps[0]["kind"] == "reason"
     assert child.frozen_steps[0]["step_definition_name"] == "hydrate-step"
+    assert child.frozen_steps[0].get("prompt_definition")
     assert await StepDefinition.filter(name="hydrate-step").count() == 1

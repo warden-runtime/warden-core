@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import time
 import uuid
@@ -59,9 +58,9 @@ from common.policy_gate import (
     step_policy_definition,
 )
 from common.processed_command_reap import release_worker_claim_for_retry
-from common.prompts import assert_prompt_file_exists
 from common.schemas.engine_events import AuditEngineEventType
 from common.schemas.saga import WORKER_STEP_KINDS, is_engine_native_kind
+from common.skills import skills_coverage_gaps, skills_definition_by_name
 from common.step_input_schema import (
     assert_jsonpath_bindings_resolved,
     validate_resolved_arguments_against_input_ports,
@@ -1954,6 +1953,55 @@ async def _build_commit_worker_command(
     return cmd, CommandType.DO_COMMIT.value
 
 
+def _require_frozen_prompt_definition(step: SagaStepInstance) -> None:
+    if not step.prompt_ref:
+        raise ValueError(
+            f"Step {step.span_id} has no prompt_ref; "
+            "file-based prompts are required for reason steps."
+        )
+    prompt_def = getattr(step, "prompt_definition", None)
+    if not isinstance(prompt_def, str) or not prompt_def.strip():
+        raise ValueError(
+            f"Step {step.span_id} has no prompt_definition; "
+            "saga start must freeze the prompt template onto the step row."
+        )
+
+
+def _skill_ids_from_specs(skill_specs: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(s["name"]).strip()
+        for s in skill_specs
+        if isinstance(s, dict) and isinstance(s.get("name"), str) and s["name"].strip()
+    ]
+
+
+def _require_frozen_skills_definition(
+    step: SagaStepInstance, skill_specs: list[dict[str, Any]]
+) -> None:
+    skill_ids = _skill_ids_from_specs(skill_specs)
+    if not skill_ids:
+        return
+    skills_def = getattr(step, "skills_definition", None)
+    if not isinstance(skills_def, list):
+        raise ValueError(
+            f"Step {step.span_id} has skills.allow but no skills_definition; "
+            "saga start must freeze skill payloads onto the step row."
+        )
+    missing, invalid = skills_coverage_gaps(skill_ids, skills_definition_by_name(skills_def))
+    if not missing and not invalid:
+        return
+    parts: list[str] = []
+    if missing:
+        parts.append(f"missing embeds for {missing!r}")
+    if invalid:
+        parts.append(
+            f"incomplete embeds for {invalid!r} (need non-empty string body and allowed_tools list)"
+        )
+    raise ValueError(
+        f"Step {step.span_id} skills_definition does not cover skills.allow: " + "; ".join(parts)
+    )
+
+
 async def _build_reason_worker_command(
     *,
     saga: SagaInstance,
@@ -1962,32 +2010,8 @@ async def _build_reason_worker_command(
     resource_specs: list[Any],
     skill_specs: list[dict[str, Any]],
 ) -> tuple[DoStepCommand, str]:
-    if not step.prompt_ref:
-        raise ValueError(
-            f"Step {step.span_id} has no prompt_ref; "
-            "PROMPTS_ROOT and file-based prompts are required for reason steps."
-        )
-    prompts_root = get_settings().prompts_root
-    if not prompts_root or not str(prompts_root).strip():
-        raise ValueError(
-            "prompts_root is not configured; set PROMPTS_ROOT when scheduling reason steps."
-        )
-    await asyncio.to_thread(assert_prompt_file_exists, prompts_root, step.prompt_ref)
-    skill_ids = [
-        str(s["name"])
-        for s in skill_specs
-        if isinstance(s, dict) and isinstance(s.get("name"), str) and s["name"].strip()
-    ]
-    if skill_ids:
-        from common.skills import assert_skill_files_exist
-
-        skills_root = get_settings().skills_root
-        await asyncio.to_thread(
-            assert_skill_files_exist,
-            skills_root,
-            step.worker,
-            skill_ids,
-        )
+    _require_frozen_prompt_definition(step)
+    _require_frozen_skills_definition(step, skill_specs)
     cmd = DoStepCommand(
         type=CommandType.DO_STEP,
         namespace=saga.namespace,

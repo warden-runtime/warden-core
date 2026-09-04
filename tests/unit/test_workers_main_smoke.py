@@ -19,7 +19,6 @@ def worker_boot_mocks(mocker):
     mocker.patch("workers.main.configure_logging")
     mocker.patch("common.plugins.loader.load_plugins_from_env")
     mocker.patch("workers.main.wire_messaging_from_registry")
-    mocker.patch("common.prompts.validate_prompts_root_if_configured")
     mocker.patch("workers.main.init_db", new_callable=AsyncMock)
 
     mock_consumer = mocker.MagicMock()
@@ -70,7 +69,6 @@ async def test_worker_main_reaper_crash_still_stops_consumer(mocker):
     mocker.patch("workers.main.configure_logging")
     mocker.patch("common.plugins.loader.load_plugins_from_env")
     mocker.patch("workers.main.wire_messaging_from_registry")
-    mocker.patch("common.prompts.validate_prompts_root_if_configured")
     mocker.patch("workers.main.init_db", new_callable=AsyncMock)
 
     shutdown_holder: dict[str, asyncio.Event] = {}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -13,6 +14,7 @@ from common.catalog_errors import (
 from common.manifest_validation import manifest_validation_error
 from common.models import StepDefinition
 from common.policy.loader import load_policy_artifact
+from common.prompts import freeze_prompt_definition
 from common.saga_assets import load_compensation_definition, load_output_schema
 from common.schemas.saga import (
     CommitSagaStep,
@@ -27,6 +29,12 @@ from common.schemas.saga import (
     SpawnSagasStep,
 )
 from common.schemas.step import CommitStepBlueprint, ReasonStepBlueprint, parse_step_blueprint
+from common.skills import (
+    SkillLoadError,
+    assert_skill_document_complete,
+    load_skill_document,
+    skill_document_to_definition,
+)
 from common.step_hydrate import hydrate_authoring_blueprint
 from pydantic import ValidationError
 
@@ -71,8 +79,10 @@ async def _embed_resolved_assets_on_step_dict(
     compensations_root: str | None,
     policies_root: str | None,
     schemas_root: str | None,
+    prompts_root: str | None,
+    skills_root: str | None,
 ) -> None:
-    """Freeze compensation, policy CEL, and output_schema JSON onto one step dict."""
+    """Freeze compensation, policy, schema, prompt, and skills onto one step dict."""
     if isinstance(step, (SpawnSagasStep, JoinSagasStep)):
         return
     try:
@@ -103,9 +113,106 @@ async def _embed_resolved_assets_on_step_dict(
         )
         if schema:
             step_dict["output_schema_definition"] = schema
-    except (OSError, FileNotFoundError, ValueError, json.JSONDecodeError, yaml.YAMLError) as e:
+
+        if isinstance(step, ReasonSagaStep):
+            await _embed_reason_prompt_and_skills(
+                step_dict=step_dict,
+                step=step,
+                prompts_root=prompts_root,
+                skills_root=skills_root,
+            )
+    except (
+        OSError,
+        FileNotFoundError,
+        ValueError,
+        json.JSONDecodeError,
+        yaml.YAMLError,
+        SkillLoadError,
+    ) as e:
         step_id = step_dict.get("id") or getattr(step, "id", None)
         raise ValueError(f"Failed to freeze step assets (id={step_id!r}): {e}") from e
+
+
+async def _freeze_prompt_onto_step_dict(
+    *,
+    step_dict: dict[str, Any],
+    prompt_ref: str,
+    prompts_root: str | None,
+) -> None:
+    if not prompts_root or not str(prompts_root).strip():
+        raise ValueError(
+            "prompts_root is not configured; set PROMPTS_ROOT to freeze reason-step prompts."
+        )
+    step_dict["prompt_definition"] = await asyncio.to_thread(
+        freeze_prompt_definition, prompts_root, prompt_ref
+    )
+
+
+async def _freeze_skill_docs_for_step(
+    *,
+    skills_root: str,
+    worker_name: str,
+    skill_ids: list[str],
+) -> list[dict[str, Any]]:
+    docs: list[dict[str, Any]] = []
+    for skill_id in skill_ids:
+        doc = await asyncio.to_thread(load_skill_document, skills_root, worker_name, skill_id)
+        assert_skill_document_complete(doc, skill_id=skill_id)
+        docs.append(skill_document_to_definition(doc))
+    return docs
+
+
+def _skill_ids_from_reason_step(step: ReasonSagaStep) -> list[str]:
+    if not step.skills or not step.skills.allow:
+        return []
+    return [(skill.name or "").strip() for skill in step.skills.allow if (skill.name or "").strip()]
+
+
+async def _embed_reason_prompt_and_skills(
+    *,
+    step_dict: dict[str, Any],
+    step: ReasonSagaStep,
+    prompts_root: str | None,
+    skills_root: str | None,
+) -> None:
+    """Freeze inlined prompt text and skill documents for a reason step."""
+    prompt_ref = (step.prompt or "").strip()
+    if prompt_ref:
+        await _freeze_prompt_onto_step_dict(
+            step_dict=step_dict, prompt_ref=prompt_ref, prompts_root=prompts_root
+        )
+    skill_ids = _skill_ids_from_reason_step(step)
+    if not skill_ids:
+        return
+    if not skills_root or not str(skills_root).strip():
+        raise ValueError("skills_root is not configured; set SKILLS_ROOT to freeze skill payloads.")
+    docs = await _freeze_skill_docs_for_step(
+        skills_root=str(skills_root).strip(),
+        worker_name=step.worker,
+        skill_ids=skill_ids,
+    )
+    if docs:
+        step_dict["skills_definition"] = docs
+
+
+def _require_step_dict_at_index(
+    steps_body: list[Any],
+    index: int,
+    *,
+    where: str,
+) -> dict[str, Any]:
+    if index >= len(steps_body):
+        raise ValueError(
+            f"Hydrated steps body shorter than blueprint at {where} "
+            f"(index={index}, body_len={len(steps_body)})"
+        )
+    entry = steps_body[index]
+    if not isinstance(entry, dict):
+        raise ValueError(
+            f"Hydrated steps body entry at {where} index={index} must be a dict, "
+            f"got {type(entry).__name__}"
+        )
+    return entry
 
 
 async def embed_resolved_step_assets(
@@ -115,35 +222,58 @@ async def embed_resolved_step_assets(
     compensations_root: str | None,
     policies_root: str | None,
     schemas_root: str | None,
+    prompts_root: str | None = None,
+    skills_root: str | None = None,
 ) -> None:
-    """Walk hydrated steps once and attach frozen compensation / policy / output_schema."""
+    """Walk hydrated steps once and attach frozen disk assets."""
     steps_body = body_payload.get("steps")
     if not isinstance(steps_body, list):
-        return
+        raise ValueError(
+            "Cannot embed step assets: hydrated body 'steps' must be a list "
+            f"(got {type(steps_body).__name__})"
+        )
+    if len(steps_body) != len(blueprint.steps):
+        raise ValueError(
+            "Cannot embed step assets: blueprint steps length "
+            f"({len(blueprint.steps)}) != body steps length ({len(steps_body)})"
+        )
     for index, step in enumerate(blueprint.steps):
-        if index >= len(steps_body) or not isinstance(steps_body[index], dict):
-            continue
+        step_dict = _require_step_dict_at_index(steps_body, index, where="steps")
         if isinstance(step, LoopSagaStep):
-            body_list = steps_body[index].get("steps")
+            body_list = step_dict.get("steps")
             if not isinstance(body_list, list):
-                continue
+                raise ValueError(
+                    f"Cannot embed loop body assets at steps[{index}]: "
+                    f"'steps' must be a list (got {type(body_list).__name__})"
+                )
+            if len(body_list) != len(step.steps):
+                raise ValueError(
+                    f"Cannot embed loop body assets at steps[{index}]: "
+                    f"blueprint body length ({len(step.steps)}) != "
+                    f"dict body length ({len(body_list)})"
+                )
             for body_i, body_step in enumerate(step.steps):
-                if body_i >= len(body_list) or not isinstance(body_list[body_i], dict):
-                    continue
+                nested = _require_step_dict_at_index(
+                    body_list, body_i, where=f"steps[{index}].steps"
+                )
                 await _embed_resolved_assets_on_step_dict(
-                    step_dict=body_list[body_i],
+                    step_dict=nested,
                     step=body_step,
                     compensations_root=compensations_root,
                     policies_root=policies_root,
                     schemas_root=schemas_root,
+                    prompts_root=prompts_root,
+                    skills_root=skills_root,
                 )
             continue
         await _embed_resolved_assets_on_step_dict(
-            step_dict=steps_body[index],
+            step_dict=step_dict,
             step=step,
             compensations_root=compensations_root,
             policies_root=policies_root,
             schemas_root=schemas_root,
+            prompts_root=prompts_root,
+            skills_root=skills_root,
         )
 
 
@@ -249,6 +379,8 @@ async def hydrate_authoring_body_to_frozen_steps(
     compensations_root: str | None,
     policies_root: str | None = None,
     schemas_root: str | None = None,
+    prompts_root: str | None = None,
+    skills_root: str | None = None,
 ) -> list[dict[str, Any]]:
     """Parse authoring AST, resolve catalog steps, return executable frozen_steps list."""
     authoring_data = _authoring_data_from_body(
@@ -280,6 +412,8 @@ async def hydrate_authoring_body_to_frozen_steps(
         compensations_root=compensations_root,
         policies_root=policies_root,
         schemas_root=schemas_root,
+        prompts_root=prompts_root,
+        skills_root=skills_root,
     )
     steps = payload.get("steps")
     if not isinstance(steps, list):

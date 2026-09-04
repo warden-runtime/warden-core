@@ -39,7 +39,7 @@ warden deploy -f config/saga.github-demo.yaml
 | `kind: step` | `step_definitions` | Reusable capability: `step_kind`, inputs, worker pin, tools/prompt/policy/HITL |
 | `kind: saga` | `saga_definitions` | Composition via `use:` + `version` + `with` + `when` (authoring AST; hydrate at start) |
 
-Everything else — Jinja prompts, CEL policies, JSON Schema, compensation YAML — is referenced by path from step or worker fields (and validated when those manifests deploy) and resolved from disk. Details and examples are in [Artifact paths](#artifact-paths).
+Everything else — Jinja prompts, skill playbooks, CEL policies, JSON Schema, compensation YAML — is referenced by path from step or worker fields (and validated when those manifests deploy) and resolved from disk at register / saga start. Details and examples are in [Artifact paths](#artifact-paths).
 
 ## Artifact paths
 
@@ -48,13 +48,14 @@ Step and worker manifests point at on-disk files by **path relative to a `*_ROOT
 | Manifest field | Root env var | Manifest example | Resolved path |
 |----------------|--------------|------------------|---------------|
 | `prompt` | `PROMPTS_ROOT` | `github-triage.j2` | `{root}/github-triage.j2` |
+| `skills.allow` | `SKILLS_ROOT` | `name: triage` | `{root}/<worker>/triage.md` |
 | `policy` | `POLICIES_ROOT` | `github-issue-comment.yaml` | `{root}/github-issue-comment.yaml` |
 | `output_schema` | `SCHEMAS_ROOT` | `github-triage-output.json` | `{root}/github-triage-output.json` |
 | `compensation` | `COMPENSATIONS_ROOT` | `disburse_undo.yaml` | `{root}/disburse_undo.yaml` |
 
-Always use paths **with file extensions** as shown in the table. Subdirectories are allowed (`teams/marketing/gate.yaml`). How engine and worker resolve `*_ROOT` on the host vs in Compose: [Configuration → Disk artifact roots](../../getting-started/configuration.md#disk-artifact-roots).
+Always use paths **with file extensions** as shown in the table (skill ids map to `{id}.md`). Subdirectories are allowed (`teams/marketing/gate.yaml`). How the **engine** resolves `*_ROOT` on the host vs in Compose: [Configuration → Disk artifact roots](../../getting-started/configuration.md#disk-artifact-roots).
 
-When you deploy a **step** (or a saga that link-checks those fields), the engine checks that referenced prompt, policy, schema, and compensation files exist on disk. When a step instance runs, the worker loads prompts and executes against those paths.
+When you deploy a **step** (or a saga that link-checks those fields), the engine checks that referenced prompt, policy, schema, skill, and compensation files exist on disk. At saga **start**, the engine freezes prompts, skills, policies, schemas, and compensation into the instance; workers execute against those embeds (not a live re-read of `*_ROOT`).
 
 ## Authoring pipeline
 

@@ -87,21 +87,12 @@ def resolve_step_prompt(
     *,
     prompt_template: str,
     template_context: dict[str, Any],
-    context: dict[str, Any] | None,
 ) -> Any:
-    """Render a reason-step prompt; use file loader when ``prompt_ref`` is in context.
+    """Render a reason-step prompt from the frozen ``prompt_template`` string.
 
-    File prompts under ``PROMPTS_ROOT`` support Jinja ``{% include %}``. Inline /
-    string templates (tests, ``with`` bindings) keep a string loader via ``resolve_input``.
-    Both paths use ``SandboxedEnvironment``.
+    Start hydrate inlines static ``{% include %}`` into ``prompt_definition``; execution
+    never re-reads ``PROMPTS_ROOT``. Both paths use ``SandboxedEnvironment``.
     """
-    from common.config import get_settings
-    from common.prompts import render_prompt_file
-
-    prompts_root = get_settings().prompts_root
-    prompt_ref = (context or {}).get("prompt_ref")
-    if prompts_root and isinstance(prompt_ref, str) and prompt_ref.strip():
-        return render_prompt_file(prompts_root, prompt_ref, template_context)
     return resolve_input(template_structure=prompt_template, context=template_context)
 
 

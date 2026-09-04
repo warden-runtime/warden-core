@@ -33,6 +33,8 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
         "step_definition_version",
         "input_ports",
         "policy_definition",
+        "prompt_definition",
+        "skills_definition",
     ),
     "saga_instances": (
         "frozen_steps",

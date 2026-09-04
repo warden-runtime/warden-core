@@ -6,7 +6,7 @@ pagination_next: guides/manifests/mcp-and-tools
 
 # Prompts
 
-A `reason` step uses a [Jinja2](https://jinja.palletsprojects.com/en/stable/templates/) template to build the user prompt that goes to the LLM. Unlike saga manifests, prompts aren't saved to the database with version numbers — they live as plain files on disk under `PROMPTS_ROOT`. Your **step** manifest points to the file (`prompt: triage.j2`); the saga binds port values with `with`. When the step runs, the worker combines the file and the data to render your prompt.
+A `reason` step uses a [Jinja2](https://jinja.palletsprojects.com/en/stable/templates/) template to build the user prompt that goes to the LLM. Prompt **files** live on disk under `PROMPTS_ROOT`; your **step** manifest points at a relative path (`prompt: triage.j2`). At saga **start**, the engine freezes the template (with static `{% include %}` inlined) onto the instance as `prompt_definition`. The worker renders that frozen string with resolved `with` bindings — it does not re-read `PROMPTS_ROOT` mid-run.
 
 Commit steps never use prompt files — they call one MCP tool with resolved `with` arguments. Compensation undo steps use YAML under `COMPENSATIONS_ROOT` (not saga prompt templates) — see [Compensation](compensation.md).
 
@@ -60,17 +60,17 @@ For JSONPath syntax, resolution timing, and binding to prior step output, see [S
 
 ## Where prompt files live
 
-Prompt files stay on disk — they aren't copied into Postgres. Both engine and worker read them from `PROMPTS_ROOT` at different times:
+Prompt **refs** stay as paths on disk. At saga start the engine copies the resolved template text onto `frozen_steps` / the step row as `prompt_definition` (same freeze pattern as policy and compensation). Disk edits after start do not affect **running** instances:
 
 | Consumer | When | What |
 |----------|------|------|
 | Engine | Step registration | Read file body; validate `{{ var }}` ⊆ step `inputs` keys |
-| Engine | Step schedule | Re-check file still exists |
-| Worker | Step execution | Load file body; render with resolved bindings |
+| Engine | Saga start / child spawn | Freeze template (+ static includes) into `prompt_definition` |
+| Worker | Step execution | Render frozen `prompt_definition` with resolved bindings |
 
-Both engine and worker need the same logical tree. In Compose, `./config/prompts` mounts at `/app/prompts` on both services — leave `PROMPTS_ROOT` unset in `.env` so container paths win. On the host CLI, export `PROMPTS_ROOT=./config/prompts`. See [Manifests and artifacts](overview.md) and [Configuration → Disk artifact roots](../../getting-started/configuration.md#disk-artifact-roots).
+The **engine** needs `PROMPTS_ROOT` at register and start. Workers do not re-read prompt files for step execution. In Compose, `./config/prompts` mounts at `/app/prompts` on the engine — leave `PROMPTS_ROOT` unset in `.env` so container paths win. On the host CLI, export `PROMPTS_ROOT=./config/prompts`. See [Manifests and artifacts](overview.md) and [Configuration → Disk artifact roots](../../getting-started/configuration.md#disk-artifact-roots).
 
-When `PROMPTS_ROOT` is set, engine and worker fail fast at startup if the path is not a readable directory.
+When `PROMPTS_ROOT` is set, the engine fails fast at startup if the path is not a readable directory.
 
 ## Deploy-time validation
 
@@ -138,14 +138,14 @@ Owner: {{ user.email }} ({{ user.name }})
 
 The worker renders the prompt when the step runs — not when you deploy the saga.
 
-1. Load `{PROMPTS_ROOT}/<prompt>` from disk (fresh read each run) — the step's prompt template file from the saga manifest `prompt` field.
+1. Read the start-frozen `prompt_definition` from the step row (already includes static `{% include %}` text).
 2. Render that template with resolved `with` values + `allowed_tools`.
 3. Send the worker manifest's **`system_prompt`** as the system message.
 4. Send the **rendered step prompt** (the Jinja output from step 2) as the human message. String templates (Jinja / inline) are sent as **plain text**. Structured dict/list prompt inputs are JSON-encoded so the model still receives a parseable object.
 
-You can edit prompt files on disk without redeploying the saga manifest. Registration already validated variable names; content changes apply on the next step run for any instance that references that `prompt` filename.
+Editing prompt files on disk does **not** change already-started saga instances — they keep the freeze from start. New starts pick up the current files (after you redeploy the step if registration validation must see new `{{ variables }}`). Registration already validated variable names against step `inputs`.
 
-If you add new `{{ variables }}`, update the saga step's `with` block and redeploy the **saga** (same version upsert is fine for sagas). To change step capability (prompt, tools, …), bump the **step** `version` and update saga `use:` pins — step versions are append-only. Prefer a new saga `version` in production when composition changes so new runs pick up the contract and **running sagas** keep the freeze they started with. See [Manifests and artifacts → Deploy and identity](overview.md#deploy-and-identity).
+If you add new `{{ variables }}`, update the step's `inputs` / saga `with` and bump the **step** `version` (append-only), then update saga `use:` pins. Prefer a new saga `version` in production when composition changes so new runs pick up the contract and **running sagas** keep the freeze they started with. See [Manifests and artifacts → Deploy and identity](overview.md#deploy-and-identity).
 
 For Jinja syntax (conditionals, loops, filters), see the [Jinja template designer docs](https://jinja.palletsprojects.com/en/stable/templates/).
 
@@ -178,9 +178,9 @@ The full GitHub demo template documents the **`react`** `_submit` JSON contract 
 
 ## Includes (`{% include %}`)
 
-File prompts under `PROMPTS_ROOT` support Jinja [`{% include %}`](https://jinja.palletsprojects.com/en/stable/templates/#include). Partials must stay under the same root — absolute paths and `..` segments are rejected.
+File prompts under `PROMPTS_ROOT` support Jinja [`{% include %}`](https://jinja.palletsprojects.com/en/stable/templates/#include). At saga **start**, the engine inlines **bare** static string includes (`{% include 'partial.j2' %}`) into `prompt_definition` via the Jinja lexer/AST — includes inside `{# comments #}` and `{% raw %}` are left intact. Dynamic includes and modifiers (`ignore missing`, `with context`, `without context`) are rejected at freeze. Partials must stay under the same root — absolute paths and `..` segments are rejected. Include cycles fail freeze.
 
-Rendering uses Jinja’s [`SandboxedEnvironment`](https://jinja.palletsprojects.com/en/stable/api/#jinja2.sandbox.SandboxedEnvironment): attribute escapes / SSTI-style constructs are blocked, and built-in helpers that expose object graphs (`cycler`, `joiner`, `namespace`, `lipsum`) are removed. Keep templates to variables, filters, conditionals, loops, and includes.
+Rendering at execute time uses Jinja’s [`SandboxedEnvironment`](https://jinja.palletsprojects.com/en/stable/api/#jinja2.sandbox.SandboxedEnvironment) on the frozen string (no disk loader): attribute escapes / SSTI-style constructs are blocked, and built-in helpers that expose object graphs (`cycler`, `joiner`, `namespace`, `lipsum`) are removed. Keep templates to variables, filters, conditionals, loops, and static includes.
 
 ```jinja
 {# analyze.j2 #}
@@ -194,7 +194,7 @@ Summarize the claim for {{ claim_id }}.
 Standing profile: {{ profile_summary }}
 ```
 
-Inline / `with` string templates still use a string Jinja loader and do **not** resolve includes — only prompt **files** under `PROMPTS_ROOT` do. Both paths share the same sandbox.
+Inline / `with` string templates still use a string Jinja loader and do **not** resolve includes — only prompt **files** under `PROMPTS_ROOT` are expanded at start freeze. Both paths share the same sandbox.
 
 ## The `noop` prompt
 
@@ -205,7 +205,8 @@ The minimal saga uses a one-line smoke-test template to verify engine registrati
 | Symptom | Likely fix |
 |---------|------------|
 | Registration 400: prompt file not found | Engine `PROMPTS_ROOT` or mount; see [Troubleshooting](../../getting-started/troubleshooting.md) |
-| Worker: `prompts_root is not configured` | Set/mount `PROMPTS_ROOT` on the **worker** service |
+| Start fails: `prompts_root is not configured` / freeze error | Set/mount `PROMPTS_ROOT` on the **engine** before saga start |
+| Step fails: missing `prompt_definition` | Instance was created before prompt freeze; restart the saga after upgrading |
 | Step fails: `Jinja render failed` | Missing `with` key or wrong type at schedule time (often a JSONPath to a step that has not completed) |
 | Step fails: `Jinja render blocked unsafe construct` | Template used a sandboxed-forbidden attribute or helper; remove SSTI-style / introspection syntax |
 | Agent ignores tools | Check `tools.allow` on the step and worker MCP config — not the prompt file alone |

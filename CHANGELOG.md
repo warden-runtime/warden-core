@@ -45,8 +45,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Child spawn maps missing/inactive child definitions to clean `STEP_FAILED` codes (`SPAWN_CHILD_DEFINITION_NOT_FOUND` / `SPAWN_CHILD_DEFINITION_INACTIVE`) instead of unhandled exceptions.
 - Policy CEL is frozen into `frozen_steps` / `policy_definition` at saga start (parity with compensation); runtime gates evaluate the embed strictly — no `POLICIES_ROOT` fallback (migration `014_policy_definition.sql`).
 - `output_schema` JSON is frozen onto `frozen_steps` as `output_schema_definition` at start/spawn hydrate; materialize and loop mint read the embed only (no runtime disk reload).
+- Reason-step Jinja prompts and skill payloads are frozen at saga start as `prompt_definition` / `skills_definition` (static bare `{% include %}` inlined via Jinja lexer/AST; migration `015_prompt_skills_definition.sql`). Workers render and `load_skill` from those embeds — no live `PROMPTS_ROOT` / `SKILLS_ROOT` reads during task execution. Incomplete skill embeds fail at start freeze; schedule also requires full `skills.allow` coverage.
 - Child spawn maps hydrate/asset freeze failures to `SPAWN_CHILD_HYDRATE_FAILED` and aborts remaining child creations.
-- Startup schema sentinels now require `worker_definitions`, definition `body`/`is_active` columns, and `tools_bind` / `policy_definition` on step instances.
+- Startup schema sentinels now require `worker_definitions`, definition `body`/`is_active` columns, and `tools_bind` / `policy_definition` / `prompt_definition` / `skills_definition` on step instances.
 - Prompt Jinja rendering uses `SandboxedEnvironment` (file + inline paths), strips introspection helpers (`cycler` / `joiner` / `namespace` / `lipsum`), and fails closed on unsafe attribute access.
 
 - ReAct `_submit` is accepted only as a singleton tool batch. Mixed batches run the other tools, feed a `_submit must be alone` tool error, and continue the loop (no silent short-circuit that drops sibling calls).

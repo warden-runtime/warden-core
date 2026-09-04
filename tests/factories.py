@@ -128,6 +128,7 @@ class StepDataFactory(factory.Factory):
     namespace = "default"
     parameters_spec = factory.LazyFunction(dict)
     prompt_ref = "step-1-fraud.j2"
+    prompt_definition = "Frozen test prompt for {{ input }}"
     output_payload = factory.LazyFunction(dict)
 
     timeout_seconds = 300

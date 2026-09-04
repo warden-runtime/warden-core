@@ -89,7 +89,10 @@ class DoStepCommand(BaseSagaMessage):
     idempotency_key: str
     prompt_ref: str = Field(
         ...,
-        description="Relative path under PROMPTS_ROOT; worker loads template content at execution.",
+        description=(
+            "Relative path under PROMPTS_ROOT used at saga start freeze; "
+            "execution renders step.prompt_definition (not a live disk re-read)."
+        ),
     )
     arguments: dict[str, Any] = Field(default_factory=dict)
     tool_specs: list[dict[str, Any]] = Field(
@@ -99,7 +102,10 @@ class DoStepCommand(BaseSagaMessage):
     resource_specs: list[ResourceSpec] = Field(default_factory=list)
     skill_specs: list[dict[str, Any]] = Field(
         default_factory=list,
-        description='Skill allowlist refs: [{"name": "skill_id"}, ...]; bodies load from SKILLS_ROOT.',
+        description=(
+            'Skill allowlist refs: [{"name": "skill_id"}, ...]; '
+            "bodies come from step.skills_definition frozen at saga start."
+        ),
     )
 
 

@@ -348,6 +348,13 @@ class ReasonSagaStep(_SagaStepBase):
 
     kind: Literal["reason"]
     prompt: str
+    prompt_definition: str | None = Field(
+        default=None,
+        description=(
+            "Inlined Jinja prompt template (static {% include %} expanded). "
+            "Populated at saga start hydration from PROMPTS_ROOT; omit in author YAML."
+        ),
+    )
     agent_adapter: AgentAdapterMode = Field(
         default=DEFAULT_AGENT_ADAPTER,
         alias="agent-adapter",
@@ -383,6 +390,13 @@ class ReasonSagaStep(_SagaStepBase):
         description=(
             "Optional worker-scoped skill allowlist for react reason steps. "
             "Skill frontmatter allowed_tools union with tools.allow into the effective MCP allowlist."
+        ),
+    )
+    skills_definition: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Resolved skill documents (name, description, allowed_tools, body) frozen at "
+            "saga start from SKILLS_ROOT; omit in author YAML."
         ),
     )
     facts: list[StepFactsExtractor] | None = Field(
