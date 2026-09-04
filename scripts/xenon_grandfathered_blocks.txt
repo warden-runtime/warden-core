@@ -1,22 +1,15 @@
-# Cyclomatic complexity grade C blocks intentionally deferred (FSM hot path, LangChain adapter).
+# Cyclomatic complexity grade C+ blocks intentionally deferred (FSM hot path, LangChain / ReAct).
 # One block name per line; matched against xenon error output.
+# Prefer extracting helpers over expanding this list when touching these paths.
 handle_hitl_approved
-trigger_compensation
 process_saga_event
-handle_step_completed
 trigger_step
 _apply_step_failure_lifecycle
-_create_saga_and_steps
 handle_possible_loop_boundary
 _step_create_fields
 run_step
 run_commit
 LangChainAdapter
-# ReAct memory compression + execution usage merge (golden-ratio / token guardrails)
-_normalize_worker_usage_dict
-merge_execution_usage
 _react_loop_turn
-run_react_loop
 partition_messages
-_tier1_redact
 _digest_bullets_for_group

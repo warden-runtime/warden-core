@@ -50,7 +50,7 @@ Workflow definitions deploy into Postgres; prompts, policies, and schemas stay o
                   YAML    ▼                 │ claims work via
                      ┌──────────────────────┴─────┐
                      │          Postgres          │
-                     │  (saga/worker_definitions) │
+                     │  (worker/step/saga_definitions) │
                      └────────────────────────────┘
 ```
 

@@ -32,7 +32,7 @@ warden show step <YOUR_TRACE_ID> --step-id greet --namespace default
 ```json
 {
   "worker": {
-    "hydration_ms": 5,
+    "worker_init_ms": 5,
     "setup_ms": 4
   },
   "engine": {
@@ -46,7 +46,7 @@ Mock runs often omit `llm_ms` and `tool_ms` — sub-millisecond work is dropped 
 
 | Domain | Key | What it measures |
 |--------|-----|------------------|
-| Worker | `hydration_ms` | Worker manifest load and prompt render |
+| Worker | `worker_init_ms` | Load step row + prompt template for the command |
 | Worker | `setup_ms` | Provider client init and tool binding |
 | Worker | `llm_ms` | Wall-clock on model responses (`react`: across ReAct turns; `simple`: one call) |
 | Worker | `tool_ms` | MCP tool execution |

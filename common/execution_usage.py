@@ -164,14 +164,19 @@ def normalize_usage_memory(raw: dict[str, Any] | None) -> dict[str, int]:
     return out
 
 
-def _normalize_worker_usage_dict(raw: dict[str, Any] | None) -> dict[str, Any]:
-    if not raw or not isinstance(raw, dict):
-        return {}
-    out: dict[str, Any] = {}
-    for key in WORKER_USAGE_COUNTERS:
+def _positive_int_fields(raw: dict[str, Any], keys: tuple[str, ...]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for key in keys:
         n = _coerce_nonneg_int(raw.get(key))
         if n is not None and n > 0:
             out[key] = n
+    return out
+
+
+def _normalize_worker_usage_dict(raw: dict[str, Any] | None) -> dict[str, Any]:
+    if not raw or not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = dict(_positive_int_fields(raw, WORKER_USAGE_COUNTERS))
     model_id = raw.get("model_id")
     if isinstance(model_id, str) and model_id.strip():
         out["model_id"] = model_id.strip()
@@ -198,6 +203,23 @@ def worker_usage_from_event(usage: dict[str, Any] | None) -> dict[str, Any]:
     return _normalize_worker_usage_dict(usage)
 
 
+def _merge_worker_usage_section(
+    section: dict[str, Any],
+    incoming: dict[str, Any],
+) -> dict[str, Any]:
+    for key in WORKER_USAGE_COUNTERS:
+        if key in incoming:
+            section[key] = clamp_nonneg(int(incoming[key]))
+    if isinstance(incoming.get("model_id"), str):
+        section["model_id"] = incoming["model_id"]
+    if isinstance(incoming.get("details"), dict):
+        section["details"] = dict(incoming["details"])
+    if isinstance(incoming.get("memory"), dict):
+        # Replace with latest worker snapshot (accumulator already summed within the step).
+        section["memory"] = dict(incoming["memory"])
+    return section
+
+
 def merge_execution_usage(
     *,
     worker: dict[str, Any] | None = None,
@@ -210,17 +232,7 @@ def merge_execution_usage(
     incoming = _normalize_worker_usage_dict(worker)
     if not incoming:
         return merged
-    section = dict(merged.get("worker") or {})
-    for key in WORKER_USAGE_COUNTERS:
-        if key in incoming:
-            section[key] = clamp_nonneg(int(incoming[key]))
-    if isinstance(incoming.get("model_id"), str):
-        section["model_id"] = incoming["model_id"]
-    if isinstance(incoming.get("details"), dict):
-        section["details"] = dict(incoming["details"])
-    if isinstance(incoming.get("memory"), dict):
-        # Replace with latest worker snapshot (accumulator already summed within the step).
-        section["memory"] = dict(incoming["memory"])
+    section = _merge_worker_usage_section(dict(merged.get("worker") or {}), incoming)
     if section:
         merged["worker"] = section
     return merged

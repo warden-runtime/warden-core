@@ -1,7 +1,7 @@
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 
 class ModelProvider(StrEnum):
@@ -65,3 +65,11 @@ class WorkerBlueprint(BaseModel):
         if self.provider == ModelProvider.MOCK and not str(self.model_name).strip():
             raise ValueError("mock provider requires a non-empty model_name (demo script label)")
         return self
+
+
+_WORKER_BLUEPRINT_ADAPTER: TypeAdapter[WorkerBlueprint] = TypeAdapter(WorkerBlueprint)
+
+
+def parse_worker_blueprint(data: Any) -> WorkerBlueprint:
+    """Validate a worker mapping (YAML/JSON / stored body) into a WorkerBlueprint."""
+    return _WORKER_BLUEPRINT_ADAPTER.validate_python(data)

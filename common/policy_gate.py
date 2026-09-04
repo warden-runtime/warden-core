@@ -7,9 +7,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from common.config import get_settings
 from common.policy.cel_eval import PolicyEvaluationError, compile_cel_program, evaluate_cel_bool
-from common.policy.loader import PolicyArtifact, load_policy_artifact
+from common.policy.loader import PolicyArtifact
 from common.utils import hash_canonical_dict
 
 if TYPE_CHECKING:
@@ -25,6 +24,8 @@ __all__ = [
     "dispatch_policy_gate_hooks",
     "evaluate_policy_gate",
     "run_policy_gate",
+    "step_policy_definition",
+    "step_has_policy_gate",
 ]
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,21 @@ def binding_hash(binding: dict[str, Any]) -> str:
     return hash_canonical_dict(binding)
 
 
+def step_policy_definition(step: Any) -> dict[str, Any] | None:
+    """Return frozen ``policy_definition`` dict from a step row, if present."""
+    raw = getattr(step, "policy_definition", None)
+    return raw if isinstance(raw, dict) else None
+
+
+def step_has_policy_gate(
+    *, policy_name: str | None, policy_definition: dict[str, Any] | None
+) -> bool:
+    """True when a step should run the CEL gate (path ref and/or frozen cel)."""
+    if (policy_name or "").strip():
+        return True
+    return bool(policy_definition and policy_definition.get("cel"))
+
+
 def _compiled_cel(source: str) -> object:
     runner = _compiled_cel_cache.get(source)
     if runner is None:
@@ -72,41 +88,100 @@ def _compiled_cel(source: str) -> object:
     return runner
 
 
+def _artifact_from_policy_definition(
+    *,
+    policy_definition: dict[str, Any],
+    fallback_name: str,
+) -> PolicyArtifact:
+    cel_raw = policy_definition.get("cel")
+    if not cel_raw or not str(cel_raw).strip():
+        raise ValueError("policy_definition must contain a non-empty 'cel' expression")
+    return PolicyArtifact(
+        name=str(policy_definition.get("name") or fallback_name),
+        version=str(policy_definition.get("version") or "0"),
+        cel_source=str(cel_raw).strip(),
+    )
+
+
+def _gate_errored(*, policy_name: str | None, message: str) -> PolicyGateResult:
+    return PolicyGateResult(
+        outcome=PolicyGateOutcome.ERRORED,
+        policy_name=policy_name,
+        error_code="POLICY_EVALUATION_FAILED",
+        error_message=message,
+    )
+
+
+def _resolve_gate_artifact(
+    *,
+    policy_name: str,
+    policy_definition: dict[str, Any] | None,
+) -> PolicyArtifact | PolicyGateResult:
+    """Build a PolicyArtifact strictly from frozen ``policy_definition`` (no disk load)."""
+    if isinstance(policy_definition, dict) and policy_definition.get("cel"):
+        try:
+            return _artifact_from_policy_definition(
+                policy_definition=policy_definition,
+                fallback_name=policy_name or "policy",
+            )
+        except ValueError as e:
+            return _gate_errored(policy_name=policy_name or None, message=str(e))
+
+    if not policy_name:
+        return _gate_errored(policy_name=None, message="policy_name is empty")
+    return _gate_errored(
+        policy_name=policy_name,
+        message=(
+            "policy_definition with cel is required (frozen at saga start); "
+            "disk POLICIES_ROOT fallback was removed"
+        ),
+    )
+
+
+def _outcome_from_cel(
+    *,
+    artifact: PolicyArtifact,
+    ok: bool,
+    denial_code: PolicyDenialCode,
+    src_hash: str,
+    b_hash: str,
+) -> PolicyGateResult:
+    if ok:
+        return PolicyGateResult(
+            outcome=PolicyGateOutcome.PASSED,
+            policy_name=artifact.name,
+            policy_version=artifact.version,
+            artifact_source_hash=src_hash,
+            binding_hash=b_hash,
+        )
+    return PolicyGateResult(
+        outcome=PolicyGateOutcome.DENIED,
+        denial_code=denial_code,
+        policy_name=artifact.name,
+        policy_version=artifact.version,
+        artifact_source_hash=src_hash,
+        binding_hash=b_hash,
+    )
+
+
 async def evaluate_policy_gate(
     *,
     policy_name: str,
     phase: PolicyPhase,
     binding: dict[str, Any],
     denial_code: PolicyDenialCode,
-    policies_root: str | None = None,
+    policy_definition: dict[str, Any] | None = None,
 ) -> PolicyGateResult:
-    """Load policy artifact and evaluate CEL; no audit rows."""
-    root = policies_root if policies_root is not None else get_settings().policies_root
+    """Evaluate policy CEL strictly from frozen ``policy_definition``."""
     name = policy_name.strip()
-    if not name:
-        return PolicyGateResult(
-            outcome=PolicyGateOutcome.ERRORED,
-            error_code="POLICY_EVALUATION_FAILED",
-            error_message="policy_name is empty",
-        )
+    if not step_has_policy_gate(policy_name=name, policy_definition=policy_definition):
+        return _gate_errored(policy_name=None, message="policy_name is empty")
 
     b_hash = binding_hash(binding)
-    try:
-        artifact = await load_policy_artifact(policies_root=root, policy_name=name)
-    except FileNotFoundError as e:
-        return PolicyGateResult(
-            outcome=PolicyGateOutcome.ERRORED,
-            policy_name=name,
-            error_code="POLICY_EVALUATION_FAILED",
-            error_message=str(e),
-        )
-    except ValueError as e:
-        return PolicyGateResult(
-            outcome=PolicyGateOutcome.ERRORED,
-            policy_name=name,
-            error_code="POLICY_EVALUATION_FAILED",
-            error_message=str(e),
-        )
+    resolved = _resolve_gate_artifact(policy_name=name, policy_definition=policy_definition)
+    if isinstance(resolved, PolicyGateResult):
+        return resolved
+    artifact = resolved
 
     src_hash = artifact_source_hash(artifact)
     try:
@@ -122,12 +197,7 @@ async def evaluate_policy_gate(
             artifact.name,
             e,
         )
-        return PolicyGateResult(
-            outcome=PolicyGateOutcome.ERRORED,
-            policy_name=artifact.name,
-            error_code="POLICY_EVALUATION_FAILED",
-            error_message=str(e),
-        )
+        return _gate_errored(policy_name=artifact.name, message=str(e))
 
     logger.info(
         "policy gate phase=%s name=%s version=%s result=%s",
@@ -136,23 +206,12 @@ async def evaluate_policy_gate(
         artifact.version,
         ok,
     )
-
-    if ok:
-        return PolicyGateResult(
-            outcome=PolicyGateOutcome.PASSED,
-            policy_name=artifact.name,
-            policy_version=artifact.version,
-            artifact_source_hash=src_hash,
-            binding_hash=b_hash,
-        )
-
-    return PolicyGateResult(
-        outcome=PolicyGateOutcome.DENIED,
+    return _outcome_from_cel(
+        artifact=artifact,
+        ok=ok,
         denial_code=denial_code,
-        policy_name=artifact.name,
-        policy_version=artifact.version,
-        artifact_source_hash=src_hash,
-        binding_hash=b_hash,
+        src_hash=src_hash,
+        b_hash=b_hash,
     )
 
 
@@ -202,7 +261,7 @@ async def run_policy_gate(
     step_span_id: str,
     conn: BaseDBAsyncClient | None = None,
     trace_context: dict[str, Any] | None = None,
-    policies_root: str | None = None,
+    policy_definition: dict[str, Any] | None = None,
 ) -> PolicyGateResult:
     """Evaluate CEL and dispatch policy gate hooks; returns evaluation result."""
     result = await evaluate_policy_gate(
@@ -210,7 +269,7 @@ async def run_policy_gate(
         phase=phase,
         binding=binding,
         denial_code=denial_code,
-        policies_root=policies_root,
+        policy_definition=policy_definition,
     )
     await dispatch_policy_gate_hooks(
         result=result,

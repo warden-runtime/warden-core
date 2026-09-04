@@ -56,3 +56,27 @@ def test_resolve_step_prompt_falls_back_to_resolve_input_without_ref():
         context={},
     )
     assert rendered == "Claim c-1"
+
+
+def test_render_prompt_file_rejects_attr_escape_ssti(tmp_path: Path):
+    (tmp_path / "evil.j2").write_text(
+        "{{ ''.__class__.__mro__[1].__subclasses__() }}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unsafe|blocked"):
+        render_prompt_file(str(tmp_path), "evil.j2", {})
+
+
+def test_resolve_input_rejects_attr_escape_ssti():
+    with pytest.raises(ValueError, match="unsafe|blocked"):
+        resolve_input("{{ ''.__class__.__mro__ }}", {})
+
+
+def test_prompt_environment_strips_introspection_globals():
+    from common.prompts import make_prompt_environment
+
+    env = make_prompt_environment()
+    for key in ("cycler", "joiner", "namespace", "lipsum"):
+        assert key not in env.globals
+    # Undefined helpers render empty rather than exposing object graphs.
+    assert env.from_string("{{ cycler }}").render() == ""

@@ -52,15 +52,17 @@ def _make_worker_def(
     model_name: str = "gpt-4o",
     system_prompt: str = "You are helpful.",
     tool_sources: list | None = None,
+    temperature: float = 0.0,
 ):
     w = MagicMock()
     w.name = "test-worker"
     w.version = "1.0.0"
     w.adapter = "langchain"
-    w.model_provider = model_provider
+    w.provider = model_provider
     w.model_name = model_name
     w.system_prompt = system_prompt
     w.tool_sources = tool_sources or []
+    w.temperature = temperature
     return w
 
 
@@ -103,7 +105,7 @@ def _patch_build_llm(mocker, responses: list[ChatResponse]):
 
 @pytest.mark.asyncio
 async def test_run_step_returns_submit_payload_when_agent_calls_submit(mocker):
-    _patch_build_llm(
+    build_llm = _patch_build_llm(
         mocker,
         [
             ChatResponse(
@@ -124,7 +126,7 @@ async def test_run_step_returns_submit_payload_when_agent_calls_submit(mocker):
     )
 
     adapter = LangChainAdapter(
-        worker_definition=_make_worker_def(),
+        worker_definition=_make_worker_def(temperature=0.4),
         secret=_make_secret(),
     )
     result = await adapter.run_step(
@@ -135,6 +137,7 @@ async def test_run_step_returns_submit_payload_when_agent_calls_submit(mocker):
         context={},
     )
     assert result.output == {"data": {"summary": "Done.", "count": 2}}
+    assert build_llm.call_args.kwargs["temperature"] == 0.4
 
 
 @pytest.mark.asyncio

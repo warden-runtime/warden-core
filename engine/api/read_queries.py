@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from common.models import (
     SagaDefinition,
     SagaInstance,
     SagaStatus,
     SagaStepInstance,
+    StepDefinition,
     StepStatus,
     WorkerDefinition,
 )
+
+if TYPE_CHECKING:
+    import uuid
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
@@ -44,17 +47,14 @@ async def list_saga_definitions(
     return await q.offset(offset).limit(limit)
 
 
-async def get_saga_definition_by_id(*, definition_id: str) -> SagaDefinition | None:
-    """Return saga definition row or None if id is not a valid UUID or not found."""
-    try:
-        uid = uuid.UUID(definition_id.strip())
-    except ValueError:
-        return None
-    return await get_saga_definition_by_uuid(definition_id=uid)
-
-
 async def get_saga_definition_by_uuid(*, definition_id: uuid.UUID) -> SagaDefinition | None:
     return await SagaDefinition.filter(id=definition_id).first()
+
+
+async def get_saga_definition_by_triple(
+    *, namespace: str, name: str, version: str
+) -> SagaDefinition | None:
+    return await SagaDefinition.filter(namespace=namespace, name=name, version=version).first()
 
 
 async def count_saga_definitions(
@@ -77,6 +77,7 @@ async def list_worker_definitions(
     *,
     namespace: str | None,
     name: str | None,
+    is_active: bool | None,
     limit: int,
     offset: int,
 ) -> list[WorkerDefinition]:
@@ -85,6 +86,8 @@ async def list_worker_definitions(
         q = q.filter(namespace=namespace)
     if name is not None:
         q = q.filter(name=name)
+    if is_active is not None:
+        q = q.filter(is_active=is_active)
     q = q.order_by("-updated_at", "-created_at", "id")
     return await q.offset(offset).limit(limit)
 
@@ -93,16 +96,70 @@ async def get_worker_definition_by_uuid(*, definition_id: uuid.UUID) -> WorkerDe
     return await WorkerDefinition.filter(id=definition_id).first()
 
 
+async def get_worker_definition_by_triple(
+    *, namespace: str, name: str, version: str
+) -> WorkerDefinition | None:
+    return await WorkerDefinition.filter(namespace=namespace, name=name, version=version).first()
+
+
 async def count_worker_definitions(
     *,
     namespace: str | None,
     name: str | None,
+    is_active: bool | None,
 ) -> int:
     q: Any = WorkerDefinition.all()
     if namespace is not None:
         q = q.filter(namespace=namespace)
     if name is not None:
         q = q.filter(name=name)
+    if is_active is not None:
+        q = q.filter(is_active=is_active)
+    return await q.count()
+
+
+async def list_step_definitions(
+    *,
+    namespace: str | None,
+    name: str | None,
+    is_active: bool | None,
+    limit: int,
+    offset: int,
+) -> list[StepDefinition]:
+    q: Any = StepDefinition.all()
+    if namespace is not None:
+        q = q.filter(namespace=namespace)
+    if name is not None:
+        q = q.filter(name=name)
+    if is_active is not None:
+        q = q.filter(is_active=is_active)
+    q = q.order_by("-updated_at", "-created_at", "id")
+    return await q.offset(offset).limit(limit)
+
+
+async def get_step_definition_by_uuid(*, definition_id: uuid.UUID) -> StepDefinition | None:
+    return await StepDefinition.filter(id=definition_id).first()
+
+
+async def get_step_definition_by_triple(
+    *, namespace: str, name: str, version: str
+) -> StepDefinition | None:
+    return await StepDefinition.filter(namespace=namespace, name=name, version=version).first()
+
+
+async def count_step_definitions(
+    *,
+    namespace: str | None,
+    name: str | None,
+    is_active: bool | None,
+) -> int:
+    q: Any = StepDefinition.all()
+    if namespace is not None:
+        q = q.filter(namespace=namespace)
+    if name is not None:
+        q = q.filter(name=name)
+    if is_active is not None:
+        q = q.filter(is_active=is_active)
     return await q.count()
 
 

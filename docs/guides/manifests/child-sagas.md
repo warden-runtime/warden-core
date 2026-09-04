@@ -15,8 +15,10 @@ v1 supports **wait_all** only. There is no cooperative `CANCEL`, no join timeout
 ```yaml
 steps:
   - id: plan
-    kind: reason
-    # ... produces output.items: [{ "id": "a", ... }, ...]
+    use: plan-work
+    version: "1.0.0"
+    with: {}
+    # catalog reason step produces output.items: [{ "id": "a", ... }, ...]
 
   - id: dispatch
     kind: spawn_sagas
@@ -40,8 +42,10 @@ steps:
       allow_zero_success: true                     # default true
 
   - id: reduce
-    kind: reason
-    # reads $.steps.await_children.output.data.children
+    use: reduce-children
+    version: "1.0.0"
+    with: {}
+    # catalog reason step reads $.steps.await_children.output.data.children
 ```
 
 Rules:
@@ -51,7 +55,9 @@ Rules:
 - More than `max_children` (default/hard max **16**) fails with `TOO_MANY_CHILDREN`.
 - `result_from` is required and must be a JSONPath into each **child** saga context.
 - Resolve context for `spawn.input` is the parent context plus `$.item` and `$.{item_var}`.
-- Children inherit the parent **namespace**. Deploy the child saga definition before the parent.
+- Children inherit the parent **namespace**. Deploy the child saga definition before the parent; the child must be **active** at parent deploy time.
+- Spawning an inactive or missing child definition fails the spawn step (`SPAWN_CHILD_DEFINITION_INACTIVE` / `SPAWN_CHILD_DEFINITION_NOT_FOUND`) instead of raising an unhandled exception.
+- Child start hydrate / asset freeze failures (missing schema, inactive step, invalid embed) fail the spawn step with `SPAWN_CHILD_HYDRATE_FAILED` and abort remaining child creations.
 - Spawn/join are **not** allowed inside loop bodies.
 - Each `join.spawn_step_id` must reference a `spawn_sagas` step; at most one join per spawn.
 

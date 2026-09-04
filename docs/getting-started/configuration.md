@@ -221,15 +221,15 @@ After changing `.env` or Compose networking, restart the worker (`docker compose
 
 ## Disk artifact roots
 
-Worker and saga **manifest YAML** is stored in Postgres when you `warden deploy`. Prompts, policies, output schemas, and compensation files stay on disk and are resolved at runtime using these variables:
+Worker and saga **manifest YAML** is stored in Postgres when you `warden deploy`. Prompts, policies, output schemas, and compensation files stay on disk. Deploy link-checks paths; saga **start** (and child spawn) freezes policy CEL, compensation blocks, and `output_schema` JSON onto the instance. Runtime gates / materialize / loop mint use those embeds — they do not re-read the roots mid-run:
 
 | Variable | Resolves | Consumer |
 |----------|----------|----------|
 | `PROMPTS_ROOT` | `prompt: foo.j2` → `{root}/foo.j2` | engine (register), worker (execute) |
 | `SKILLS_ROOT` | `skills.allow: [{name: triage}]` → `{root}/<worker>/triage.md` | engine (register), worker (execute) |
-| `POLICIES_ROOT` | `policy: gate.yaml` → `{root}/gate.yaml` (legacy stem `gate` → `{root}/gate.yaml`) | engine |
-| `SCHEMAS_ROOT` | `output_schema: triage.json` → `{root}/triage.json` | engine (register + saga start) |
-| `COMPENSATIONS_ROOT` | `compensation: disburse_undo.yaml` → `{root}/disburse_undo.yaml` | engine (register + saga start) |
+| `POLICIES_ROOT` | `policy: gate.yaml` → `{root}/gate.yaml` (legacy stem `gate` → `{root}/gate.yaml`) | engine (register + saga start freeze) |
+| `SCHEMAS_ROOT` | `output_schema: triage.json` → `{root}/triage.json` | engine (register + saga start freeze) |
+| `COMPENSATIONS_ROOT` | `compensation: disburse_undo.yaml` → `{root}/disburse_undo.yaml` | engine (register + saga start freeze) |
 
 Each value is a path relative to the root — subdirectories are allowed (e.g. `policy: teams/marketing/gate.yaml`). For `policy`, prefer an explicit path with extension; stem-only refs without an extension still resolve via `{ref}.yaml` when the exact path is missing (one deploy-time warning per unique legacy ref).
 

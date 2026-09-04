@@ -3,18 +3,15 @@ Start-saga handler: creates a saga instance and steps from a definition, then em
 SAGA_STARTED so the engine consumer runs the state machine. All in one transaction.
 """
 
-import json
 import logging
 import uuid
 from typing import Any, NamedTuple
 
-import yaml
 from common.config import get_settings
 from common.contracts import SagaEventPayload
 from common.loops import (
     build_loop_definitions,
     initial_loops_context,
-    parse_executable_step,
     take_initial_materialization_segment,
 )
 from common.models import (
@@ -25,11 +22,6 @@ from common.models import (
 )
 from common.outbox import emit_saga_event
 from common.plugins.registry import get_registry
-from common.saga_assets import (
-    load_compensation_definition,
-    load_output_schema,
-    validate_compensation_definition_dict,
-)
 from common.topics import TOPIC_ORCHESTRATOR_EVENTS
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.transactions import in_transaction
@@ -39,6 +31,7 @@ from engine.api.saga_errors import (
     InactiveSagaDefinitionError,
     StartIdempotencyConflictError,
 )
+from engine.saga_hydrate import hydrate_authoring_body_to_frozen_steps
 from engine.step_materialize import materialize_executable_steps
 
 logger = logging.getLogger(__name__)
@@ -51,54 +44,6 @@ _DEFINITION_NOT_FOUND = (
 class StartSagaResult(NamedTuple):
     trace_id: str
     created: bool
-
-
-async def resolve_executable_step_assets(
-    step_specs: list[dict[str, Any]],
-    *,
-    schemas_root: str | None,
-    compensations_root: str | None,
-) -> list[tuple[dict[str, Any] | None, dict[str, Any] | None]]:
-    """Load output_schema and compensation for executable step specs.
-
-    Engine-native spawn/join steps have no schema or compensation artifacts.
-    """
-    from common.schemas.saga import JoinSagasStep, SpawnSagasStep
-
-    resolved: list[tuple[dict[str, Any] | None, dict[str, Any] | None]] = []
-    for order_index, step_spec in enumerate(step_specs):
-        if not isinstance(step_spec, dict):
-            raise ValueError(f"Saga step at index {order_index} must be a mapping")
-        clean = {k: v for k, v in step_spec.items() if not str(k).startswith("_")}
-        step_model = parse_executable_step(clean)
-        if isinstance(step_model, (SpawnSagasStep, JoinSagasStep)):
-            resolved.append((None, None))
-            continue
-        step_id = step_model.id
-        try:
-            resolved_output_schema = await load_output_schema(
-                schemas_root=schemas_root,
-                ref=step_model.output_schema,
-            )
-            embedded_comp = step_model.compensation_definition
-            if embedded_comp is None:
-                raw_embedded = clean.get("compensation_definition")
-                if isinstance(raw_embedded, dict):
-                    embedded_comp = raw_embedded
-            if embedded_comp is not None:
-                compensation_definition = validate_compensation_definition_dict(embedded_comp)
-            else:
-                compensation_definition = await load_compensation_definition(
-                    compensations_root=compensations_root,
-                    ref=step_model.compensation,
-                )
-        except (OSError, ValueError, json.JSONDecodeError, yaml.YAMLError) as e:
-            raise ValueError(
-                f"Saga step {order_index} (id={step_id!r}) output_schema={step_model.output_schema!r} "
-                f"or compensation={step_model.compensation!r}: {e}"
-            ) from e
-        resolved.append((resolved_output_schema, compensation_definition))
-    return resolved
 
 
 def _executable_shell_ids(frozen_steps: list[Any]) -> list[str]:
@@ -187,16 +132,25 @@ async def _create_saga_and_steps(
     idempotency_key: str | None,
     schemas_root: str | None,
     compensations_root: str | None,
+    policies_root: str | None = None,
     parent_trace_id: str | None = None,
 ) -> str:
-    frozen_steps = list(definition.body.get("steps") or [])
+    if not isinstance(definition.body, dict):
+        raise ValueError(
+            f"Saga definition {name!r}@{version} body must be a mapping (authoring AST)"
+        )
+    frozen_steps = await hydrate_authoring_body_to_frozen_steps(
+        body=definition.body,
+        namespace=namespace,
+        name=name,
+        version=version,
+        description=str(definition.body.get("description") or ""),
+        compensations_root=compensations_root,
+        policies_root=policies_root,
+        schemas_root=schemas_root,
+    )
     segment, loop_state = take_initial_materialization_segment(frozen_steps)
     loop_definitions = build_loop_definitions(frozen_steps)
-    resolved_assets = await resolve_executable_step_assets(
-        segment,
-        schemas_root=schemas_root,
-        compensations_root=compensations_root,
-    )
 
     trace_id = uuid.uuid4().hex
     step_shells = {
@@ -235,7 +189,6 @@ async def _create_saga_and_steps(
         start_forward_seq=0,
         start_order_index=0,
         conn=conn,
-        resolved_assets=resolved_assets,
     )
 
     payload = SagaEventPayload(
@@ -313,6 +266,7 @@ async def start_saga(
             idempotency_key=idempotency_key,
             schemas_root=settings.schemas_root,
             compensations_root=settings.compensations_root,
+            policies_root=settings.policies_root,
         )
 
     logger.info("Started saga %s (namespace=%s, definition=%s)", trace_id, namespace, name)

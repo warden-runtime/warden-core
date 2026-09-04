@@ -52,11 +52,20 @@ from common.models import (
 )
 from common.outbox import emit_saga_event
 from common.plugins.registry import get_registry
-from common.policy_gate import PolicyGateOutcome, run_policy_gate
+from common.policy_gate import (
+    PolicyGateOutcome,
+    run_policy_gate,
+    step_has_policy_gate,
+    step_policy_definition,
+)
 from common.processed_command_reap import release_worker_claim_for_retry
 from common.prompts import assert_prompt_file_exists
 from common.schemas.engine_events import AuditEngineEventType
 from common.schemas.saga import WORKER_STEP_KINDS, is_engine_native_kind
+from common.step_input_schema import (
+    assert_jsonpath_bindings_resolved,
+    validate_resolved_arguments_against_input_ports,
+)
 from common.step_output import (
     step_context_entry_for_saga,
     validate_business_data_schema,
@@ -239,7 +248,6 @@ async def _schedule_next_forward_step(
                     db_conn=db_conn,
                     trace_context=trace_context,
                     schedule_next=_schedule_next_forward_step,
-                    apply_step_failure=_apply_step_failure_lifecycle,
                 )
                 if handled:
                     await _notify_when_skipped_summary(
@@ -787,7 +795,6 @@ async def _finalize_step_output_and_advance(
         db_conn=db_conn,
         trace_context=trace_context,
         schedule_next=_schedule_next_forward_step,
-        apply_step_failure=_apply_step_failure_lifecycle,
     )
     if handled:
         return
@@ -798,6 +805,96 @@ async def _finalize_step_output_and_advance(
         db_conn=db_conn,
         trace_context=trace_context,
     )
+
+
+async def _fail_reason_on_policy(
+    *,
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    event: Any,
+    db_conn: BaseDBAsyncClient,
+    error_code: str,
+    error_message: str,
+) -> None:
+    step.error_details = {"code": error_code, "message": error_message}
+    synthetic = StepFailedEvent(
+        saga_trace_id=event.saga_trace_id,
+        namespace=event.namespace,
+        event_type=EventType.STEP_FAILED.value,
+        step_span_id=event.step_span_id,
+        error_details=step.error_details,
+        output=event.output,
+        timing=event.timing,
+        usage=event.usage,
+    )
+    await step.save(
+        using_db=db_conn,
+        update_fields=["execution_timing", "execution_usage", "error_details"],
+    )
+    await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
+
+
+async def _maybe_stop_reason_on_policy(
+    *,
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    event: Any,
+    db_conn: BaseDBAsyncClient,
+    trace_ctx: dict[str, Any] | None,
+) -> bool:
+    """Run after_reason policy gate; return True if the step failed and handling should stop."""
+    if step.step_kind != "reason":
+        return False
+    pn = str(step.policy_name or "").strip()
+    pd = step_policy_definition(step)
+    if not step_has_policy_gate(policy_name=pn, policy_definition=pd):
+        return False
+    policy_start = time.perf_counter()
+    gate = await run_policy_gate(
+        policy_name=pn,
+        phase=POLICY_PHASE_AFTER_REASON,
+        binding=_policy_binding(
+            phase=POLICY_PHASE_AFTER_REASON,
+            saga=saga,
+            step=step,
+            arguments=step.resolved_arguments or {},
+            output=event.output,
+        ),
+        denial_code="POLICY_REASON_DENIED",
+        namespace=event.namespace,
+        saga_trace_id=saga.trace_id,
+        step_span_id=step.span_id,
+        conn=db_conn,
+        trace_context=trace_ctx,
+        policy_definition=pd,
+    )
+    add_engine_bucket_ms(step, bucket="policy_ms", ms=elapsed_ms(policy_start))
+    if gate.outcome == PolicyGateOutcome.ERRORED:
+        logger.error(
+            "Reason step %s policy evaluation failed: %s",
+            event.step_span_id,
+            gate.error_message,
+        )
+        await _fail_reason_on_policy(
+            saga=saga,
+            step=step,
+            event=event,
+            db_conn=db_conn,
+            error_code=gate.error_code or "POLICY_EVALUATION_FAILED",
+            error_message=gate.error_message or "policy evaluation failed",
+        )
+        return True
+    if gate.outcome == PolicyGateOutcome.DENIED:
+        await _fail_reason_on_policy(
+            saga=saga,
+            step=step,
+            event=event,
+            db_conn=db_conn,
+            error_code="POLICY_REASON_DENIED",
+            error_message="policy cel returned false; reason output not allowed",
+        )
+        return True
+    return False
 
 
 @trace_step()
@@ -877,74 +974,14 @@ async def handle_step_completed(
             return
 
     trace_ctx = _ingest_trace_context(event)
-    if step.step_kind == "reason" and step.policy_name and str(step.policy_name).strip():
-        policy_start = time.perf_counter()
-        gate = await run_policy_gate(
-            policy_name=str(step.policy_name),
-            phase=POLICY_PHASE_AFTER_REASON,
-            binding=_policy_binding(
-                phase=POLICY_PHASE_AFTER_REASON,
-                saga=saga,
-                step=step,
-                arguments=step.resolved_arguments or {},
-                output=event.output,
-            ),
-            denial_code="POLICY_REASON_DENIED",
-            namespace=event.namespace,
-            saga_trace_id=saga.trace_id,
-            step_span_id=step.span_id,
-            conn=db_conn,
-            trace_context=trace_ctx,
-        )
-        add_engine_bucket_ms(step, bucket="policy_ms", ms=elapsed_ms(policy_start))
-        if gate.outcome == PolicyGateOutcome.ERRORED:
-            logger.error(
-                "Reason step %s policy evaluation failed: %s",
-                event.step_span_id,
-                gate.error_message,
-            )
-            step.error_details = {
-                "code": gate.error_code or "POLICY_EVALUATION_FAILED",
-                "message": gate.error_message or "policy evaluation failed",
-            }
-            synthetic = StepFailedEvent(
-                saga_trace_id=event.saga_trace_id,
-                namespace=event.namespace,
-                event_type=EventType.STEP_FAILED.value,
-                step_span_id=event.step_span_id,
-                error_details=step.error_details,
-                output=event.output,
-                timing=event.timing,
-                usage=event.usage,
-            )
-            await step.save(
-                using_db=db_conn,
-                update_fields=["execution_timing", "execution_usage", "error_details"],
-            )
-            await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
-            return
-
-        if gate.outcome == PolicyGateOutcome.DENIED:
-            step.error_details = {
-                "code": "POLICY_REASON_DENIED",
-                "message": "policy cel returned false; reason output not allowed",
-            }
-            synthetic = StepFailedEvent(
-                saga_trace_id=event.saga_trace_id,
-                namespace=event.namespace,
-                event_type=EventType.STEP_FAILED.value,
-                step_span_id=event.step_span_id,
-                error_details=step.error_details,
-                output=event.output,
-                timing=event.timing,
-                usage=event.usage,
-            )
-            await step.save(
-                using_db=db_conn,
-                update_fields=["execution_timing", "execution_usage", "error_details"],
-            )
-            await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
-            return
+    if await _maybe_stop_reason_on_policy(
+        saga=saga,
+        step=step,
+        event=event,
+        db_conn=db_conn,
+        trace_ctx=trace_ctx,
+    ):
+        return
 
     if step.hitl_required and step.step_kind == "reason":
         output_for_review = event.output if isinstance(event.output, dict) else {}
@@ -1770,6 +1807,28 @@ def _step_tool_and_resource_specs(
     return tool_specs, resource_specs, skill_specs
 
 
+async def _fail_commit_on_policy(
+    *,
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    db_conn: BaseDBAsyncClient,
+    schedule_acc: EngineTimingAccumulator | None,
+    error_code: str,
+    error_message: str,
+) -> bool:
+    if schedule_acc is not None:
+        await persist_schedule_engine_timing_on_policy_denial(step, schedule_acc, conn=db_conn)
+    synthetic = StepFailedEvent(
+        saga_trace_id=saga.trace_id,
+        namespace=saga.namespace,
+        event_type=EventType.STEP_FAILED.value,
+        step_span_id=step.span_id,
+        error_details={"code": error_code, "message": error_message},
+    )
+    await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
+    return True
+
+
 async def _commit_policy_stopped_step(
     *,
     saga: SagaInstance,
@@ -1781,7 +1840,8 @@ async def _commit_policy_stopped_step(
     schedule_acc: EngineTimingAccumulator | None = None,
 ) -> bool:
     pn = (step.policy_name or "").strip()
-    if not pn:
+    pd = step_policy_definition(step)
+    if not step_has_policy_gate(policy_name=pn, policy_definition=pd):
         return False
     policy_start = time.perf_counter()
     gate = await run_policy_gate(
@@ -1800,39 +1860,28 @@ async def _commit_policy_stopped_step(
         step_span_id=step.span_id,
         conn=db_conn,
         trace_context=trace_context,
+        policy_definition=pd,
     )
     if schedule_acc is not None:
         schedule_acc.add_ms("policy_ms", elapsed_ms(policy_start))
     if gate.outcome == PolicyGateOutcome.ERRORED:
-        if schedule_acc is not None:
-            await persist_schedule_engine_timing_on_policy_denial(step, schedule_acc, conn=db_conn)
-        synthetic = StepFailedEvent(
-            saga_trace_id=saga.trace_id,
-            namespace=saga.namespace,
-            event_type=EventType.STEP_FAILED.value,
-            step_span_id=step.span_id,
-            error_details={
-                "code": gate.error_code or "POLICY_EVALUATION_FAILED",
-                "message": gate.error_message or "policy evaluation failed",
-            },
+        return await _fail_commit_on_policy(
+            saga=saga,
+            step=step,
+            db_conn=db_conn,
+            schedule_acc=schedule_acc,
+            error_code=gate.error_code or "POLICY_EVALUATION_FAILED",
+            error_message=gate.error_message or "policy evaluation failed",
         )
-        await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
-        return True
     if gate.outcome == PolicyGateOutcome.DENIED:
-        if schedule_acc is not None:
-            await persist_schedule_engine_timing_on_policy_denial(step, schedule_acc, conn=db_conn)
-        synthetic = StepFailedEvent(
-            saga_trace_id=saga.trace_id,
-            namespace=saga.namespace,
-            event_type=EventType.STEP_FAILED.value,
-            step_span_id=step.span_id,
-            error_details={
-                "code": "POLICY_COMMIT_DENIED",
-                "message": "policy cel returned false; commit not allowed",
-            },
+        return await _fail_commit_on_policy(
+            saga=saga,
+            step=step,
+            db_conn=db_conn,
+            schedule_acc=schedule_acc,
+            error_code="POLICY_COMMIT_DENIED",
+            error_message="policy cel returned false; commit not allowed",
         )
-        await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
-        return True
     return False
 
 
@@ -2109,9 +2158,22 @@ async def trigger_step(
                 raise ValueError(f"Unsupported engine-native kind {step_to_run.step_kind!r}")
             return
 
+        missing_from: dict[str, str] = {}
         worker_args = resolve_parameters_spec(
             step_to_run.parameters_spec or {},
             saga.context or {},
+            missing_from=missing_from,
+        )
+        assert_jsonpath_bindings_resolved(
+            step_id=step_to_run.step_id,
+            missing_from=missing_from,
+        )
+        validate_resolved_arguments_against_input_ports(
+            step_id=step_to_run.step_id,
+            resolved=worker_args,
+            input_ports=step_to_run.input_ports
+            if isinstance(step_to_run.input_ports, dict)
+            else None,
         )
         if step_to_run.step_kind == "reason" and (
             int(step_to_run.hitl_retry_count) > 0 or hitl_retry_guidance

@@ -3,28 +3,36 @@
 from uuid import uuid4
 
 import pytest
+from common.catalog_errors import CatalogDefinitionNotFoundError
 from common.models import ProviderSecret, WorkerDefinition
+from tests.factories import worker_definition_body
 from workers.logic import load_worker_config
 
 
 @pytest.mark.asyncio
 async def test_load_worker_config_selects_exact_version() -> None:
-    """Same worker name with two versions returns the row matching worker_version."""
+    """Same worker name with two versions returns the blueprint matching worker_version."""
     await WorkerDefinition.create(
         namespace="default",
         name="versioned-worker",
         version="1.0.0",
-        model_provider="openai",
-        model_name="gpt-4o-mini",
-        system_prompt="v1",
+        body=worker_definition_body(
+            name="versioned-worker",
+            version="1.0.0",
+            model_name="gpt-4o-mini",
+            system_prompt="v1",
+        ),
     )
     await WorkerDefinition.create(
         namespace="default",
         name="versioned-worker",
         version="2.0.0",
-        model_provider="openai",
-        model_name="gpt-4o",
-        system_prompt="v2",
+        body=worker_definition_body(
+            name="versioned-worker",
+            version="2.0.0",
+            model_name="gpt-4o",
+            system_prompt="v2",
+        ),
     )
     await ProviderSecret.create(
         id=uuid4(),
@@ -46,10 +54,7 @@ async def test_load_worker_config_raises_when_version_missing() -> None:
         namespace="default",
         name="only-v1",
         version="1.0.0",
-        model_provider="openai",
-        model_name="gpt-4o-mini",
-        system_prompt="v1",
+        body=worker_definition_body(name="only-v1", version="1.0.0"),
     )
-
-    with pytest.raises(ValueError, match="only-v1@9.9.9"):
+    with pytest.raises(CatalogDefinitionNotFoundError, match="not found"):
         await load_worker_config("only-v1", "default", "9.9.9")

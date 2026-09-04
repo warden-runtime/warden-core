@@ -26,11 +26,12 @@ from common.execution_timing import WorkerTimingAccumulator, elapsed_ms
 from common.execution_usage import WorkerUsageAccumulator
 from common.governance import admit_and_validate, validate_against_schema
 from common.llm import ChatMessage, ToolProtocol
-from common.models import ProviderSecret, WorkerDefinition
+from common.models import ProviderSecret
 from common.plugins.context import db_conn_from_injection, execution_scope_from_injection
 from common.plugins.registry import get_registry
 from common.resource_specs import ResourceSpec
 from common.schemas.saga import DEFAULT_MAX_TURNS
+from common.schemas.worker import WorkerBlueprint
 from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_document
 from common.step_facts import StepFactsExtractionError, extract_step_facts
 from common.step_output import business_data_from_step_output, wrap_step_output_data
@@ -345,7 +346,7 @@ class LangChainAdapter(AgentAdapterPort):
 
     def __init__(
         self,
-        worker_definition: WorkerDefinition,
+        worker_definition: WorkerBlueprint,
         secret: ProviderSecret | SimpleNamespace,
         context: dict[str, Any] | None = None,
     ) -> None:
@@ -437,8 +438,9 @@ class LangChainAdapter(AgentAdapterPort):
         if timing_acc is not None:
             timing_acc.start("adapter_setup")
         llm = build_llm(
-            provider=self._worker_definition.model_provider,
+            provider=self._worker_definition.provider,
             model_name=self._worker_definition.model_name,
+            temperature=float(self._worker_definition.temperature),
             api_key=self._secret.api_key,
             max_tokens=max_completion_tokens,
         )
@@ -599,8 +601,9 @@ class LangChainAdapter(AgentAdapterPort):
 
             bind_tools = mcp_tools + [_build_submit_tool(output_schema)]
             llm = build_llm(
-                provider=self._worker_definition.model_provider,
+                provider=self._worker_definition.provider,
                 model_name=self._worker_definition.model_name,
+                temperature=float(self._worker_definition.temperature),
                 api_key=self._secret.api_key,
                 max_tokens=max_completion_tokens,
             )

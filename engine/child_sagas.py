@@ -6,6 +6,10 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from common.catalog_errors import (
+    CatalogDefinitionNotFoundError,
+    InactiveCatalogDefinitionError,
+)
 from common.child_sagas import (
     CHILD_TERMINAL,
     build_child_resolve_context,
@@ -26,7 +30,7 @@ from common.models import (
     SagaStepInstance,
     StepStatus,
 )
-from common.schemas.saga import JoinSagasStep, SpawnSagasStep
+from common.schemas.saga import JoinSagasStep, SpawnSagasStep, SpawnSpec
 from common.step_output import wrap_step_output_data
 from common.utils import status_value
 
@@ -71,6 +75,104 @@ def parse_join_step(saga: SagaInstance, step_id: str) -> JoinSagasStep:
     return parsed
 
 
+def _spawn_validation_error_code(message: str) -> str:
+    for known in (
+        "SPAWN_EMPTY_ITEMS",
+        "TOO_MANY_CHILDREN",
+        "SPAWN_ITEM_MISSING_ID",
+        "SPAWN_RESULT_FROM_REQUIRED",
+    ):
+        if known in message:
+            return known
+    return "SPAWN_VALIDATION_ERROR"
+
+
+async def _fail_spawn_step(
+    *,
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    code: str,
+    message: str,
+    db_conn: BaseDBAsyncClient,
+) -> None:
+    from engine.logic import _apply_step_failure_lifecycle
+
+    synthetic = StepFailedEvent(
+        saga_trace_id=saga.trace_id,
+        namespace=saga.namespace,
+        event_type=EventType.STEP_FAILED.value,
+        step_span_id=step.span_id,
+        error_details={"code": code, "message": message},
+    )
+    await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
+
+
+async def _spawn_one_child(
+    *,
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    spec: SpawnSpec,
+    item_id: str,
+    item: dict[str, Any],
+    db_conn: BaseDBAsyncClient,
+) -> dict[str, str]:
+    settings = get_settings()
+    idem_key = child_start_idempotency_key(saga.trace_id, step.step_id, item_id)
+    definition = await _require_saga_definition(
+        namespace=saga.namespace,
+        name=spec.saga_name,
+        version=spec.saga_version,
+        conn=db_conn,
+    )
+    existing = await _resolve_idempotent_start(
+        namespace=saga.namespace,
+        definition_id=str(definition.id),
+        idempotency_key=idem_key,
+        conn=db_conn,
+    )
+    if existing is not None:
+        child_trace_id = existing
+    else:
+        resolve_ctx = build_child_resolve_context(
+            saga.context or {},
+            item,
+            item_var=spec.item_var,
+        )
+        input_map = {
+            key: entry.model_dump(by_alias=True, exclude_none=True)
+            for key, entry in spec.input.items()
+        }
+        child_input = resolve_parameters_spec(input_map, resolve_ctx)
+        child_trace_id = await _create_saga_and_steps(
+            conn=db_conn,
+            definition=definition,
+            namespace=saga.namespace,
+            name=spec.saga_name,
+            version=spec.saga_version,
+            input=child_input,
+            idempotency_key=idem_key,
+            schemas_root=settings.schemas_root,
+            compensations_root=settings.compensations_root,
+            policies_root=settings.policies_root,
+            parent_trace_id=saga.trace_id,
+        )
+
+    link = await SagaChild.filter(idempotency_key=idem_key).using_db(db_conn).first()
+    if link is None:
+        await SagaChild.create(
+            id=uuid.uuid4(),
+            namespace=saga.namespace,
+            parent_trace_id=saga.trace_id,
+            spawn_step_id=step.step_id,
+            spawn_span_id=step.span_id,
+            item_id=item_id,
+            child_trace_id=child_trace_id,
+            idempotency_key=idem_key,
+            using_db=db_conn,
+        )
+    return {"item_id": item_id, "child_trace_id": child_trace_id}
+
+
 async def execute_spawn_sagas(
     *,
     saga: SagaInstance,
@@ -79,7 +181,7 @@ async def execute_spawn_sagas(
     trace_context: dict[str, Any] | None = None,
 ) -> None:
     """Create child sagas for each item and complete the spawn step."""
-    from engine.logic import _apply_step_failure_lifecycle, _finalize_step_output_and_advance
+    from engine.logic import _finalize_step_output_and_advance
 
     try:
         spawn_model = parse_spawn_step(saga, step.step_id)
@@ -88,82 +190,63 @@ async def execute_spawn_sagas(
         validated = validate_spawn_items(items, max_children=spec.max_children)
     except ValueError as exc:
         msg = str(exc)
-        code = "SPAWN_VALIDATION_ERROR"
-        for known in (
-            "SPAWN_EMPTY_ITEMS",
-            "TOO_MANY_CHILDREN",
-            "SPAWN_ITEM_MISSING_ID",
-            "SPAWN_RESULT_FROM_REQUIRED",
-        ):
-            if known in msg:
-                code = known
-                break
-        synthetic = StepFailedEvent(
-            saga_trace_id=saga.trace_id,
-            namespace=saga.namespace,
-            event_type=EventType.STEP_FAILED.value,
-            step_span_id=step.span_id,
-            error_details={"code": code, "message": msg},
+        await _fail_spawn_step(
+            saga=saga,
+            step=step,
+            code=_spawn_validation_error_code(msg),
+            message=msg,
+            db_conn=db_conn,
         )
-        await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
         return
 
-    settings = get_settings()
     children_out: list[dict[str, str]] = []
-    for item_id, item in validated:
-        idem_key = child_start_idempotency_key(saga.trace_id, step.step_id, item_id)
-        definition = await _require_saga_definition(
-            namespace=saga.namespace,
-            name=spec.saga_name,
-            version=spec.saga_version,
-            conn=db_conn,
+    try:
+        for item_id, item in validated:
+            children_out.append(
+                await _spawn_one_child(
+                    saga=saga,
+                    step=step,
+                    spec=spec,
+                    item_id=item_id,
+                    item=item,
+                    db_conn=db_conn,
+                )
+            )
+    except InactiveCatalogDefinitionError as exc:
+        await _fail_spawn_step(
+            saga=saga,
+            step=step,
+            code=(
+                "SPAWN_CHILD_DEFINITION_INACTIVE"
+                if exc.kind == "saga"
+                else "SPAWN_CHILD_HYDRATE_FAILED"
+            ),
+            message=str(exc),
+            db_conn=db_conn,
         )
-        existing = await _resolve_idempotent_start(
-            namespace=saga.namespace,
-            definition_id=str(definition.id),
-            idempotency_key=idem_key,
-            conn=db_conn,
+        return
+    except CatalogDefinitionNotFoundError as exc:
+        await _fail_spawn_step(
+            saga=saga,
+            step=step,
+            code=(
+                "SPAWN_CHILD_DEFINITION_NOT_FOUND"
+                if exc.kind == "saga"
+                else "SPAWN_CHILD_HYDRATE_FAILED"
+            ),
+            message=str(exc),
+            db_conn=db_conn,
         )
-        if existing is not None:
-            child_trace_id = existing
-        else:
-            resolve_ctx = build_child_resolve_context(
-                saga.context or {},
-                item,
-                item_var=spec.item_var,
-            )
-            input_map = {
-                key: entry.model_dump(by_alias=True, exclude_none=True)
-                for key, entry in spec.input.items()
-            }
-            child_input = resolve_parameters_spec(input_map, resolve_ctx)
-            child_trace_id = await _create_saga_and_steps(
-                conn=db_conn,
-                definition=definition,
-                namespace=saga.namespace,
-                name=spec.saga_name,
-                version=spec.saga_version,
-                input=child_input,
-                idempotency_key=idem_key,
-                schemas_root=settings.schemas_root,
-                compensations_root=settings.compensations_root,
-                parent_trace_id=saga.trace_id,
-            )
-
-        link = await SagaChild.filter(idempotency_key=idem_key).using_db(db_conn).first()
-        if link is None:
-            await SagaChild.create(
-                id=uuid.uuid4(),
-                namespace=saga.namespace,
-                parent_trace_id=saga.trace_id,
-                spawn_step_id=step.step_id,
-                spawn_span_id=step.span_id,
-                item_id=item_id,
-                child_trace_id=child_trace_id,
-                idempotency_key=idem_key,
-                using_db=db_conn,
-            )
-        children_out.append({"item_id": item_id, "child_trace_id": child_trace_id})
+        return
+    except ValueError as exc:
+        await _fail_spawn_step(
+            saga=saga,
+            step=step,
+            code="SPAWN_CHILD_HYDRATE_FAILED",
+            message=str(exc),
+            db_conn=db_conn,
+        )
+        return
 
     await _finalize_step_output_and_advance(
         saga,

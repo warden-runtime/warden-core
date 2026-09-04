@@ -1,0 +1,20 @@
+# Mock MCP demo — greet by name via mock LLM and echo MCP.
+# Requires: warden deploy -f config/worker.mock-mcp.yaml
+kind: step
+name: mock-greet
+namespace: default
+version: "0.1.0"
+title: greet
+description: Greet by name via mock LLM and echo MCP.
+inputs:
+  name:
+    required: true
+step_kind: reason
+worker: mock-mcp-worker
+worker_version: "0.1.0"
+prompt: mock-greet.j2
+tools:
+  allow:
+    - name: echo
+timeout_seconds: 300
+max_turns: 5

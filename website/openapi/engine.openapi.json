@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "DefinitionActiveUpdate": {
+        "description": "PATCH body to soft-enable or soft-disable a catalog definition.",
+        "properties": {
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_active"
+        ],
+        "title": "DefinitionActiveUpdate",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1102,6 +1116,111 @@
         "title": "StartSagaResponse",
         "type": "object"
       },
+      "StepDefinitionItem": {
+        "description": "One row in GET /v1/definitions/steps.",
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full step manifest blueprint when include_body=true on by-id GET.",
+            "title": "Body"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Step definition UUID",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "namespace",
+          "name",
+          "version",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "StepDefinitionItem",
+        "type": "object"
+      },
+      "StepDefinitionListResponse": {
+        "description": "Response for GET /v1/definitions/steps.",
+        "properties": {
+          "has_more": {
+            "description": "True when len(items) == limit (more pages may exist).",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StepDefinitionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching rows when include_total=true was requested.",
+            "title": "Total"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "StepDefinitionListResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1145,10 +1264,6 @@
       "WorkerDefinitionItem": {
         "description": "One row in GET /v1/definitions/workers.",
         "properties": {
-          "adapter": {
-            "title": "Adapter",
-            "type": "string"
-          },
           "body": {
             "anyOf": [
               {
@@ -1171,6 +1286,10 @@
             "description": "Worker definition UUID",
             "title": "Id",
             "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
           },
           "name": {
             "title": "Name",
@@ -1195,7 +1314,7 @@
           "namespace",
           "name",
           "version",
-          "adapter",
+          "is_active",
           "created_at",
           "updated_at"
         ],
@@ -1386,6 +1505,120 @@
         "tags": [
           "definitions"
         ]
+      },
+      "patch": {
+        "description": "Soft-enable or soft-disable a saga definition (`is_active`) by id or triple.",
+        "operationId": "patch_definitions_saga_active_v1_definitions_sagas_patch",
+        "parameters": [
+          {
+            "description": "Definition UUID (mutually exclusive with triple).",
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Definition UUID (mutually exclusive with triple).",
+              "title": "Id"
+            }
+          },
+          {
+            "description": "With name+version: identity triple.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With name+version: identity triple.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "With namespace+version: identity triple.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+version: identity triple.",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "With namespace+name: identity triple.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+name: identity triple.",
+              "title": "Version"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefinitionActiveUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaDefinitionItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Definitions Saga Active",
+        "tags": [
+          "definitions"
+        ]
       }
     },
     "/v1/definitions/sagas/{definition_id}": {
@@ -1443,6 +1676,307 @@
         ]
       }
     },
+    "/v1/definitions/steps": {
+      "get": {
+        "description": "List registered step definitions, newest updates first.",
+        "operationId": "get_definitions_steps_v1_definitions_steps_get",
+        "parameters": [
+          {
+            "description": "Filter by namespace; omit for all.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by namespace; omit for all.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "Exact step definition name.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact step definition name.",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "Filter by active flag.",
+            "in": "query",
+            "name": "is_active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by active flag.",
+              "title": "Is Active"
+            }
+          },
+          {
+            "description": "Include total matching row count.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include total matching row count.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepDefinitionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Definitions Steps",
+        "tags": [
+          "definitions"
+        ]
+      },
+      "patch": {
+        "description": "Soft-enable or soft-disable a step definition (`is_active`) by id or triple.",
+        "operationId": "patch_definitions_step_active_v1_definitions_steps_patch",
+        "parameters": [
+          {
+            "description": "Definition UUID (mutually exclusive with triple).",
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Definition UUID (mutually exclusive with triple).",
+              "title": "Id"
+            }
+          },
+          {
+            "description": "With name+version: identity triple.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With name+version: identity triple.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "With namespace+version: identity triple.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+version: identity triple.",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "With namespace+name: identity triple.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+name: identity triple.",
+              "title": "Version"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefinitionActiveUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepDefinitionItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Definitions Step Active",
+        "tags": [
+          "definitions"
+        ]
+      }
+    },
+    "/v1/definitions/steps/{definition_id}": {
+      "get": {
+        "description": "Return one step definition by primary key UUID.",
+        "operationId": "get_definitions_step_by_id_v1_definitions_steps__definition_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition_id",
+            "required": true,
+            "schema": {
+              "title": "Definition Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "When true, include the full step manifest blueprint in body.",
+            "in": "query",
+            "name": "include_body",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When true, include the full step manifest blueprint in body.",
+              "title": "Include Body",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepDefinitionItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Definitions Step By Id",
+        "tags": [
+          "definitions"
+        ]
+      }
+    },
     "/v1/definitions/workers": {
       "get": {
         "description": "List registered worker definitions, newest updates first.",
@@ -1482,6 +2016,24 @@
               ],
               "description": "Exact worker definition name.",
               "title": "Name"
+            }
+          },
+          {
+            "description": "Filter by active flag.",
+            "in": "query",
+            "name": "is_active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by active flag.",
+              "title": "Is Active"
             }
           },
           {
@@ -1552,6 +2104,120 @@
           }
         },
         "summary": "Get Definitions Workers",
+        "tags": [
+          "definitions"
+        ]
+      },
+      "patch": {
+        "description": "Soft-enable or soft-disable a worker definition (`is_active`) by id or triple.",
+        "operationId": "patch_definitions_worker_active_v1_definitions_workers_patch",
+        "parameters": [
+          {
+            "description": "Definition UUID (mutually exclusive with triple).",
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Definition UUID (mutually exclusive with triple).",
+              "title": "Id"
+            }
+          },
+          {
+            "description": "With name+version: identity triple.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With name+version: identity triple.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "With namespace+version: identity triple.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+version: identity triple.",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "With namespace+name: identity triple.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+name: identity triple.",
+              "title": "Version"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefinitionActiveUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDefinitionItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Definitions Worker Active",
         "tags": [
           "definitions"
         ]
@@ -1658,7 +2324,7 @@
     },
     "/v1/manifests": {
       "post": {
-        "description": "Register a worker or saga manifest. Accepts YAML or JSON body.\n\nBody must define a mapping with `kind` (worker | saga) and kind-specific\nfields. Same schema as the file-based manifests used by the CLI.\n\nReturns:\n    ManifestDeployResponse with a success message.\n\nRaises:\n    HTTPException: 413 when body is too large; 400 on invalid body, unknown kind, or (saga) missing workers.",
+        "description": "Register a worker, step, or saga manifest. Accepts YAML or JSON body.\n\nBody must define a mapping with `kind` (worker | step | saga) and kind-specific\nfields. Same schema as the file-based manifests used by the CLI.\n\nReturns:\n    ManifestDeployResponse with a success message.\n\nRaises:\n    HTTPException: 413 when body is too large; 400 on invalid body, unknown kind,\n    or missing worker/step dependencies.",
         "operationId": "post_manifests_v1_manifests_post",
         "responses": {
           "200": {
@@ -1672,7 +2338,13 @@
             "description": "Successful Response"
           },
           "400": {
-            "description": "Manifest validation failed (invalid YAML/JSON, unknown kind, missing worker references, schema errors)."
+            "description": "Manifest validation failed (invalid YAML/JSON, unknown kind, schema errors)."
+          },
+          "404": {
+            "description": "Referenced catalog definition (worker/step/saga) is missing."
+          },
+          "409": {
+            "description": "Referenced catalog definition exists but is inactive (``INACTIVE_CATALOG_DEFINITION``)."
           },
           "413": {
             "description": "Manifest body exceeds MANIFEST_MAX_BODY_BYTES."
@@ -1994,7 +2666,7 @@
     },
     "/v1/sagas/start": {
       "post": {
-        "description": "Start a saga from a registered definition; returns 202 with trace_id.\n\nCreates saga and step instances in a transaction and emits SAGA_STARTED.\n\nArgs:\n    body: Namespace, name, version, and input for the saga.\n\nReturns:\n    StartSagaResponse with trace_id.\n\nRaises:\n    HTTPException: 404 if definition not found; 409 on idempotency conflict or inactive definition; 400 on other ValueError.",
+        "description": "Start a saga from a registered definition; returns 202 with trace_id.\n\nCreates saga and step instances in a transaction and emits SAGA_STARTED.\n\nArgs:\n    body: Namespace, name, version, and input for the saga.\n\nReturns:\n    StartSagaResponse with trace_id.\n\nRaises:\n    HTTPException: 404 if definition not found; 409 on idempotency conflict or inactive\n        catalog definition (structured ``INACTIVE_CATALOG_DEFINITION`` /\n        ``CATALOG_DEFINITION_NOT_FOUND``); 400 on other ValueError.",
         "operationId": "post_sagas_start_v1_sagas_start_post",
         "requestBody": {
           "content": {

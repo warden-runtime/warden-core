@@ -25,19 +25,12 @@ if TYPE_CHECKING:
     from tortoise.backends.base.client import BaseDBAsyncClient
 
 
-def _assets_for_index(
-    step_spec: dict[str, Any],
-    index: int,
-    resolved_assets: list[tuple[dict[str, Any] | None, dict[str, Any] | None]] | None,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    if resolved_assets is not None and index < len(resolved_assets):
-        return resolved_assets[index]
-    schema = step_spec.get("output_schema_resolved")
-    comp = step_spec.get("compensation_definition")
-    return (
-        schema if isinstance(schema, dict) else None,
-        comp if isinstance(comp, dict) else None,
-    )
+def _frozen_dict_asset(step_model: Any, clean: dict[str, Any], field: str) -> dict[str, Any] | None:
+    embedded = getattr(step_model, field, None)
+    if isinstance(embedded, dict):
+        return embedded
+    raw = clean.get(field)
+    return raw if isinstance(raw, dict) else None
 
 
 def _reason_fields(step_model: ReasonSagaStep | Any) -> dict[str, Any]:
@@ -66,8 +59,6 @@ def _step_create_fields(
     step_spec: dict[str, Any],
     forward_seq: int,
     order_index: int,
-    resolved_output_schema: dict[str, Any] | None,
-    compensation_definition: dict[str, Any] | None,
 ) -> dict[str, Any]:
     clean = {k: v for k, v in step_spec.items() if not str(k).startswith("_")}
     loop_id = step_spec.get("_loop_id")
@@ -75,6 +66,8 @@ def _step_create_fields(
     step_model = parse_executable_step(clean)
     loop_id_str = str(loop_id) if loop_id else None
     iteration_int = int(iteration) if iteration is not None else None
+    compensation_definition = _frozen_dict_asset(step_model, clean, "compensation_definition")
+    output_schema = _frozen_dict_asset(step_model, clean, "output_schema_definition")
     base = {
         "span_id": uuid.uuid4().hex[:16],
         "saga_trace_id": saga.trace_id,
@@ -99,7 +92,7 @@ def _step_create_fields(
         "output_payload": None,
         "error_details": None,
         "compensation_definition": compensation_definition,
-        "output_schema": resolved_output_schema,
+        "output_schema": output_schema,
         "hitl_retry_count": 0,
         "pending_review_payload": None,
         "when_cel": step_model.when.cel if step_model.when else None,
@@ -116,9 +109,13 @@ def _step_create_fields(
                 "skills_allow": [],
                 "parameters_spec": {},
                 "policy_name": None,
+                "policy_definition": None,
                 "hitl_required": False,
                 "hitl_max_retries": None,
                 "hitl_retry_guidance": None,
+                "step_definition_name": None,
+                "step_definition_version": None,
+                "input_ports": {},
             }
         )
         base.update(_reason_fields(None))
@@ -127,6 +124,10 @@ def _step_create_fields(
     if not isinstance(step_model, (ReasonSagaStep, CommitSagaStep)):
         raise ValueError(f"Unsupported step kind for materialization: {step_model.kind!r}")
 
+    base["step_definition_name"] = step_model.step_definition_name
+    base["step_definition_version"] = step_model.step_definition_version
+    base["input_ports"] = dict(step_model.inputs or {})
+
     tools_spec = step_model.tools or ToolsSpec()
     resources_spec = step_model.resources or ResourcesSpec()
     skills_spec = (
@@ -134,6 +135,7 @@ def _step_create_fields(
         if isinstance(step_model, ReasonSagaStep) and step_model.skills is not None
         else SkillsSpec()
     )
+    policy_definition = _frozen_dict_asset(step_model, clean, "policy_definition")
     base.update(
         {
             "max_turns": step_model.max_turns,
@@ -145,6 +147,7 @@ def _step_create_fields(
             "skills_allow": [s.model_dump(mode="json") for s in skills_spec.allow],
             "parameters_spec": clean.get("with") or {},
             "policy_name": step_model.policy,
+            "policy_definition": policy_definition,
             "hitl_required": step_model.hitl,
             "hitl_max_retries": step_model.hitl_max_retries if step_model.hitl else None,
             "hitl_retry_guidance": step_model.hitl_retry_guidance if step_model.hitl else None,
@@ -161,27 +164,23 @@ async def materialize_executable_steps(
     start_forward_seq: int,
     start_order_index: int,
     conn: BaseDBAsyncClient,
-    resolved_assets: list[tuple[dict[str, Any] | None, dict[str, Any] | None]] | None = None,
 ) -> list[SagaStepInstance]:
     """Persist forward step rows for ``step_specs`` with contiguous forward_seq.
 
     ``step_specs`` may include ``_loop_id`` / ``_loop_iteration`` annotations from
-    loop materialization helpers. ``resolved_assets`` is parallel (output_schema,
-    compensation_definition); when omitted, values are taken from the step spec.
+    loop materialization helpers. Compensation, policy, and output_schema must already
+    be embedded on each frozen step dict (start hydrate).
     """
     created: list[SagaStepInstance] = []
     forward_seq = start_forward_seq
     order_index = start_order_index
 
-    for i, step_spec in enumerate(step_specs):
-        schema, comp = _assets_for_index(step_spec, i, resolved_assets)
+    for step_spec in step_specs:
         fields = _step_create_fields(
             saga=saga,
             step_spec=step_spec,
             forward_seq=forward_seq,
             order_index=order_index,
-            resolved_output_schema=schema,
-            compensation_definition=comp,
         )
         step = await SagaStepInstance.create(**fields, using_db=conn)
         await get_registry().engine.on_step_created(saga=saga, step=step, conn=conn)

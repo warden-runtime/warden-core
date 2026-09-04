@@ -6,9 +6,9 @@ pagination_next: guides/manifests/when-cel
 
 # MCP and tools
 
-Workers reach external systems through MCP servers declared on the worker manifest. Saga steps then narrow that surface with per-step allowlists. For a full stdio walkthrough on the dev stack, see [Demo: GitHub MCP](../../getting-started/demo-github-mcp.md); for manifest fields, start with [Worker manifests](worker-manifests.md).
+Workers reach external systems through MCP servers declared on the worker manifest. **Step** manifests then narrow that surface with per-step allowlists (`tools.allow`). For a full stdio walkthrough on the dev stack, see [Demo: GitHub MCP](../../getting-started/demo-github-mcp.md); for manifest fields, start with [Worker manifests](worker-manifests.md) and [Step manifests](step-manifests.md).
 
-Two layers always apply: **`tool_sources`** on the worker (what MCP endpoints the worker can open) and **`tools.allow`** on each saga step (what a given step may call). Transport choice is the main variable — Streamable HTTP when something else hosts the server, stdio when the worker should start it. The sections below cover auth headers, tool and resource allowlists, policy interaction, and designing tools for at-least-once delivery.
+Two layers always apply: **`tool_sources`** on the worker (what MCP endpoints the worker can open) and **`tools.allow`** on each **step** definition (what a given capability may call).
 
 ## Transport: Streamable HTTP vs stdio
 
@@ -41,7 +41,7 @@ Literal header values (no `${…}` placeholder) work for non-secret metadata. St
 
 ## Tool allowlists
 
-Each saga step has a `tools.allow` list. Each entry may use the **raw MCP tool id** (e.g. `calendar.list_events`) **or** the **provider-safe sanitized form** (e.g. `calendar_list_events`). During execution the worker matches either form against discovered MCP tools.
+Each reason/commit step has a `tools.allow` list (authored on the **step** manifest). Each entry may use the **raw MCP tool id** (e.g. `calendar.list_events`) **or** the **provider-safe sanitized form** (e.g. `calendar_list_events`). During execution the worker matches either form against discovered MCP tools.
 
 LLM providers require tool names matching `^[a-zA-Z0-9_-]{1,64}$`. Warden therefore always exposes **sanitized** names on the wire (dots and other illegal characters become `_`; collisions within a step get `_2`, `_3`, …). MCP `call_tool`, governance, policy CEL `tool.name`, and `facts[].tool` keep the **original** MCP ids.
 
@@ -64,16 +64,21 @@ On **`react`** reason steps, optional `skills.allow` lists skill ids the step ma
 Do **not** list `load_skill` in `tools.allow` or skill `allowed_tools` — it is reserved like `_submit`. Missing or malformed skill files fail the step with `SKILL_NOT_FOUND` / `SKILL_INVALID` **before** any LLM turn. Incompatible with **`agent-adapter: simple`**. Commit steps and compensation undo YAML do not use skills.
 
 ```yaml
-  - id: triage
-    kind: reason
-    worker: github-demo-worker
-    prompt: triage.j2
-    skills:
-      allow:
-        - name: triage
-    tools:
-      allow:
-        - name: add_issue_comment   # extra beyond the skill's allowed_tools
+# step catalog (reason)
+kind: step
+name: triage
+version: "1.0.0"
+step_kind: reason
+worker: github-demo-worker
+worker_version: "1.0.0"
+prompt: triage.j2
+skills:
+  allow:
+    - name: triage
+tools:
+  allow:
+    - name: add_issue_comment   # extra beyond the skill's allowed_tools
+inputs: {}
 ```
 
 Example skill file (`config/skills/github-demo-worker/triage.md`):
@@ -94,30 +99,34 @@ allowed_tools:
 
 MCP **tools** are callable functions (`list_issues`, `add_issue_comment`, …). MCP **resources** are addressable documents the server exposes by URI — policy files, profile records, static context blobs. Tools and resources are governed separately: `tools.allow` controls which tools the agent may invoke; `resources.allow` controls which resource URIs it may read.
 
-On each saga step, optional `resources.allow` lists URI templates the step may fetch. Each entry needs a `uri`; `description` is optional metadata for authors.
+On each **step** definition, optional `resources.allow` lists URI templates the capability may fetch. Each entry needs a `uri`; `description` is optional metadata for authors.
 
 ```yaml
-  - id: review-risk
-    kind: reason
-    worker: risk-worker
-    prompt: review.j2
-    with:
-      customer_id:
-        from: "$.input.customer_id"
-    resources:
-      allow:
-        - uri: "file:///policies/fraud-v3.md"
-        - uri: "postgres://risk/profiles/{customer_id}"
-    tools:
-      allow:
-        - name: score_transaction
+# step catalog
+kind: step
+name: review-risk
+version: "1.0.0"
+step_kind: reason
+worker: risk-worker
+worker_version: "1.0.0"
+prompt: review.j2
+inputs:
+  customer_id:
+    required: true
+resources:
+  allow:
+    - uri: "file:///policies/fraud-v3.md"
+    - uri: "postgres://risk/profiles/{customer_id}"
+tools:
+  allow:
+    - name: score_transaction
 ```
 
 When `resources.allow` is non-empty on a **`react`** reason step, the worker injects a virtual **`read_resource`** tool (same pattern as `_submit` — you do not list `read_resource` in `tools.allow`). During the ReAct loop the agent calls `read_resource` with a concrete URI; the worker checks the URI against the step allowlist, then fetches content from connected MCP servers. Incompatible with **`agent-adapter: simple`**.
 
 | Concern | Behavior |
 |---------|----------|
-| **Where declared** | Saga step `resources.allow` (persisted on the step instance row) |
+| **Where declared** | Step definition `resources.allow` (frozen onto the step instance at start hydrate) |
 | **MCP dependency** | Worker must have `tool_sources` — resource reads use MCP `read_resource` on those sessions |
 | **Parameterized URIs** | `{placeholder}` segments in the template (e.g. `{customer_id}`) must match resolved step arguments from `with` |
 | **Traversal / smuggling** | `..`, encoded traversal, and ambiguous overlapping templates are rejected at runtime |

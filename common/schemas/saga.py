@@ -197,6 +197,21 @@ class _SagaStepBase(BaseModel):
     name: str
     worker: str
     worker_version: str
+    step_definition_name: str | None = Field(
+        default=None,
+        description="Catalog step name when this node was hydrated from a use: ref.",
+    )
+    step_definition_version: str | None = Field(
+        default=None,
+        description="Catalog step version when this node was hydrated from a use: ref.",
+    )
+    inputs: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Frozen catalog input ports (required/description/schema) from start-time hydrate. "
+            "Used to validate resolved with values at schedule time."
+        ),
+    )
     with_spec: dict[str, StepParameterSpec] = Field(default_factory=dict, alias="with")
     compensation: str | None = Field(
         default=None,
@@ -208,8 +223,8 @@ class _SagaStepBase(BaseModel):
     compensation_definition: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Resolved compensation block (worker, with, tools). Populated at manifest "
-            "registration; omit in author YAML."
+            "Resolved compensation block (worker, with, tools). Populated at saga start "
+            "hydration from COMPENSATIONS_ROOT; omit in author YAML."
         ),
     )
     timeout_seconds: int = 600
@@ -224,7 +239,15 @@ class _SagaStepBase(BaseModel):
         description=(
             "Relative path under SCHEMAS_ROOT to a JSON file: step output JSON Schema (Draft-7). "
             'Workers emit STEP_COMPLETED.output as {"data": <object>}; engine validates output.data. '
-            "The resolved schema is not stored on the saga definition row."
+            "At saga start the engine freezes the resolved object into "
+            "``output_schema_definition``; materialize reads that embed."
+        ),
+    )
+    output_schema_definition: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Resolved output JSON Schema object. Populated at saga start hydration "
+            "from SCHEMAS_ROOT; omit in author YAML."
         ),
     )
     policy: str | None = Field(
@@ -233,10 +256,19 @@ class _SagaStepBase(BaseModel):
             "Relative path under POLICIES_ROOT to a policy YAML file "
             "(e.g. github-issue-comment.yaml or team-a/gate.yaml). "
             "Legacy stem-only refs without .yaml still resolve via {ref}.yaml. "
+            "At saga start the engine freezes the resolved CEL into "
+            "``policy_definition``; runtime gates use that embed, not a live disk re-read. "
             "The engine evaluates ``cel`` against a normalized binding with ``phase``, "
             "``input``, ``arguments``, ``output``, ``saga``, ``step``, ``worker``, "
             "and ``tool``. Reason step phase is ``after_reason``; commit step phase "
             "is ``before_commit``."
+        ),
+    )
+    policy_definition: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Resolved policy artifact (name, version, cel). Populated at saga start "
+            "hydration from POLICIES_ROOT; omit in author YAML."
         ),
     )
     hitl: bool = Field(
@@ -290,18 +322,23 @@ class _SagaStepBase(BaseModel):
         return self
 
 
-def _simple_agent_adapter_error(step: "ReasonSagaStep") -> str | None:
-    """Return a validation error message if ``simple`` constraints are violated."""
-    tools = step.tools
+def simple_agent_adapter_constraints(
+    *,
+    tools: ToolsSpec | None,
+    resources: ResourcesSpec | None,
+    skills: SkillsSpec | None,
+    facts: list[StepFactsExtractor] | None,
+) -> str | None:
+    """Return a validation error if ``simple`` agent-adapter constraints are violated."""
     if tools is not None and tools.allow:
         return "simple agent-adapter requires an empty tools.allow"
     if tools is not None and tools.bind:
         return "simple agent-adapter does not support tools.bind"
-    if step.resources is not None and step.resources.allow:
+    if resources is not None and resources.allow:
         return "simple agent-adapter requires an empty resources.allow"
-    if step.skills is not None and step.skills.allow:
+    if skills is not None and skills.allow:
         return "simple agent-adapter requires an empty skills.allow"
-    if step.facts:
+    if facts:
         return "facts require tool results; incompatible with simple agent-adapter"
     return None
 
@@ -375,7 +412,12 @@ class ReasonSagaStep(_SagaStepBase):
     def validate_simple_agent_adapter_constraints(self) -> "ReasonSagaStep":
         if self.agent_adapter != "simple":
             return self
-        err = _simple_agent_adapter_error(self)
+        err = simple_agent_adapter_constraints(
+            tools=self.tools,
+            resources=self.resources,
+            skills=self.skills,
+            facts=self.facts,
+        )
         if err is not None:
             raise ValueError(err)
         return self
@@ -548,7 +590,86 @@ class LoopSagaStep(BaseModel):
         return v
 
 
-# Loop body steps stay reason/commit only.
+class SagaStepRef(BaseModel):
+    """Saga-local composition node: pins a catalog step and binds ports."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    kind: Literal["use"] = "use"
+    id: str
+    name: str | None = Field(
+        default=None,
+        description="Optional display-name override; defaults to the step definition title.",
+    )
+    use: str = Field(description="Step definition name in the saga namespace.")
+    version: str = Field(description="Step definition version pin.")
+    with_spec: dict[str, StepParameterSpec] = Field(default_factory=dict, alias="with")
+    when: StepWhenSpec | None = None
+    # Tighten-only overrides (applied at hydrate; cannot widen catalog guardrails).
+    hitl: bool | None = None
+    hitl_max_retries: int | None = Field(default=None, ge=0)
+    hitl_retry_guidance: str | None = Field(default=None, max_length=4096)
+    timeout_seconds: int | None = Field(default=None, ge=1)
+    max_turns: int | None = Field(default=None, ge=1, le=MAX_TURNS_LIMIT)
+    max_step_tokens: int | None = Field(default=None, ge=1)
+    max_completion_tokens: int | None = Field(default=None, ge=1)
+
+    @field_validator("id", "use", "version")
+    @classmethod
+    def non_empty_ref_fields(cls, v: str) -> str:
+        stripped = (v or "").strip()
+        if not stripped:
+            raise ValueError("must be non-empty")
+        return stripped
+
+
+class LoopAuthoringStep(BaseModel):
+    """Authoring-time loop whose body is a list of catalog step refs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["loop"]
+    id: str
+    name: str | None = None
+    max_iterations: int = Field(..., ge=1, description="Hard ceiling on body passes; required.")
+    until: LoopUntilSpec
+    steps: list[SagaStepRef]
+
+    @field_validator("id")
+    @classmethod
+    def id_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("loop id must be non-empty")
+        return stripped
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def inject_use_kind_on_body(cls, v: Any) -> Any:
+        return _inject_use_kind(v)
+
+    @field_validator("steps")
+    @classmethod
+    def body_non_empty(cls, v: list[SagaStepRef]) -> list[SagaStepRef]:
+        if not v:
+            raise ValueError("loop body steps must be non-empty")
+        return v
+
+
+def _inject_use_kind(steps: Any) -> Any:
+    """Treat ``use:`` nodes without ``kind`` as ``kind: use`` for discrimination."""
+    if not isinstance(steps, list):
+        return steps
+    out: list[Any] = []
+    for item in steps:
+        if isinstance(item, dict) and "use" in item and "kind" not in item:
+            out.append({**item, "kind": "use"})
+        else:
+            out.append(item)
+    return out
+
+
+# Loop body steps stay reason/commit only (hydrated / stored shape).
 SagaStep = Annotated[
     ReasonSagaStep | CommitSagaStep,
     Field(discriminator="kind"),
@@ -562,6 +683,11 @@ ExecutableSagaStep = Annotated[
 
 TopLevelSagaStep = Annotated[
     ReasonSagaStep | CommitSagaStep | LoopSagaStep | SpawnSagasStep | JoinSagasStep,
+    Field(discriminator="kind"),
+]
+
+AuthoringTopLevelStep = Annotated[
+    SagaStepRef | LoopAuthoringStep | SpawnSagasStep | JoinSagasStep,
     Field(discriminator="kind"),
 ]
 
@@ -589,8 +715,11 @@ def _compile_jsonpath(path: str, *, step_id: str, field_name: str) -> None:
         raise ValueError(f"spawn step {step_id!r} {field_name} is not a valid JSONPath: {e}") from e
 
 
-class SagaBlueprint(BaseModel):
-    """Root schema for a saga definition (YAML)."""
+class HydratedSagaBlueprint(BaseModel):
+    """Execution-ready saga graph after catalog ``use:`` refs are hydrated.
+
+    Distinct from :class:`SagaAuthoringBlueprint`, which is the deploy/store AST.
+    """
 
     kind: Literal["saga"] = "saga"
     name: str
@@ -616,7 +745,79 @@ class SagaBlueprint(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_spawn_join_wiring(self) -> "SagaBlueprint":
+    def validate_spawn_join_wiring(self) -> "HydratedSagaBlueprint":
+        spawn_ids: set[str] = set()
+        joins: list[JoinSagasStep] = []
+        for step in self.steps:
+            if isinstance(step, SpawnSagasStep):
+                spawn_ids.add(step.id)
+                _compile_jsonpath(step.spawn.items_from, step_id=step.id, field_name="items_from")
+                _compile_jsonpath(step.spawn.result_from, step_id=step.id, field_name="result_from")
+            elif isinstance(step, JoinSagasStep):
+                joins.append(step)
+
+        seen_targets: set[str] = set()
+        for join in joins:
+            target = join.join.spawn_step_id
+            if target not in spawn_ids:
+                raise ValueError(
+                    f"join step {join.id!r} references unknown spawn_step_id {target!r}"
+                )
+            if target in seen_targets:
+                raise ValueError(f"spawn_step_id {target!r} is targeted by more than one join")
+            seen_targets.add(target)
+        return self
+
+
+def iter_authoring_executable_ids(steps: list[AuthoringTopLevelStep]) -> list[str]:
+    """Collect executable step ids from an authoring (use-ref) steps list."""
+    ids: list[str] = []
+    for step in steps:
+        if isinstance(step, LoopAuthoringStep):
+            ids.extend(body.id for body in step.steps)
+        else:
+            ids.append(step.id)
+    return ids
+
+
+def iter_authoring_loop_ids(steps: list[AuthoringTopLevelStep]) -> list[str]:
+    """Collect loop container ids from an authoring steps list."""
+    return [step.id for step in steps if isinstance(step, LoopAuthoringStep)]
+
+
+class SagaAuthoringBlueprint(BaseModel):
+    """Deploy-time saga YAML: composes catalog steps via ``use:`` refs."""
+
+    kind: Literal["saga"] = "saga"
+    name: str
+    namespace: str = "default"
+    version: str
+    description: str
+    steps: list[AuthoringTopLevelStep]
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def inject_use_kind_on_top_level(cls, v: Any) -> Any:
+        return _inject_use_kind(v)
+
+    @field_validator("steps")
+    @classmethod
+    def ensure_unique_ids_and_no_nested_loops(
+        cls, v: list[AuthoringTopLevelStep]
+    ) -> list[AuthoringTopLevelStep]:
+        executable_ids = iter_authoring_executable_ids(v)
+        if len(executable_ids) != len(set(executable_ids)):
+            raise ValueError("All step IDs in a blueprint must be unique.")
+        loop_ids = iter_authoring_loop_ids(v)
+        if len(loop_ids) != len(set(loop_ids)):
+            raise ValueError("All loop IDs in a blueprint must be unique.")
+        overlap = set(executable_ids) & set(loop_ids)
+        if overlap:
+            raise ValueError(f"Loop IDs must not collide with step IDs: {sorted(overlap)}")
+        return v
+
+    @model_validator(mode="after")
+    def validate_spawn_join_wiring(self) -> "SagaAuthoringBlueprint":
         spawn_ids: set[str] = set()
         joins: list[JoinSagasStep] = []
         for step in self.steps:

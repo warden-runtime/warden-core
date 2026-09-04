@@ -59,11 +59,12 @@ The table below is the operator map. Most day-to-day work uses `deploy`, `start 
 
 | Command | What it does |
 |---------|--------------|
-| `warden deploy` | Register a manifest (worker or saga) with the engine |
-| `warden list definitions` | Inspect deployed worker and saga definitions |
+| `warden deploy` | Register a manifest (worker, step, or saga) with the engine |
+| `warden list definitions` | Inspect deployed worker, step, and saga **catalog** definitions |
+| `warden definitions set-active` | Soft-enable or soft-disable a catalog definition by UUID or identity triple |
 | `warden start saga` | Start a saga instance |
 | `warden list sagas` | List saga instances and their status |
-| `warden list steps` | List step rows for one saga (`--trace-id` required) — status index only |
+| `warden list steps` | List **runtime** step rows for one saga (`--trace-id` required) — not catalog steps |
 | `warden show step` | Show one step's inputs, output, prompt ref, and errors (`--step-id` or `step_span_id`) |
 | `warden review` | Approve, reject, or HITL-retry steps in `AWAITING_HUMAN` |
 | `warden saga retry-step` | Re-queue a stuck forward step (`IN_PROGRESS` on a `RUNNING` saga) |

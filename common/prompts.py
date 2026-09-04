@@ -7,6 +7,21 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import BaseLoader, Environment, TemplateNotFound
+from jinja2.sandbox import SandboxedEnvironment, SecurityError
+
+# Built-in helpers that can expose object graphs; prompts only need variables + filters.
+_UNSAFE_PROMPT_GLOBALS = ("cycler", "joiner", "namespace", "lipsum")
+
+
+def make_prompt_environment(*, loader: BaseLoader | None = None) -> SandboxedEnvironment:
+    """Jinja env for LLM prompts: sandboxed attribute access + path-safe loaders."""
+    env = SandboxedEnvironment(
+        loader=loader if loader is not None else BaseLoader(),
+        autoescape=False,
+    )  # nosemgrep: missing-autoescape-disabled
+    for key in _UNSAFE_PROMPT_GLOBALS:
+        env.globals.pop(key, None)
+    return env
 
 
 def resolve_prompts_root(prompts_root: str | None) -> str:
@@ -76,14 +91,13 @@ def render_prompt_file(prompts_root: str, prompt_ref: str, context: dict[str, An
     ref = (prompt_ref or "").strip().lstrip("/")
     # Fail fast with the same path errors as load_prompt_content before Jinja.
     resolved_prompt_path(prompts_root, ref)
-    env = Environment(
-        loader=_SandboxedPromptLoader(prompts_root),
-        autoescape=False,
-    )  # nosemgrep: missing-autoescape-disabled
+    env = make_prompt_environment(loader=_SandboxedPromptLoader(prompts_root))
     try:
         return env.get_template(ref).render(**context)
     except TemplateNotFound as e:
         raise ValueError(f"Prompt include not found or escapes PROMPTS_ROOT: {e}") from e
+    except SecurityError as e:
+        raise ValueError(f"Jinja render blocked unsafe construct in prompt {ref!r}: {e}") from e
     except Exception as e:
         raise ValueError(f"Jinja render failed for prompt {ref!r}: {e}") from e
 

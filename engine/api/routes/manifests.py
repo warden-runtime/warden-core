@@ -5,9 +5,11 @@ import json
 import logging
 
 import yaml
+from common.catalog_errors import CatalogError
 from common.config import get_settings
 from fastapi import APIRouter, HTTPException, Request
 
+from engine.api.http_errors import http_exception_for_catalog
 from engine.api.schemas import ManifestDeployResponse
 from engine.registry.service import RegistryService
 
@@ -32,8 +34,16 @@ _ALLOWED_MANIFEST_MEDIA = frozenset(
     responses={
         400: {
             "description": (
-                "Manifest validation failed (invalid YAML/JSON, unknown kind, "
-                "missing worker references, schema errors)."
+                "Manifest validation failed (invalid YAML/JSON, unknown kind, schema errors)."
+            ),
+        },
+        404: {
+            "description": "Referenced catalog definition (worker/step/saga) is missing.",
+        },
+        409: {
+            "description": (
+                "Referenced catalog definition exists but is inactive "
+                "(``INACTIVE_CATALOG_DEFINITION``)."
             ),
         },
         413: {
@@ -45,16 +55,17 @@ _ALLOWED_MANIFEST_MEDIA = frozenset(
     },
 )
 async def post_manifests(request: Request) -> ManifestDeployResponse:
-    """Register a worker or saga manifest. Accepts YAML or JSON body.
+    """Register a worker, step, or saga manifest. Accepts YAML or JSON body.
 
-    Body must define a mapping with `kind` (worker | saga) and kind-specific
+    Body must define a mapping with `kind` (worker | step | saga) and kind-specific
     fields. Same schema as the file-based manifests used by the CLI.
 
     Returns:
         ManifestDeployResponse with a success message.
 
     Raises:
-        HTTPException: 413 when body is too large; 400 on invalid body, unknown kind, or (saga) missing workers.
+        HTTPException: 413 when body is too large; 400 on invalid body, unknown kind,
+        or missing worker/step dependencies.
     """
     body_bytes = await request.body()
     max_bytes = get_settings().manifest_max_body_bytes
@@ -90,6 +101,9 @@ async def post_manifests(request: Request) -> ManifestDeployResponse:
         service = RegistryService()
         message = await service.register_manifest_from_dict(data)
         return ManifestDeployResponse(message=message)
+    except CatalogError as e:
+        logger.warning("manifest deploy catalog conflict: %s", e)
+        raise http_exception_for_catalog(e) from e
     except ValueError as e:
         logger.warning("manifest deploy rejected: %s", e)
         raise HTTPException(status_code=400, detail=str(e)) from e

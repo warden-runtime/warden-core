@@ -8,7 +8,7 @@ pagination_next: getting-started/demo-observe-execution-timing
 
 # Demo: Mock LLM and MCP
 
-This is the first hands-on demo in getting started — no API keys required. You deploy two bundled manifests, start one saga with two steps, and watch the worker run a short reasoning loop on each step. When both steps finish, the saga is `COMPLETED` in Postgres.
+This is the first hands-on demo in getting started — no API keys required. You deploy a worker, two step definitions, and a thin saga that composes them, then start one instance and watch the worker run a short reasoning loop on each step. When both steps finish, the saga is `COMPLETED` in Postgres.
 
 You need a running stack from [Installation](installation.md) — `warden ping` should already succeed. No extra `.env` beyond what Installation set up.
 
@@ -19,11 +19,12 @@ This demo focuses on the core orchestration loop. Policy rules and human-in-the-
 | Artifact | Path |
 |----------|------|
 | Worker | `config/worker.mock-mcp.yaml` — `mock-mcp-worker`, mock LLM provider |
-| Saga | `config/saga.mock-mcp.yaml` — `greet` then `summarize` (reads prior step output) |
+| Steps | `config/step.mock-greet.yaml`, `config/step.mock-summarize.yaml` — prompts + tool allowlists |
+| Saga | `config/saga.mock-mcp.yaml` — `greet` then `summarize` via `use:` (binds prior output) |
 | Prompts | `config/prompts/mock-greet.j2`, `config/prompts/mock-summarize.j2` |
 | Mock runtime | `workers/fixtures/mock_mcp_server.py`, `workers/llm/mock.py` |
 
-Before you deploy, open the files in the table — worker provider, step order, prompts, and tool allowlists make more sense once you've read the YAML.
+Before you deploy, open the files in the table — worker provider, step capabilities, saga wiring, and prompts make more sense once you've read the YAML.
 
 ## Before you start
 
@@ -36,10 +37,12 @@ From the repo root with `ENGINE_URL` set. Run commands with `source .venv/bin/ac
 
 ### 1. Deploy the manifests
 
-Deploy the worker first, then the saga. Warden rejects the saga deploy if the worker is not registered yet.
+Deploy workers → steps → sagas. Warden rejects the saga deploy if a referenced worker or step is not registered yet.
 
 ```bash
 warden deploy -f config/worker.mock-mcp.yaml
+warden deploy -f config/step.mock-greet.yaml
+warden deploy -f config/step.mock-summarize.yaml
 warden deploy -f config/saga.mock-mcp.yaml
 ```
 

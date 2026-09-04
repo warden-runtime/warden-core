@@ -14,19 +14,23 @@ You'll see the same core terms cross paths everywhere—from the YAML manifests 
 
 ### Saga
 
-A versioned workflow blueprint: ordered steps, per-step tool allowlists, and references to prompts and policies. You deploy a saga definition once and start many instances from it. See [Saga manifests](../guides/manifests/saga-manifests.md).
+A versioned workflow blueprint: ordered composition of catalog steps (`use:` + `version`), port bindings, and optional `when` gates. You deploy a saga definition once (authoring AST; link-checked against the catalog) and start many instances from it — each start hydrates refs into instance `frozen_steps`. See [Saga manifests](../guides/manifests/saga-manifests.md).
 
 ### Instance
 
 A single live run of a saga definition. Each instance has its own step progress, status, and [saga context](#saga-context). Instances are identified by `trace_id`, not by manifest name or version. Many instances of the same saga can run at once.
 
-### Step
+### Step definition
 
-One unit of work in a running saga. **Reason** steps produce structured LLM output. **Commit** steps call exactly one MCP tool, usually to change something outside Warden. Each step is a durable row for the life of the run. See [Reason step execution](../guides/manifests/saga-manifests.md#reason-step-execution-agent-adapter).
+A versioned reusable capability (`kind: step`): `step_kind` (`reason` \| `commit`), declared `inputs`, worker pin, and capability fields (prompt, tools, policy, HITL, and so on). Sagas compose definitions via `use:` — they do not re-author those fields inline. At start hydrate, catalog `step_kind` becomes the runtime step's `kind`. See [Step manifests](../guides/manifests/step-manifests.md).
+
+### Step instance
+
+One unit of work in a **running** saga. **Reason** steps produce structured LLM output. **Commit** steps call exactly one MCP tool, usually to change something outside Warden. Each step instance is a durable row for the life of the run, tracked with the saga's `trace_id`. See [Reason step execution](../guides/manifests/saga-manifests.md#reason-step-execution-agent-adapter).
 
 ### Worker definition
 
-The manifest that declares LLM provider settings, model, MCP tool sources, and system prompt for a worker process. Saga steps pin a worker by name and version at execution time. This is a deployed blueprint, not a running process. See [Worker manifests](../guides/manifests/worker-manifests.md).
+The manifest that declares LLM provider settings, model, MCP tool sources, and system prompt for a worker process. Step definitions pin a worker by name and version; at execution time the worker process loads that pin. This is a deployed blueprint, not a running process. See [Worker manifests](../guides/manifests/worker-manifests.md).
 
 ### Worker
 
@@ -46,7 +50,7 @@ As steps complete, the engine adds each step's output and facts under that step'
 
 ### Bindings (`with`)
 
-Optional keys on a saga step that pull values from [saga context](#saga-context). When the step is scheduled, the engine resolves them into a flat `arguments` map. On **`react`** reason steps, keys hydrate the Jinja prompt; optional `tools.bind` (⊆ `with`) also pins selected values onto MCP tool args. On **commit** steps, the full map becomes MCP tool kwargs. See [Bindings](../guides/manifests/saga-manifests.md#bindings-with).
+Optional keys on a saga `use:` ref that pull values from [saga context](#saga-context) into the step definition's declared [input ports](../guides/manifests/step-manifests.md#input-ports). When the step is scheduled, the engine resolves them into a flat `arguments` map. On **`react`** reason steps, keys **render** the Jinja prompt; optional `tools.bind` (⊆ declared inputs) also pins selected values onto MCP tool args. On **commit** steps, the full map becomes MCP tool kwargs. See [Bindings](../guides/manifests/saga-manifests.md#bindings-with).
 
 ### Conditional branching (`when.cel`)
 
@@ -74,6 +78,16 @@ When a saga cannot finish safely, the engine undoes completed forward steps in r
 ### Tool facts
 
 Selected values copied from MCP tool output into [saga context](#saga-context). Later steps can branch or bind on real tool data, not only on LLM output. See [Tool facts](../guides/manifests/saga-manifests.md#tool-facts-facts).
+
+## Vocabulary: hydrate vs render vs prepare
+
+Warden uses three different verbs on purpose:
+
+| Verb | Layer | Meaning |
+|------|--------|---------|
+| **Hydrate** | Catalog → runtime graph | Resolve saga `use:` refs into an execution-ready `HydratedSagaBlueprint` / instance `frozen_steps` (deploy link-check or start freeze). |
+| **Render** | Jinja prompts | Fill a prompt template with resolved `with` values (`render_prompt_file` / `resolve_step_prompt`). |
+| **Prepare** / **init** | Worker command | Load the step row and prompt template before adapter setup (`worker_init_ms`), then tool/adapter setup (`setup_ms`). |
 
 ## Component identity
 

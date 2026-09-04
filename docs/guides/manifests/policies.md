@@ -21,7 +21,7 @@ Each policy is a YAML file under `POLICIES_ROOT` (default `./config/policies` in
 | Field | Purpose |
 |-------|---------|
 | `name` | Display name (defaults to the manifest ref minus extension, preserving subdirs) |
-| `version` | Optional label on the policy artifact (read at gate time; the step row stores the `policy:` path ref, not this field) |
+| `version` | Optional label on the policy artifact (frozen onto the step at saga start) |
 | `cel` | CEL expression — must evaluate to **bool** (`true` = pass, `false` = deny) |
 
 ```yaml
@@ -31,24 +31,28 @@ version: "1"
 cel: "phase == 'before_commit' && step.kind == 'commit' && step.id == 'post-comment' && tool.name == 'add_issue_comment' && arguments.owner == input.owner && arguments.repo == input.repo && arguments.issue_number > 0 && size(arguments.body) > 0 && size(arguments.body) <= 8000 && arguments.body.contains('## Warden triage')"
 ```
 
-The engine loads the file when the gate runs. `warden deploy` also validates that each referenced policy file exists and that its CEL compiles. A policy that goes missing after deploy surfaces as `errored` at runtime. Keep policy files on disk where the **engine** container can read them — see [Configuration](../../getting-started/configuration.md) for `POLICIES_ROOT` and Compose mounts.
+`warden deploy` validates that each referenced policy file exists and that its CEL compiles. At saga **start**, the engine freezes `{name, version, cel}` into the instance `frozen_steps` (and onto the step row as `policy_definition`), same pattern as compensation embeds. Runtime gates evaluate that frozen CEL — they do not re-read `POLICIES_ROOT`. Keep policy files on disk where the **engine** can read them at start/deploy — see [Configuration](../../getting-started/configuration.md) for `POLICIES_ROOT` and Compose mounts.
 
 CEL expressions evaluate to `true` or `false` — in a policy gate, `true` passes and `false` denies. For syntax, operators, and functions, see the [CEL documentation](https://cel.dev).
 
-## Attaching to a saga step
+## Attaching to a step
 
-Reference a policy by path on any step that should be gated:
+Reference a policy by path on the **step** definition that should be gated (not on the saga `use:` ref):
 
 ```yaml
-steps:
-  - id: post-comment
-    kind: commit
-    worker: github-demo-worker
-    policy: github-issue-comment.yaml
-    # with, tools, when, hitl, … omitted — see saga manifests
+# config/step.github-post-comment.yaml (excerpt)
+kind: step
+name: github-post-comment
+step_kind: commit
+worker: github-demo-worker
+worker_version: "0.1.0"
+policy: github-issue-comment.yaml
+tools:
+  allow:
+    - name: add_issue_comment
 ```
 
-Field placement and `with` bindings are saga-manifest concerns — see [Saga manifests](saga-manifests.md).
+Saga composition binds ports and optional `when` / HITL tighten overrides — see [Step manifests](step-manifests.md) and [Saga manifests](saga-manifests.md).
 
 ## Evaluation phases
 

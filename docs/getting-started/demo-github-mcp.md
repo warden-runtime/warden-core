@@ -119,6 +119,8 @@ If services look stuck, run `make doctor`.
 export ENGINE_URL=http://127.0.0.1:8000
 
 warden deploy -f config/worker.github-demo.yaml
+warden deploy -f config/step.github-triage.yaml
+warden deploy -f config/step.github-post-comment.yaml
 warden deploy -f config/saga.github-demo.yaml
 ```
 

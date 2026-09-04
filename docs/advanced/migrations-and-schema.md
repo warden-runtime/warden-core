@@ -20,7 +20,7 @@ SQL under `db/migrations/` is the **source of truth** for kernel tables. Tortois
 
 | Group | Tables | Role |
 |-------|--------|------|
-| **Definitions** | `saga_definitions`, `worker_definitions`, `provider_secrets` | Deployed manifests and provider credentials |
+| **Definitions** | `saga_definitions`, `step_definitions`, `worker_definitions`, `provider_secrets` | Deployed manifests and provider credentials |
 | **Runtime** | `saga_instances`, `saga_step_instances` | Running sagas and per-step state |
 | **Messaging** | `outbox_events`, `processed_commands`, `processed_ingest_events`, `processed_operator_recoveries` | Transactional outbox and idempotency guards |
 

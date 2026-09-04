@@ -6,40 +6,54 @@ pagination_next: guides/manifests/mcp-and-tools
 
 # Prompts
 
-A `reason` step uses a [Jinja2](https://jinja.palletsprojects.com/en/stable/templates/) template to build the user prompt that goes to the LLM. Unlike saga manifests, prompts aren't saved to the database with version numbers — they live as plain files on disk under `PROMPTS_ROOT`. Your saga manifest points to the file by name (like `prompt: triage.j2`) and uses a `with` block to feed data into it. When the step runs, the worker combines the file and the data to render your prompt.
+A `reason` step uses a [Jinja2](https://jinja.palletsprojects.com/en/stable/templates/) template to build the user prompt that goes to the LLM. Unlike saga manifests, prompts aren't saved to the database with version numbers — they live as plain files on disk under `PROMPTS_ROOT`. Your **step** manifest points to the file (`prompt: triage.j2`); the saga binds port values with `with`. When the step runs, the worker combines the file and the data to render your prompt.
 
 Commit steps never use prompt files — they call one MCP tool with resolved `with` arguments. Compensation undo steps use YAML under `COMPENSATIONS_ROOT` (not saga prompt templates) — see [Compensation](compensation.md).
 
-For how `with` bindings work, see [Saga manifests → Bindings](saga-manifests.md#bindings-with).
+For how `with` bindings work, see [Saga manifests → Bindings](saga-manifests.md#bindings-with) and [Step manifests](step-manifests.md).
 
 ## Referencing a prompt from a step
 
-Set `prompt` on any `reason` step. Every value the template reads must be declared under `with` (or injected by the worker — see [Template context](#template-context)):
+Set `prompt` on a **reason** [step manifest](step-manifests.md). Every value the template reads must be declared under the step's `inputs` (and bound from the saga `with` block — see [Template context](#template-context)):
 
 ```yaml
+# step catalog
+kind: step
+name: analyze
+version: "1.0.0"
+step_kind: reason
+worker: analyst-worker
+worker_version: "1.0.0"
+prompt: analyze.j2
+inputs:
+  repo:
+    required: true
+```
+
+```yaml
+# saga composition
 steps:
   - id: analyze
-    kind: reason
-    worker: analyst-worker
-    prompt: analyze.j2
+    use: analyze
+    version: "1.0.0"
     with:
       repo:
         from: $.input.repo
 ```
 
-When you deploy your manifest, Warden checks your `{PROMPTS_ROOT}/analyze.j2` file early to make sure everything works. The engine will catch errors and block the deploy if:
+When you deploy the **step** manifest, Warden checks your `{PROMPTS_ROOT}/analyze.j2` file early. The engine blocks deploy if:
 
 - `PROMPTS_ROOT` isn't configured on the engine
 - The prompt file can't be found at that path
-- The template references a `{{ variable }}` that isn't declared in `with`
+- The template references a `{{ variable }}` that isn't declared in the step's `inputs`
 
 The `prompt` value must be a **relative path** under `PROMPTS_ROOT` — no leading `/` and no `..` segments.
 
-When the template has no `{{ variables }}`, you can **omit `with` entirely** — the engine treats a missing block the same as an empty map. The [Demo: Quickstart](../../getting-started/demo-quickstart.md) minimal saga uses an explicit empty map for clarity:
+When the template has no `{{ variables }}`, use an empty `inputs: {}` map (see [Demo: Quickstart](../../getting-started/demo-quickstart.md)):
 
 ```yaml
 prompt: noop.j2
-# with: {}   # optional — omit when the template has no variables
+inputs: {}
 ```
 
 For JSONPath syntax, resolution timing, and binding to prior step output, see [Saga manifests → Bindings](saga-manifests.md#bindings-with).
@@ -50,7 +64,7 @@ Prompt files stay on disk — they aren't copied into Postgres. Both engine and 
 
 | Consumer | When | What |
 |----------|------|------|
-| Engine | Saga registration | Read file body; validate `{{ var }}` ⊆ `with` keys |
+| Engine | Step registration | Read file body; validate `{{ var }}` ⊆ step `inputs` keys |
 | Engine | Step schedule | Re-check file still exists |
 | Worker | Step execution | Load file body; render with resolved bindings |
 
@@ -127,11 +141,11 @@ The worker renders the prompt when the step runs — not when you deploy the sag
 1. Load `{PROMPTS_ROOT}/<prompt>` from disk (fresh read each run) — the step's prompt template file from the saga manifest `prompt` field.
 2. Render that template with resolved `with` values + `allowed_tools`.
 3. Send the worker manifest's **`system_prompt`** as the system message.
-4. Send the **rendered step prompt** (the hydrated `.j2` output from step 2) as the human message. String templates (Jinja / inline) are sent as **plain text**. Structured dict/list prompt inputs are JSON-encoded so the model still receives a parseable object.
+4. Send the **rendered step prompt** (the Jinja output from step 2) as the human message. String templates (Jinja / inline) are sent as **plain text**. Structured dict/list prompt inputs are JSON-encoded so the model still receives a parseable object.
 
 You can edit prompt files on disk without redeploying the saga manifest. Registration already validated variable names; content changes apply on the next step run for any instance that references that `prompt` filename.
 
-If you add new `{{ variables }}`, update the saga step's `with` block and redeploy. You don't have to bump `version` for deploy to succeed — the engine upserts the same `(namespace, name, version)` in place. In development, redeploying the same version is usually fine. In production, prefer a new saga `version` when `with` or other step fields change so new runs pick up the contract and **running sagas** keep the bindings they started with. See [Manifests and artifacts → Deploy and identity](overview.md#deploy-and-identity).
+If you add new `{{ variables }}`, update the saga step's `with` block and redeploy the **saga** (same version upsert is fine for sagas). To change step capability (prompt, tools, …), bump the **step** `version` and update saga `use:` pins — step versions are append-only. Prefer a new saga `version` in production when composition changes so new runs pick up the contract and **running sagas** keep the freeze they started with. See [Manifests and artifacts → Deploy and identity](overview.md#deploy-and-identity).
 
 For Jinja syntax (conditionals, loops, filters), see the [Jinja template designer docs](https://jinja.palletsprojects.com/en/stable/templates/).
 
@@ -166,6 +180,8 @@ The full GitHub demo template documents the **`react`** `_submit` JSON contract 
 
 File prompts under `PROMPTS_ROOT` support Jinja [`{% include %}`](https://jinja.palletsprojects.com/en/stable/templates/#include). Partials must stay under the same root — absolute paths and `..` segments are rejected.
 
+Rendering uses Jinja’s [`SandboxedEnvironment`](https://jinja.palletsprojects.com/en/stable/api/#jinja2.sandbox.SandboxedEnvironment): attribute escapes / SSTI-style constructs are blocked, and built-in helpers that expose object graphs (`cycler`, `joiner`, `namespace`, `lipsum`) are removed. Keep templates to variables, filters, conditionals, loops, and includes.
+
 ```jinja
 {# analyze.j2 #}
 {% include 'partials/profile.j2' %}
@@ -178,7 +194,7 @@ Summarize the claim for {{ claim_id }}.
 Standing profile: {{ profile_summary }}
 ```
 
-Inline / `with` string templates still use a string Jinja loader and do **not** resolve includes — only prompt **files** under `PROMPTS_ROOT` do.
+Inline / `with` string templates still use a string Jinja loader and do **not** resolve includes — only prompt **files** under `PROMPTS_ROOT` do. Both paths share the same sandbox.
 
 ## The `noop` prompt
 
@@ -191,6 +207,7 @@ The minimal saga uses a one-line smoke-test template to verify engine registrati
 | Registration 400: prompt file not found | Engine `PROMPTS_ROOT` or mount; see [Troubleshooting](../../getting-started/troubleshooting.md) |
 | Worker: `prompts_root is not configured` | Set/mount `PROMPTS_ROOT` on the **worker** service |
 | Step fails: `Jinja render failed` | Missing `with` key or wrong type at schedule time (often a JSONPath to a step that has not completed) |
+| Step fails: `Jinja render blocked unsafe construct` | Template used a sandboxed-forbidden attribute or helper; remove SSTI-style / introspection syntax |
 | Agent ignores tools | Check `tools.allow` on the step and worker MCP config — not the prompt file alone |
 
 ## What's next

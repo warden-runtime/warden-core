@@ -8,9 +8,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 from common.contracts import CommandType
-from common.models import ProcessedCommand, WorkerDefinition
+from common.models import ProcessedCommand
 from common.plugins.context import ExecutionScope
 from common.processed_command_claim import mark_claim_result_emitted
+from common.schemas.worker import WorkerBlueprint
 from tortoise.transactions import in_transaction
 
 
@@ -55,11 +56,12 @@ async def test_finalize_success_skips_emit_when_superseded():
         command_type=CommandType.DO_STEP.value,
         worker_name="w",
     )
-    worker_def = WorkerDefinition(
+    worker_def = WorkerBlueprint(
+        kind="worker",
         name="w",
         namespace="default",
         version="1.0.0",
-        model_provider="openai",
+        provider="openai",
         model_name="gpt-4o",
         system_prompt="x",
     )

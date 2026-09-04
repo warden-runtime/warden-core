@@ -29,12 +29,12 @@ from tortoise.transactions import in_transaction
 
 def test_worker_timing_accumulator_buckets():
     acc = WorkerTimingAccumulator()
-    acc.add_ms("hydration_ms", 5)
+    acc.add_ms("worker_init_ms", 5)
     acc.add_ms("setup_ms", 10)
     acc.add_ms("llm_ms", 100)
     acc.add_ms("tool_ms", 40)
     assert acc.to_dict() == {
-        "hydration_ms": 5,
+        "worker_init_ms": 5,
         "setup_ms": 10,
         "llm_ms": 100,
         "tool_ms": 40,
@@ -53,11 +53,11 @@ def test_engine_timing_accumulator_pending_shape():
 
 def test_merge_execution_timing_worker_and_engine():
     merged = merge_execution_timing(
-        worker={"hydration_ms": 8, "setup_ms": 12},
+        worker={"worker_init_ms": 8, "setup_ms": 12},
         engine={"schedule_ms": 30, "dispatch_to_ingest_ms": 500},
     )
     assert merged == {
-        "worker": {"hydration_ms": 8, "setup_ms": 12},
+        "worker": {"worker_init_ms": 8, "setup_ms": 12},
         "engine": {"schedule_ms": 30, "dispatch_to_ingest_ms": 500},
     }
 
@@ -102,10 +102,10 @@ async def test_finalize_step_execution_timing_merges_and_clears_pending(memory_s
         with tracer.start_as_current_span("handle_step_completed"):
             merged = await finalize_step_execution_timing(
                 step,
-                worker_timing={"worker": {"hydration_ms": 3, "setup_ms": 7}},
+                worker_timing={"worker": {"worker_init_ms": 3, "setup_ms": 7}},
                 conn=conn,
             )
-    assert merged["worker"]["hydration_ms"] == 3
+    assert merged["worker"]["worker_init_ms"] == 3
     assert merged["engine"]["schedule_ms"] == 15
     assert merged["engine"].get("dispatch_to_ingest_ms", 0) >= 0
     assert step.pending_engine_timing is None
@@ -127,10 +127,10 @@ async def test_finalize_step_execution_timing_merges_and_clears_pending_no_span(
     async with in_transaction() as conn:
         merged = await finalize_step_execution_timing(
             step,
-            worker_timing={"worker": {"hydration_ms": 3, "setup_ms": 7}},
+            worker_timing={"worker": {"worker_init_ms": 3, "setup_ms": 7}},
             conn=conn,
         )
-    assert merged["worker"]["hydration_ms"] == 3
+    assert merged["worker"]["worker_init_ms"] == 3
     assert merged["engine"]["schedule_ms"] == 15
     assert merged["engine"].get("dispatch_to_ingest_ms", 0) >= 0
     assert step.pending_engine_timing is None

@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ from common.plugins.context import (
 )
 from common.plugins.registry import get_registry
 from common.resource_specs import ResourceSpec
+from common.schemas.worker import WorkerBlueprint
 from common.skills import LOAD_SKILL_TOOL_NAME, SkillLoadError, load_skill_body
 from common.utils import format_exception_chain, resolve_bindable_json_type
 from langchain_core.tools import StructuredTool
@@ -705,7 +707,7 @@ def _append_load_skill_tool(
 
 
 async def build_tools_for_worker(
-    worker_def,  # WorkerDefinition ORM model
+    worker_def: WorkerBlueprint,
     tool_specs: list[dict[str, Any]],
     exit_stack: AsyncExitStack,
     context: dict[str, Any] | None = None,
@@ -732,7 +734,14 @@ async def build_tools_for_worker(
     required_patterns = _required_resource_patterns(allowlist)
     has_required_resources: dict[str | None, bool] = {}
 
-    if not worker_def.tool_sources:
+    tool_sources = [
+        source
+        if isinstance(source, dict)
+        else json.loads(source.model_dump_json(by_alias=True, exclude_none=True))
+        for source in worker_def.tool_sources
+    ]
+
+    if not tool_sources:
         tools = await _handle_no_sources(
             allowlist=allowlist,
             scope=scope,
@@ -743,7 +752,7 @@ async def build_tools_for_worker(
         _append_load_skill_tool(tools, worker_def=worker_def, skill_ids=skill_ids)
         return tools
 
-    for source in worker_def.tool_sources:
+    for source in tool_sources:
         final_tools.extend(
             await _process_mcp_source(
                 source=source,

@@ -3,10 +3,11 @@ import re
 from functools import lru_cache
 from typing import Any
 
-from jinja2 import BaseLoader, Environment
+from common.prompts import make_prompt_environment
+from jinja2.sandbox import SecurityError
 
-# Setup a standard Jinja environment (LLM prompts, not HTML — see Ruff S701 audit).
-jinja_env = Environment(loader=BaseLoader())  # nosemgrep: missing-autoescape-disabled
+# Sandboxed Jinja for LLM prompts (not HTML — see Ruff S701 audit).
+jinja_env = make_prompt_environment()
 
 
 @lru_cache(maxsize=256)
@@ -52,7 +53,7 @@ def resolve_input(template_structure: Any, context: dict[str, Any]) -> Any:
         Structure with templates resolved; non-scalar rendered strings stay as str.
 
     Raises:
-        ValueError: If Jinja render fails (e.g. unknown variable).
+        ValueError: If Jinja render fails (e.g. unknown variable or unsafe construct).
     """
     # 1. Handle Dictionary Recursion
     if isinstance(template_structure, dict):
@@ -65,12 +66,16 @@ def resolve_input(template_structure: Any, context: dict[str, Any]) -> Any:
     # 3. Handle Strings (The actual templating)
     if isinstance(template_structure, str):
         # Optimization: Don't run jinja if there are no brackets
-        if "{{" not in template_structure:
+        if "{{" not in template_structure and "{%" not in template_structure:
             return template_structure
 
         try:
             rendered = _compiled_template(template_structure).render(**context)
             return _coerce_rendered_string(rendered)
+        except SecurityError as e:
+            raise ValueError(
+                f"Jinja render blocked unsafe construct in '{template_structure}': {e}"
+            ) from e
         except Exception as e:
             raise ValueError(f"Jinja render failed for '{template_structure}': {e}") from e
 
@@ -87,7 +92,8 @@ def resolve_step_prompt(
     """Render a reason-step prompt; use file loader when ``prompt_ref`` is in context.
 
     File prompts under ``PROMPTS_ROOT`` support Jinja ``{% include %}``. Inline /
-    string templates (tests, ``with`` bindings) keep ``BaseLoader`` via ``resolve_input``.
+    string templates (tests, ``with`` bindings) keep a string loader via ``resolve_input``.
+    Both paths use ``SandboxedEnvironment``.
     """
     from common.config import get_settings
     from common.prompts import render_prompt_file

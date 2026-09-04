@@ -6,6 +6,8 @@ from tortoise import connections
 
 REQUIRED_CORE_TABLES: tuple[str, ...] = (
     "saga_definitions",
+    "step_definitions",
+    "worker_definitions",
     "saga_instances",
     "saga_step_instances",
     "saga_children",
@@ -26,6 +28,11 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
         "loop_id",
         "iteration",
         "skills_allow",
+        "tools_bind",
+        "step_definition_name",
+        "step_definition_version",
+        "input_ports",
+        "policy_definition",
     ),
     "saga_instances": (
         "frozen_steps",
@@ -33,6 +40,9 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
         "loop_state",
         "parent_trace_id",
     ),
+    "saga_definitions": ("body", "is_active"),
+    "step_definitions": ("body", "is_active"),
+    "worker_definitions": ("body", "is_active"),
 }
 
 

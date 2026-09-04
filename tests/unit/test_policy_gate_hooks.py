@@ -40,12 +40,7 @@ def _isolated_policy_hooks():
 
 
 @pytest.mark.asyncio
-async def test_run_policy_gate_dispatches_pass_to_on_evaluated(tmp_path, monkeypatch):
-    monkeypatch.setenv("POLICIES_ROOT", str(tmp_path))
-    (tmp_path / "ok.yaml").write_text(
-        'name: ok\nversion: "1"\ncel: "true"\n',
-        encoding="utf-8",
-    )
+async def test_run_policy_gate_dispatches_pass_to_on_evaluated():
     hooks = _CountingPolicyHooks()
     register_policy_hooks(hooks)
 
@@ -57,7 +52,7 @@ async def test_run_policy_gate_dispatches_pass_to_on_evaluated(tmp_path, monkeyp
         namespace="default",
         saga_trace_id="a" * 32,
         step_span_id="b" * 16,
-        policies_root=str(tmp_path),
+        policy_definition={"name": "ok", "version": "1", "cel": "true"},
     )
 
     assert result.outcome == PolicyGateOutcome.PASSED
@@ -83,3 +78,54 @@ async def test_run_policy_gate_empty_name_skips_on_errored():
 
     assert result.outcome == PolicyGateOutcome.ERRORED
     assert hooks.errored == 0
+
+
+@pytest.mark.asyncio
+async def test_run_policy_gate_uses_frozen_definition_without_disk(tmp_path, monkeypatch):
+    """Frozen policy_definition is required; POLICIES_ROOT is not consulted at gate time."""
+    monkeypatch.setenv("POLICIES_ROOT", str(tmp_path))
+    hooks = _CountingPolicyHooks()
+    register_policy_hooks(hooks)
+
+    result = await run_policy_gate(
+        policy_name="missing-on-disk.yaml",
+        phase="before_commit",
+        binding={"phase": "before_commit"},
+        denial_code="POLICY_COMMIT_DENIED",
+        namespace="default",
+        saga_trace_id="a" * 32,
+        step_span_id="b" * 16,
+        policy_definition={"name": "frozen-ok", "version": "9", "cel": "true"},
+    )
+
+    assert result.outcome == PolicyGateOutcome.PASSED
+    assert result.policy_name == "frozen-ok"
+    assert result.policy_version == "9"
+    assert hooks.evaluated == 1
+
+
+@pytest.mark.asyncio
+async def test_run_policy_gate_errors_without_frozen_definition(tmp_path, monkeypatch):
+    """Path-only policy_name without policy_definition fails closed (no disk fallback)."""
+    (tmp_path / "on-disk.yaml").write_text(
+        'name: on-disk\nversion: "1"\ncel: "true"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("POLICIES_ROOT", str(tmp_path))
+    hooks = _CountingPolicyHooks()
+    register_policy_hooks(hooks)
+
+    result = await run_policy_gate(
+        policy_name="on-disk.yaml",
+        phase="after_reason",
+        binding={"output": {}},
+        denial_code="POLICY_REASON_DENIED",
+        namespace="default",
+        saga_trace_id="a" * 32,
+        step_span_id="b" * 16,
+    )
+
+    assert result.outcome == PolicyGateOutcome.ERRORED
+    assert result.error_code == "POLICY_EVALUATION_FAILED"
+    assert "policy_definition" in (result.error_message or "")
+    assert hooks.errored == 1

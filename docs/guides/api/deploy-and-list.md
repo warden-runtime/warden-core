@@ -6,9 +6,9 @@ pagination_next: guides/api/start-and-monitor
 
 # Deploy and list
 
-Before you can start a saga over HTTP, register worker and saga definitions with the engine. `POST /v1/manifests` validates each manifest and stores the result in Postgres — runtime credentials and MCP connectivity are checked later when steps actually run.
+Before you can start a saga over HTTP, register worker, step, and saga definitions with the engine. `POST /v1/manifests` validates each manifest and stores the result in Postgres — runtime credentials and MCP connectivity are checked later when steps actually run.
 
-Deploy the worker manifest first — saga steps reference `(worker, worker_version)` in the saga's namespace, and the engine rejects a saga deploy if that worker row is missing.
+Deploy order is **workers → steps → sagas**. Step manifests pin `(worker, worker_version)` in the saga namespace; saga `use:` refs must resolve to registered steps or deploy fails.
 
 Each definition is tracked by `namespace`, `name`, and `version`. Leave out `namespace` in deploy YAML and the engine defaults to `"default"`.
 
@@ -17,7 +17,7 @@ Each definition is tracked by `namespace`, `name`, and `version`. Leave out `nam
 ```bash
 curl -sS -X POST "$ENGINE_URL/v1/manifests" \
   -H "Content-Type: application/x-yaml" \
-  --data-binary @config/worker.minimal.yaml
+  --data-binary @config/worker.github-demo.yaml
 ```
 
 Typical order on a fresh stack:
@@ -25,10 +25,11 @@ Typical order on a fresh stack:
 ```bash
 curl -sS -X POST "$ENGINE_URL/v1/manifests" \
   -H "Content-Type: application/x-yaml" \
-  --data-binary @config/worker.minimal.yaml
+  --data-binary @config/worker.github-demo.yaml
+# then step manifests, then the saga
 curl -sS -X POST "$ENGINE_URL/v1/manifests" \
   -H "Content-Type: application/x-yaml" \
-  --data-binary @config/saga.minimal.yaml
+  --data-binary @config/saga.github-demo.yaml
 ```
 
 JSON is also accepted (`Content-Type: application/json`).
@@ -41,91 +42,35 @@ Success response (**200 OK** — synchronous; the definition is registered befor
 
 On validation failure the engine returns **`400`** with a `detail` string.
 
-Redeploying the same `(namespace, name, version)` updates the stored definition — deploy is idempotent.
+**Sagas** may redeploy the same `(namespace, name, version)` to update the stored authoring AST. **Steps and workers** are append-only — bump `version` to change capability. Saga deploy link-checks `use:` refs; hydration into instance `frozen_steps` happens at start.
 
-**What deploy checks:**
+**What deploy checks:** YAML structure, worker/step refs, artifact paths, `when` CEL, `with` vs step `inputs`, and tighten-only overrides. It does **not** validate API keys or MCP reachability.
 
-- YAML structure and required fields
-- Worker references in saga steps
-- Prompt, policy, `output_schema`, and compensation file paths (policy CEL is compile-checked)
-- CEL expression syntax in `when` conditions
+CLI equivalent: `warden deploy -f …` — see [CLI Deploy and list](../cli/deploy-and-list.md).
 
-It does **not** validate API keys or MCP server reachability — those surface at step execution time. A policy removed from disk after deploy still fails at gate time (`errored`).
-
-CLI equivalent:
-
-```bash
-warden deploy -f config/worker.minimal.yaml
-warden deploy -f config/saga.minimal.yaml
-```
-
-## List saga definitions
+## List definitions
 
 ```bash
 curl -sS "$ENGINE_URL/v1/definitions/sagas"
-```
-
-Optional query parameters:
-
-| Parameter | Description |
-|-----------|-------------|
-| `namespace` | Filter by namespace |
-| `name` | Exact definition name |
-| `is_active` | `true` / `false` |
-| `limit` | Page size (default 50, max 100) |
-| `offset` | Pagination offset |
-| `include_total` | When `true`, include `total` matching row count |
-
-The list endpoint does not filter by `version` — each item includes a `version` field, so pick the row you need client-side (often combine `namespace` + `name`) before calling `POST /v1/sagas/start` with an explicit `version`.
-
-Response shape:
-
-```json
-{
-  "items": [
-    {
-      "id": "...",
-      "namespace": "default",
-      "name": "minimal-saga",
-      "version": "0.0.1",
-      "is_active": true,
-      "created_at": "...",
-      "updated_at": "..."
-    }
-  ],
-  "limit": 50,
-  "offset": 0,
-  "has_more": false
-}
-```
-
-When `has_more` is `true`, more rows may exist — advance `offset` by `limit` for the next page.
-
-## List worker definitions
-
-```bash
+curl -sS "$ENGINE_URL/v1/definitions/steps"
 curl -sS "$ENGINE_URL/v1/definitions/workers"
 ```
 
-Same pagination and `namespace` / `name` filters as sagas (no `is_active` on workers).
+Shared optional query parameters: `namespace`, `name`, `limit`, `offset`, `include_total`, `is_active`. Soft-disable a pin with `PATCH /v1/definitions/{workers|steps|sagas}?id=<uuid>` **or** `?namespace=&name=&version=` and body `{"is_active": false}` (CLI: `warden definitions set-active -t worker --id … --inactive` or `--namespace/--name/--version`).
 
-## Get one saga definition by id
+Deploy/start against an **inactive** catalog pin returns **409** with structured detail `code: INACTIVE_CATALOG_DEFINITION`. Missing pins return **404** with `code: CATALOG_DEFINITION_NOT_FOUND`.
+
+The list endpoints do not filter by `version` — each item includes a `version` field. Pick the row you need client-side before `POST /v1/sagas/start`.
+
+Get one by id (optional `include_body=true` — returns the stored worker/step/saga manifest JSON):
 
 ```bash
-curl -sS "$ENGINE_URL/v1/definitions/sagas/<definition-uuid>"
+curl -sS "$ENGINE_URL/v1/definitions/steps/<definition-uuid>?include_body=true"
 curl -sS "$ENGINE_URL/v1/definitions/sagas/<definition-uuid>?include_body=true"
-```
-
-Add `include_body=true` to include the manifest `body` in the response.
-
-Returns **`404`** when the id is unknown; invalid UUID syntax → **422**.
-
-## Get one worker definition by id
-
-```bash
-curl -sS "$ENGINE_URL/v1/definitions/workers/<definition-uuid>"
 curl -sS "$ENGINE_URL/v1/definitions/workers/<definition-uuid>?include_body=true"
 ```
+
+Returns **`404`** when the id is unknown; invalid UUID syntax → **422**.
 
 ## What's next
 

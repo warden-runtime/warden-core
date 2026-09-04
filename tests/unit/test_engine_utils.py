@@ -46,6 +46,31 @@ class TestResolveParametersSpec:
         result = resolve_parameters_spec(spec, {"input": {}})
         assert result == {"missing": None}
 
+    def test_missing_path_recorded_when_requested(self):
+        spec = {
+            "ok": {"from": "$.input.amount"},
+            "missing": {"from": "$.input.nonexistent"},
+        }
+        missing: dict[str, str] = {}
+        result = resolve_parameters_spec(
+            spec,
+            {"input": {"amount": 1}},
+            missing_from=missing,
+        )
+        assert result == {"ok": 1, "missing": None}
+        assert missing == {"missing": "$.input.nonexistent"}
+
+    def test_present_null_is_not_missing(self):
+        spec = {"n": {"from": "$.input.n"}}
+        missing: dict[str, str] = {}
+        result = resolve_parameters_spec(
+            spec,
+            {"input": {"n": None}},
+            missing_from=missing,
+        )
+        assert result == {"n": None}
+        assert missing == {}
+
     def test_empty_spec(self):
         assert resolve_parameters_spec({}, {"input": {}}) == {}
 

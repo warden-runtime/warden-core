@@ -57,15 +57,56 @@ def validate_prompt_variables(prompt_content: str, param_keys: Set[str]) -> None
         )
 
 
-def resolve_parameters_spec(spec: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def _resolve_from_binding(
+    *,
+    key: str,
+    path_string: Any,
+    context: dict[str, Any],
+    missing_from: dict[str, str] | None,
+) -> Any:
+    if not isinstance(path_string, str) or not path_string.startswith("$"):
+        logger.warning(
+            "'from' for '%s' must be a JSONPath string starting with '$'.",
+            key,
+        )
+        if missing_from is not None:
+            missing_from[key] = str(path_string)
+        return None
+    try:
+        match = parse(path_string).find(context)
+    except Exception as e:
+        logger.exception("JSONPath '%s' for key '%s': %s", path_string, key, e)
+        if missing_from is not None:
+            missing_from[key] = path_string
+        return None
+    if match:
+        return match[0].value
+    if missing_from is not None:
+        missing_from[key] = path_string
+    return None
+
+
+def resolve_parameters_spec(
+    spec: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    missing_from: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Resolve a step's `with` spec against saga context.
 
     Each entry is {"from": "$.path"} (JSONPath into context) or {"value": <literal>}.
     Non-dict entries or invalid JSONPath are skipped; missing path yields None.
 
+    A path that exists with an explicit ``null`` value is a successful match
+    (resolved value ``None``). A path with no matches is recorded in
+    ``missing_from`` when provided so callers can distinguish "target missing"
+    from "present null" before schema validation.
+
     Args:
         spec: Map of key -> {"from": "$.path"} or {"value": literal}.
         context: Saga context (e.g. input, steps) for JSONPath lookup.
+        missing_from: Optional map filled with ``key -> JSONPath`` for ``from:``
+            bindings that matched no values (not written for present nulls).
 
     Returns:
         Flat dict key -> resolved value (missing/invalid path -> None).
@@ -76,21 +117,12 @@ def resolve_parameters_spec(spec: dict[str, Any], context: dict[str, Any]) -> di
             logger.warning("Parameter spec entry for '%s' is not a dict; skipping.", key)
             continue
         if "from" in entry:
-            path_string = entry["from"]
-            if not isinstance(path_string, str) or not path_string.startswith("$"):
-                logger.warning(
-                    "'from' for '%s' must be a JSONPath string starting with '$'.",
-                    key,
-                )
-                resolved[key] = None
-                continue
-            try:
-                jsonpath_expr = parse(path_string)
-                match = jsonpath_expr.find(context)
-                resolved[key] = match[0].value if match else None
-            except Exception as e:
-                logger.exception("JSONPath '%s' for key '%s': %s", path_string, key, e)
-                resolved[key] = None
+            resolved[key] = _resolve_from_binding(
+                key=key,
+                path_string=entry["from"],
+                context=context,
+                missing_from=missing_from,
+            )
         elif "value" in entry:
             resolved[key] = entry["value"]
         else:

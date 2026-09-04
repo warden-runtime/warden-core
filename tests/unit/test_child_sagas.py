@@ -10,7 +10,7 @@ from common.child_sagas import (
     summarize_join_children,
     validate_spawn_items,
 )
-from common.schemas.saga import SagaBlueprint
+from common.schemas.saga import HydratedSagaBlueprint
 from pydantic import ValidationError
 
 
@@ -108,7 +108,7 @@ def _parent_blueprint(**spawn_extra):
 
 
 def test_blueprint_spawn_join_ok():
-    bp = SagaBlueprint(**_parent_blueprint())
+    bp = HydratedSagaBlueprint(**_parent_blueprint())
     assert bp.steps[1].kind == "spawn_sagas"
     assert bp.steps[2].join.spawn_step_id == "dispatch"
 
@@ -117,14 +117,14 @@ def test_blueprint_requires_result_from():
     data = _parent_blueprint()
     del data["steps"][1]["spawn"]["result_from"]
     with pytest.raises(ValidationError):
-        SagaBlueprint(**data)
+        HydratedSagaBlueprint(**data)
 
 
 def test_blueprint_join_unknown_spawn():
     data = _parent_blueprint()
     data["steps"][2]["join"]["spawn_step_id"] = "missing"
     with pytest.raises(ValidationError, match="unknown spawn_step_id"):
-        SagaBlueprint(**data)
+        HydratedSagaBlueprint(**data)
 
 
 def test_blueprint_duplicate_join_target():
@@ -138,4 +138,113 @@ def test_blueprint_duplicate_join_target():
         }
     )
     with pytest.raises(ValidationError, match="more than one join"):
-        SagaBlueprint(**data)
+        HydratedSagaBlueprint(**data)
+
+
+@pytest.mark.asyncio
+async def test_execute_spawn_sagas_maps_inactive_child_to_step_failed(mocker):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from engine.api.saga_errors import InactiveSagaDefinitionError
+    from engine.child_sagas import execute_spawn_sagas
+
+    data = _parent_blueprint(items_from="$.input.items")
+    saga = SimpleNamespace(
+        trace_id="a" * 32,
+        namespace="default",
+        context={"input": {"items": [{"id": "one"}]}},
+        frozen_steps=data["steps"],
+    )
+    step = SimpleNamespace(step_id="dispatch", span_id="b" * 16)
+    mocker.patch(
+        "engine.child_sagas._require_saga_definition",
+        side_effect=InactiveSagaDefinitionError(
+            namespace="default", name="child-saga", version="1.0.0"
+        ),
+    )
+    fail = mocker.patch("engine.logic._apply_step_failure_lifecycle", new_callable=AsyncMock)
+    finalize = mocker.patch(
+        "engine.logic._finalize_step_output_and_advance", new_callable=AsyncMock
+    )
+
+    await execute_spawn_sagas(saga=saga, step=step, db_conn=object())
+
+    fail.assert_awaited_once()
+    finalize.assert_not_awaited()
+    synthetic = fail.await_args.args[2]
+    assert synthetic.error_details["code"] == "SPAWN_CHILD_DEFINITION_INACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_execute_spawn_sagas_maps_missing_child_to_step_failed(mocker):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from engine.api.saga_errors import DefinitionNotFoundError
+    from engine.child_sagas import execute_spawn_sagas
+
+    data = _parent_blueprint(items_from="$.input.items")
+    saga = SimpleNamespace(
+        trace_id="a" * 32,
+        namespace="default",
+        context={"input": {"items": [{"id": "one"}]}},
+        frozen_steps=data["steps"],
+    )
+    step = SimpleNamespace(step_id="dispatch", span_id="b" * 16)
+    mocker.patch(
+        "engine.child_sagas._require_saga_definition",
+        side_effect=DefinitionNotFoundError(
+            namespace="default", name="child-saga", version="1.0.0"
+        ),
+    )
+    fail = mocker.patch("engine.logic._apply_step_failure_lifecycle", new_callable=AsyncMock)
+
+    await execute_spawn_sagas(saga=saga, step=step, db_conn=object())
+
+    synthetic = fail.await_args.args[2]
+    assert synthetic.error_details["code"] == "SPAWN_CHILD_DEFINITION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_execute_spawn_sagas_maps_hydrate_value_error_to_step_failed(mocker):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from engine.child_sagas import execute_spawn_sagas
+
+    data = _parent_blueprint(items_from="$.input.items")
+    saga = SimpleNamespace(
+        trace_id="a" * 32,
+        namespace="default",
+        context={"input": {"items": [{"id": "one"}, {"id": "two"}]}},
+        frozen_steps=data["steps"],
+    )
+    step = SimpleNamespace(step_id="dispatch", span_id="b" * 16)
+    mocker.patch(
+        "engine.child_sagas._require_saga_definition",
+        new_callable=AsyncMock,
+        return_value=SimpleNamespace(id="def-1"),
+    )
+    mocker.patch(
+        "engine.child_sagas._resolve_idempotent_start",
+        new_callable=AsyncMock,
+        return_value=None,
+    )
+    mocker.patch(
+        "engine.child_sagas._create_saga_and_steps",
+        new_callable=AsyncMock,
+        side_effect=ValueError("Step definition 'missing'@'1.0.0' is inactive."),
+    )
+    fail = mocker.patch("engine.logic._apply_step_failure_lifecycle", new_callable=AsyncMock)
+    finalize = mocker.patch(
+        "engine.logic._finalize_step_output_and_advance", new_callable=AsyncMock
+    )
+
+    await execute_spawn_sagas(saga=saga, step=step, db_conn=object())
+
+    fail.assert_awaited_once()
+    finalize.assert_not_awaited()
+    synthetic = fail.await_args.args[2]
+    assert synthetic.error_details["code"] == "SPAWN_CHILD_HYDRATE_FAILED"
+    assert "inactive" in synthetic.error_details["message"]

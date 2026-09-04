@@ -1,0 +1,20 @@
+# Mock MCP demo — summarize prior greeting.
+# Requires: warden deploy -f config/worker.mock-mcp.yaml
+kind: step
+name: mock-summarize
+namespace: default
+version: "0.1.0"
+title: summarize
+description: Summarize a prior greeting via mock LLM and echo MCP.
+inputs:
+  greeting:
+    required: true
+step_kind: reason
+worker: mock-mcp-worker
+worker_version: "0.1.0"
+prompt: mock-summarize.j2
+tools:
+  allow:
+    - name: echo
+timeout_seconds: 300
+max_turns: 5

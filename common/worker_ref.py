@@ -2,6 +2,10 @@
 
 from typing import Any
 
+from common.catalog_errors import (
+    CatalogDefinitionNotFoundError,
+    InactiveCatalogDefinitionError,
+)
 from common.models import WorkerDefinition
 
 WorkerIdentity = tuple[str, str]
@@ -34,7 +38,8 @@ async def require_worker_definition(
     """Load a worker definition row by full identity (namespace, name, version).
 
     Raises:
-        ValueError: When no matching row exists.
+        CatalogDefinitionNotFoundError: When no matching row exists.
+        InactiveCatalogDefinitionError: When the row exists but is soft-disabled.
     """
     worker_definition = await WorkerDefinition.get_or_none(
         namespace=namespace,
@@ -42,12 +47,12 @@ async def require_worker_definition(
         version=version,
     )
     if worker_definition is None:
-        label = worker_identity_label(name, version)
-        raise ValueError(f"WorkerDefinition {label} not found in namespace {namespace!r}.")
-    if worker_definition.version != version:
-        label = worker_identity_label(name, version)
-        raise ValueError(
-            f"WorkerDefinition {label} version mismatch: row has {worker_definition.version!r}."
+        raise CatalogDefinitionNotFoundError(
+            kind="worker", namespace=namespace, name=name, version=version
+        )
+    if not worker_definition.is_active:
+        raise InactiveCatalogDefinitionError(
+            kind="worker", namespace=namespace, name=name, version=version
         )
     return worker_definition
 

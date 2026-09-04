@@ -67,6 +67,7 @@ const sidebars: SidebarsConfig = {
           items: [
             'guides/manifests/overview',
             'guides/manifests/worker-manifests',
+            'guides/manifests/step-manifests',
             'guides/manifests/saga-manifests',
             'guides/manifests/prompts',
             'guides/manifests/mcp-and-tools',

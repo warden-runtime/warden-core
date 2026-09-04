@@ -103,7 +103,8 @@ An unknown `adapter` fails at worker startup with `ValueError` from `resolve_ada
 
 When a command is claimed, the flow is always the same:
 
-1. Worker loads `WorkerDefinition` and provider secret.
+1. Worker loads `WorkerBlueprint` from `WorkerDefinition.body` and the provider secret.
+
 2. `resolve_adapter()` returns an `AgentAdapterPort` (today: `LangChainAdapter`).
 3. The agent adapter calls `build_llm(provider=..., model_name=..., api_key=...)` for a `ChatModelPort`.
 4. `run_step` / `run_commit` / `run_compensation` execute through the agent adapter. Optional `AdapterHooks.after_reason_step` runs when a plugin registers hooks.

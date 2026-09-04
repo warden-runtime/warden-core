@@ -72,7 +72,10 @@ async def test_post_sagas_start_404_when_definition_not_found(mocker, app_no_db)
             },
         )
     assert resp.status_code == 404
-    assert "not found" in resp.json().get("detail", "").lower()
+    detail = resp.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail["code"] == "CATALOG_DEFINITION_NOT_FOUND"
+    assert "not found" in detail["message"].lower()
 
 
 @pytest.mark.asyncio
@@ -129,7 +132,11 @@ async def test_post_sagas_start_409_on_inactive_definition(mocker, app_no_db):
             },
         )
     assert resp.status_code == 409
-    assert "inactive" in resp.json().get("detail", "").lower()
+    detail = resp.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail["code"] == "INACTIVE_CATALOG_DEFINITION"
+    assert detail["kind"] == "saga"
+    assert "inactive" in detail["message"].lower()
 
 
 @pytest.mark.asyncio

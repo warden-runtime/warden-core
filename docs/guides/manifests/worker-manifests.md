@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 pagination_prev: guides/manifests/overview
-pagination_next: guides/manifests/saga-manifests
+pagination_next: guides/manifests/step-manifests
 ---
 
 # Worker manifests
@@ -10,7 +10,7 @@ A worker manifest tells Warden which LLM to use and which MCP servers to connect
 
 Keep in mind that deploying this manifest doesn't start a worker process. It saves the config to the database. When your running worker pulls a task from the outbox, it reads this saved definition to figure out how to execute the step.
 
-This page covers required fields, providers, and MCP setup. Saga steps point to a worker by matching its name and version. We'll connect them in the next guide on [Saga manifests](saga-manifests.md).
+This page covers required fields, providers, and MCP setup. [Step manifests](step-manifests.md) pin a worker by name and version; sagas compose those steps.
 
 ## Required fields
 
@@ -27,7 +27,7 @@ system_prompt: |
   You are a helpful assistant.
 ```
 
-`name`, `namespace`, and `version` identify the saved worker (see [Manifests and artifacts → Deploy and identity](overview.md#deploy-and-identity)). Saga steps reference it with `worker` + `worker_version`. Steps use the saga's `namespace` — you don't set namespace on the step itself.
+`name`, `namespace`, and `version` identify the saved worker (see [Manifests and artifacts → Deploy and identity](overview.md#deploy-and-identity)). Step manifests reference it with `worker` + `worker_version` in the same namespace.
 
 ## Providers
 
@@ -45,7 +45,7 @@ Unknown `provider` values fail at worker step runtime with `ValueError` from `bu
 
 ## MCP tool sources
 
-Warden workers use the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) to talk to external APIs. List the servers your agent can reach under `tool_sources` in the worker manifest; saga steps narrow that list with their own `tools.allow`.
+Warden workers use the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) to talk to external APIs. List the servers your agent can reach under `tool_sources` in the worker manifest; step manifests narrow that list with their own `tools.allow`.
 
 When a worker picks up a step, it opens a connection for each source. For **`stdio`** sources, that means spawning a subprocess that stays alive until the step finishes or times out — stdin/stdout carry messages between the MCP server and your agent loop. For **`streamable_http`** sources, the worker connects over Streamable HTTP to a server that's already running elsewhere.
 
@@ -97,13 +97,13 @@ Everything beyond the [required fields](#required-fields) is optional. Common ad
 | Field | Default | Purpose |
 |-------|---------|---------|
 | `description` | — | Short note for your team or deploy listings |
-| `temperature` | `0.0` | LLM sampling temperature |
+| `temperature` | `0.0` | LLM sampling temperature (persisted on the worker definition `body` and passed to the model at runtime) |
 | `tool_sources` | `[]` | MCP servers — see [MCP tool sources](#mcp-tool-sources) |
-| `adapter` | `langchain` | How the worker runs agent steps internally. Leave at default unless you ship a custom adapter. **Not** the same as saga-step `agent-adapter: react \| simple` — see [Saga manifests → Reason step execution](saga-manifests.md#reason-step-execution-agent-adapter) |
+| `adapter` | `langchain` | How the worker runs agent steps internally. Leave at default unless you ship a custom adapter. **Not** the same as step-manifest `agent-adapter: react \| simple` — see [Saga manifests → Reason step execution](saga-manifests.md#reason-step-execution-agent-adapter) |
 
 ### How many times the agent can loop (`max_turns`)
 
-This setting lives on each **`kind: reason` step** in the saga YAML — not on the worker manifest.
+This setting lives on each **`step_kind: reason`** step manifest — not on the worker.
 
 For a standard **`react`** step, the agent keeps calling tools until it invokes `_submit`. `max_turns` caps those rounds (default **25**, max **200**). Invalid `_submit` payloads that trigger schema soft-retries still draw from this budget — see [Configuration → LLM schema soft-retries](../../getting-started/configuration.md#llm-schema-soft-retries-validation-feedback). **`simple`** steps make one LLM call and ignore this cap.
 
@@ -113,4 +113,4 @@ See [Saga manifests → Step budgets](saga-manifests.md#step-budgets) for defaul
 
 ## What's next
 
-Next up: [Saga manifests](saga-manifests.md) — connect this worker to your steps, set tool allowlists, and add policy and HITL gates.
+Next up: [Step manifests](step-manifests.md) — declare reusable reason/commit capabilities that pin this worker, then compose them in [Saga manifests](saga-manifests.md).
