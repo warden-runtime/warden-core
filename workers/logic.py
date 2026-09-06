@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from common.agent_adapter import StepResult
+from common.catalog_errors import CatalogError
 from common.compensation_context import (
     compensation_parameter_context,
     effective_forward_step_output,
@@ -595,6 +596,7 @@ async def _finalize_worker_config_load_failure(
     trace_context: dict[str, Any],
     claim_token: uuid.UUID,
     handler_started_at: datetime,
+    error_code: str = "worker_config_load_failed",
 ) -> None:
     """Notify engine and audit when worker definition/secret cannot be loaded."""
     result_event = (
@@ -613,7 +615,7 @@ async def _finalize_worker_config_load_failure(
         trace_context=trace_context,
     )
     detail = error[:512]
-    failure_output = {"error": detail, "code": "worker_config_load_failed"}
+    failure_output = {"error": detail, "code": error_code}
     raw = cmd.model_dump(mode="json")
     async with in_transaction() as conn:
         await get_registry().worker.on_command_rejected(
@@ -621,7 +623,7 @@ async def _finalize_worker_config_load_failure(
             reason=detail,
             conn=conn,
             raw_command=raw,
-            rejection_code="worker_config_load_failed",
+            rejection_code=error_code,
             detail=detail,
         )
         await _finalize_failure(
@@ -635,7 +637,7 @@ async def _finalize_worker_config_load_failure(
             step_span_id=cmd.step_span_id,
             event_type=result_event,
             output=failure_output,
-            error_code="worker_config_load_failed",
+            error_code=error_code,
             release_claim=True,
             conn=conn,
         )
@@ -802,7 +804,7 @@ async def _prepare_worker_command_execution(
             expected_version=worker_version,
         )
         worker_definition, secret = await load_worker_config(worker_name, namespace, worker_version)
-    except ValueError as e:
+    except (ValueError, CatalogError) as e:
         timing_acc.stop("setup", bucket="setup_ms")
         logger.error("Worker config load failed: %s", e)
         await _finalize_worker_config_load_failure(
@@ -812,6 +814,7 @@ async def _prepare_worker_command_execution(
             trace_context=trace_context,
             claim_token=claim_token,
             handler_started_at=handler_started_at,
+            error_code=e.code if isinstance(e, CatalogError) else "worker_config_load_failed",
         )
         return None
 
