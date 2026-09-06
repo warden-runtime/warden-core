@@ -3,11 +3,12 @@
 import asyncio
 import json
 import logging
+from typing import Annotated
 
 import yaml
 from common.catalog_errors import CatalogError
 from common.config import get_settings
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from engine.api.http_errors import http_exception_for_catalog
 from engine.api.schemas import ManifestDeployResponse
@@ -54,14 +55,27 @@ _ALLOWED_MANIFEST_MEDIA = frozenset(
         },
     },
 )
-async def post_manifests(request: Request) -> ManifestDeployResponse:
+async def post_manifests(
+    request: Request,
+    dry_run: Annotated[
+        bool,
+        Query(
+            description=(
+                "When true, run the same validation and catalog link-checks as deploy "
+                "but do not persist. Worker/step version immutability is not checked."
+            ),
+        ),
+    ] = False,
+) -> ManifestDeployResponse:
     """Register a worker, step, or saga manifest. Accepts YAML or JSON body.
 
     Body must define a mapping with `kind` (worker | step | saga) and kind-specific
     fields. Same schema as the file-based manifests used by the CLI.
 
+    Pass ``dry_run=true`` to validate without writing catalog rows (CI / preflight).
+
     Returns:
-        ManifestDeployResponse with a success message.
+        ManifestDeployResponse with a success message (and ``dry_run`` echoed).
 
     Raises:
         HTTPException: 413 when body is too large; 400 on invalid body, unknown kind,
@@ -99,8 +113,8 @@ async def post_manifests(request: Request) -> ManifestDeployResponse:
             raise ValueError("Manifest body must be a mapping (e.g. kind, name, ...).")
 
         service = RegistryService()
-        message = await service.register_manifest_from_dict(data)
-        return ManifestDeployResponse(message=message)
+        message = await service.register_manifest_from_dict(data, dry_run=dry_run)
+        return ManifestDeployResponse(message=message, dry_run=dry_run)
     except CatalogError as e:
         logger.warning("manifest deploy catalog conflict: %s", e)
         raise http_exception_for_catalog(e) from e

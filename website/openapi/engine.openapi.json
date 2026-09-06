@@ -222,6 +222,12 @@
       "ManifestDeployResponse": {
         "description": "Response body for POST /v1/manifests (200 OK).",
         "properties": {
+          "dry_run": {
+            "default": false,
+            "description": "True when the request used dry_run=true (validated, not persisted).",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
           "message": {
             "description": "Success message from registry",
             "title": "Message",
@@ -2346,8 +2352,22 @@
     },
     "/v1/manifests": {
       "post": {
-        "description": "Register a worker, step, or saga manifest. Accepts YAML or JSON body.\n\nBody must define a mapping with `kind` (worker | step | saga) and kind-specific\nfields. Same schema as the file-based manifests used by the CLI.\n\nReturns:\n    ManifestDeployResponse with a success message.\n\nRaises:\n    HTTPException: 413 when body is too large; 400 on invalid body, unknown kind,\n    or missing worker/step dependencies.",
+        "description": "Register a worker, step, or saga manifest. Accepts YAML or JSON body.\n\nBody must define a mapping with `kind` (worker | step | saga) and kind-specific\nfields. Same schema as the file-based manifests used by the CLI.\n\nPass ``dry_run=true`` to validate without writing catalog rows (CI / preflight).\n\nReturns:\n    ManifestDeployResponse with a success message (and ``dry_run`` echoed).\n\nRaises:\n    HTTPException: 413 when body is too large; 400 on invalid body, unknown kind,\n    or missing worker/step dependencies.",
         "operationId": "post_manifests_v1_manifests_post",
+        "parameters": [
+          {
+            "description": "When true, run the same validation and catalog link-checks as deploy but do not persist. Worker/step version immutability is not checked.",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When true, run the same validation and catalog link-checks as deploy but do not persist. Worker/step version immutability is not checked.",
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -2373,6 +2393,16 @@
           },
           "415": {
             "description": "Unsupported Content-Type; use application/json or YAML media types."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Post Manifests",

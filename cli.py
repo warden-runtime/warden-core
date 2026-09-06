@@ -661,25 +661,34 @@ def deploy(
         "-f",
         help="Path to a Worker or Saga manifest (YAML). Relative paths depend on your cwd.",
     ),
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help=("Validate and link-check without persisting (POST /v1/manifests?dry_run=true)."),
+        ),
+    ] = False,
 ) -> None:
     """Register a manifest with the engine (POST /v1/manifests).
 
     Sends the file body as YAML. On success the engine returns a short message
-    (definition created or updated).
+    (definition created or updated). Use ``--dry-run`` for CI preflight without writing.
     """
     if not Path(file_path).exists():
         say_err(f"file not found: {file_path}")
         raise typer.Exit(code=1)
     with open(file_path, encoding="utf-8") as f:
         content = f.read()
-    say("REGISTER", file_path)
+    say("DRY-RUN" if dry_run else "REGISTER", file_path)
 
     async def _run() -> str:
+        params = [("dry_run", "true")] if dry_run else None
         resp = await http_request(
             "POST",
             "/v1/manifests",
             content=content.encode("utf-8"),
             headers={"Content-Type": "application/x-yaml"},
+            params=params,
         )
         try:
             resp.raise_for_status()

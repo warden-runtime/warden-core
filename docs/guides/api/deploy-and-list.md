@@ -20,6 +20,14 @@ curl -sS -X POST "$ENGINE_URL/v1/manifests" \
   --data-binary @config/worker.github-demo.yaml
 ```
 
+Dry-run (validate / link-check only — no catalog write):
+
+```bash
+curl -sS -X POST "$ENGINE_URL/v1/manifests?dry_run=true" \
+  -H "Content-Type: application/x-yaml" \
+  --data-binary @config/saga.github-demo.yaml
+```
+
 Typical order on a fresh stack:
 
 ```bash
@@ -34,19 +42,19 @@ curl -sS -X POST "$ENGINE_URL/v1/manifests" \
 
 JSON is also accepted (`Content-Type: application/json`).
 
-Success response (**200 OK** — synchronous; the definition is registered before the response returns):
+Success response (**200 OK** — synchronous; the definition is registered before the response returns, unless `dry_run=true`):
 
 ```json
-{ "message": "..." }
+{ "message": "...", "dry_run": false }
 ```
 
 On validation failure the engine returns **`400`** with a `detail` string.
 
 **Sagas** may redeploy the same `(namespace, name, version)` to update the stored authoring AST. **Steps and workers** are append-only — bump `version` to change capability. Saga deploy link-checks `use:` refs; hydration into instance `frozen_steps` happens at start.
 
-**What deploy checks:** YAML structure, worker/step refs, artifact paths, `when` CEL, `with` vs step `inputs`, and tighten-only overrides. It does **not** validate API keys or MCP reachability.
+**What deploy checks:** YAML structure, worker/step refs, artifact paths, `when` CEL, `with` vs step `inputs`, and tighten-only overrides. It does **not** validate API keys or MCP reachability. Dry-run skips persistence and does not check worker/step version immutability.
 
-CLI equivalent: `warden deploy -f …` — see [CLI Deploy and list](../cli/deploy-and-list.md).
+CLI equivalent: `warden deploy -f …` / `warden deploy --dry-run -f …` — see [CLI Deploy and list](../cli/deploy-and-list.md).
 
 ## List definitions
 

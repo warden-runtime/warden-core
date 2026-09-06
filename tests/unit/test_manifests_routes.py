@@ -43,10 +43,39 @@ async def test_post_v1_manifests_200_yaml(mocker, app_manifests_no_db):
     assert resp.status_code == 200
     data = resp.json()
     assert data["message"] == "Worker 'email-worker' registered successfully"
+    assert data["dry_run"] is False
     mock_registry.register_manifest_from_dict.assert_called_once()
-    call_args = mock_registry.register_manifest_from_dict.call_args[0][0]
-    assert call_args["kind"] == "worker"
-    assert call_args["name"] == "email-worker"
+    call_args = mock_registry.register_manifest_from_dict.call_args
+    assert call_args[0][0]["kind"] == "worker"
+    assert call_args[0][0]["name"] == "email-worker"
+    assert call_args.kwargs.get("dry_run") is False
+
+
+@pytest.mark.asyncio
+async def test_post_v1_manifests_dry_run(mocker, app_manifests_no_db):
+    """POST /v1/manifests?dry_run=true passes dry_run through and echoes it."""
+    mock_registry = mocker.MagicMock()
+    mock_registry.register_manifest_from_dict = AsyncMock(
+        return_value="Worker 'email-worker' dry-run OK (not registered)"
+    )
+    mocker.patch(
+        "engine.api.routes.manifests.RegistryService",
+        return_value=mock_registry,
+    )
+    yaml_body = "kind: worker\nname: email-worker\nprovider: openai\nmodel_name: gpt-4o\n"
+    with TestClient(app_manifests_no_db) as c:
+        resp = c.post(
+            "/v1/manifests",
+            content=yaml_body,
+            headers={"Content-Type": "application/x-yaml"},
+            params={"dry_run": "true"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["dry_run"] is True
+    assert "dry-run OK" in data["message"]
+    call_args = mock_registry.register_manifest_from_dict.call_args
+    assert call_args.kwargs.get("dry_run") is True
 
 
 @pytest.mark.asyncio

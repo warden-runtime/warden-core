@@ -74,6 +74,10 @@ class ManifestDeployResponse(BaseModel):
     """Response body for POST /v1/manifests (200 OK)."""
 
     message: str = Field(..., description="Success message from registry")
+    dry_run: bool = Field(
+        default=False,
+        description="True when the request used dry_run=true (validated, not persisted).",
+    )
 
 
 class HumanApproveRequest(BaseModel):

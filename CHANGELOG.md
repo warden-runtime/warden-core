@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Saga instances store ``definition_name`` / ``definition_version`` at start (copied from the catalog row; migration ``016_saga_instance_definition_labels.sql``). ``GET /v1/sagas`` and ``warden list sagas`` expose the labels so operators and MCP see ``name@version`` without joining catalog rows (survives hard-delete of definitions).
+- Manifest deploy dry-run: ``POST /v1/manifests?dry_run=true`` and ``warden deploy --dry-run -f …`` run the same validation and catalog link-checks without persisting (does not check worker/step version immutability).
 
 ## [0.2.0] - 2026-09-06
 

@@ -94,6 +94,33 @@ async def test_register_manifest_unknown_kind_raises():
 
 
 @pytest.mark.asyncio
+async def test_register_manifest_worker_dry_run_does_not_persist():
+    """dry_run validates a worker without creating a WorkerDefinition row."""
+    service = RegistryService()
+    msg = await service.register_manifest(WORKER_YAML, dry_run=True)
+    assert "dry-run OK" in msg
+    assert await WorkerDefinition.all().count() == 0
+
+
+@pytest.mark.asyncio
+async def test_register_manifest_step_dry_run_requires_worker():
+    """dry_run still link-checks step → worker before accepting."""
+    service = RegistryService()
+    with pytest.raises(CatalogDefinitionNotFoundError):
+        await service.register_manifest(STEP_YAML, dry_run=True)
+
+
+@pytest.mark.asyncio
+async def test_register_manifest_step_dry_run_ok_without_persist():
+    """dry_run validates a step against a registered worker without inserting the step."""
+    service = RegistryService()
+    await service.register_manifest(WORKER_YAML)
+    msg = await service.register_manifest(STEP_YAML, dry_run=True)
+    assert "dry-run OK" in msg
+    assert await StepDefinition.all().count() == 0
+
+
+@pytest.mark.asyncio
 async def test_register_manifest_worker_creates_definition():
     """register_manifest with kind worker creates a WorkerDefinition row."""
     service = RegistryService()

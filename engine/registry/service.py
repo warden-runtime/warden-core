@@ -519,12 +519,13 @@ async def _assert_step_worker_registered(
 class RegistryService:
     """Registers worker, step, and saga manifests (YAML) into the database."""
 
-    async def register_manifest(self, yaml_content: str) -> str:
-        """Parse YAML manifest, validate against blueprint, and persist to DB.
+    async def register_manifest(self, yaml_content: str, *, dry_run: bool = False) -> str:
+        """Parse YAML manifest, validate against blueprint, and optionally persist to DB.
 
         Args:
             yaml_content: Raw YAML string (must have kind: worker | step | saga and
                 kind-specific fields).
+            dry_run: When True, run the same validation/link-checks without writing.
 
         Returns:
             Human-readable success message (e.g. "Worker 'x' registered successfully").
@@ -537,13 +538,18 @@ class RegistryService:
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML format: {e}") from e
 
-        return await self.register_manifest_from_dict(data)
+        return await self.register_manifest_from_dict(data, dry_run=dry_run)
 
-    async def register_manifest_from_dict(self, data: dict[str, Any]) -> str:
-        """Validate manifest dict and persist to DB. Used by API and CLI.
+    async def register_manifest_from_dict(
+        self, data: dict[str, Any], *, dry_run: bool = False
+    ) -> str:
+        """Validate manifest dict and optionally persist to DB. Used by API and CLI.
 
         Args:
             data: Parsed manifest (must have kind: worker | step | saga and kind-specific fields).
+            dry_run: When True, validate only — no catalog insert/upsert and no
+                ``on_manifest_registered`` hooks. Does not check worker/step version
+                immutability (a real deploy may still fail if the version exists).
 
         Returns:
             Human-readable success message.
@@ -556,19 +562,28 @@ class RegistryService:
 
         kind = data.get("kind")
         if kind == "worker":
-            return await self._register_worker(data)
+            return await self._register_worker(data, dry_run=dry_run)
         if kind == "step":
-            return await self._register_step(data)
+            return await self._register_step(data, dry_run=dry_run)
         if kind == "saga":
-            return await self._register_saga(data)
+            return await self._register_saga(data, dry_run=dry_run)
         raise ValueError(f"Unknown manifest kind: {kind!r}.")
 
-    async def _register_worker(self, data: dict[str, Any]) -> str:
+    async def _register_worker(self, data: dict[str, Any], *, dry_run: bool = False) -> str:
         try:
             blueprint = WorkerBlueprint(**data)
         except ValidationError as exc:
             raise manifest_validation_error(exc) from exc
         body_payload = _definition_body_payload(blueprint)
+
+        if dry_run:
+            logger.debug(
+                "dry-run worker name=%s namespace=%s version=%s",
+                blueprint.name,
+                blueprint.namespace,
+                blueprint.version,
+            )
+            return f"Worker '{blueprint.name}' dry-run OK (not registered)"
 
         async with in_transaction() as conn:
             await _create_worker_definition(
@@ -590,7 +605,7 @@ class RegistryService:
         )
         return f"Worker '{blueprint.name}' registered successfully"
 
-    async def _register_step(self, data: dict[str, Any]) -> str:
+    async def _register_step(self, data: dict[str, Any], *, dry_run: bool = False) -> str:
         try:
             blueprint = parse_step_blueprint(data)
         except ValidationError as exc:
@@ -600,6 +615,16 @@ class RegistryService:
         await _assert_step_worker_registered(blueprint)
         await _validate_step_blueprint_at_registration(blueprint=blueprint, settings=settings)
         body_payload = _definition_body_payload(blueprint)
+
+        if dry_run:
+            logger.debug(
+                "dry-run step name=%s namespace=%s version=%s step_kind=%s",
+                blueprint.name,
+                blueprint.namespace,
+                blueprint.version,
+                blueprint.step_kind,
+            )
+            return f"Step '{blueprint.name}' v{blueprint.version} dry-run OK (not registered)"
 
         async with in_transaction() as conn:
             await _create_step_definition(
@@ -622,7 +647,7 @@ class RegistryService:
         )
         return f"Step '{blueprint.name}' v{blueprint.version} registered successfully"
 
-    async def _register_saga(self, data: dict[str, Any]) -> str:
+    async def _register_saga(self, data: dict[str, Any], *, dry_run: bool = False) -> str:
         try:
             authoring = SagaAuthoringBlueprint(**data)
         except ValidationError as exc:
@@ -650,6 +675,15 @@ class RegistryService:
         await _assert_child_saga_definitions_registered(hydrated)
 
         body_payload = _definition_body_payload(authoring)
+
+        if dry_run:
+            logger.debug(
+                "dry-run saga name=%s namespace=%s version=%s",
+                authoring.name,
+                authoring.namespace,
+                authoring.version,
+            )
+            return f"Saga '{authoring.name}' v{authoring.version} dry-run OK (not registered)"
 
         async with in_transaction() as conn:
             await _upsert_saga_definition(

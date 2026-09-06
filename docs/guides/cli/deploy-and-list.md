@@ -14,6 +14,7 @@ This page covers `warden deploy` and `warden list definitions`. Deploy order is 
 
 ```bash
 warden deploy -f <path-to-manifest.yaml>
+warden deploy --dry-run -f <path-to-manifest.yaml>
 ```
 
 Typical order on a fresh stack (GitHub demo shape):
@@ -24,6 +25,8 @@ warden deploy -f config/step.github-triage.yaml
 warden deploy -f config/step.github-post-comment.yaml
 warden deploy -f config/saga.github-demo.yaml
 ```
+
+Use `--dry-run` (HTTP `?dry_run=true`) in CI to run the same validation and catalog link-checks without writing. Dry-run does **not** check worker/step version immutability — a real deploy may still fail if that version already exists.
 
 On success, the CLI prints a confirmation message. **Sagas** may redeploy the same `(namespace, name, version)` to update the stored authoring AST (upsert). **Steps and workers** are append-only for that identity — bump `version` to change capability. Saga deploy **link-checks** `use:` refs against the catalog; it does not persist an expanded reason/commit body (hydration runs at saga start into instance `frozen_steps`).
 
