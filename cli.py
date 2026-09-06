@@ -411,11 +411,19 @@ def _print_definition_rows(items: list[dict[str, Any]]) -> None:
 
 
 def _print_saga_instance_rows(items: list[dict[str, Any]]) -> None:
-    print(f"{'namespace':<12} {'trace_id':<34} {'status':<16} {'definition_id':<38} {'started_at'}")
+    print(f"{'namespace':<12} {'trace_id':<34} {'status':<16} {'definition':<28} {'started_at'}")
     for it in items:
+        name = it.get("definition_name") or ""
+        version = it.get("definition_version") or ""
+        if name and version:
+            label = f"{name}@{version}"
+        elif name:
+            label = str(name)
+        else:
+            label = str(it.get("definition_id", ""))
         print(
             f"{it.get('namespace', ''):<12} {it.get('trace_id', ''):<34} "
-            f"{str(it.get('status', '')):<16} {str(it.get('definition_id', '')):<38} "
+            f"{str(it.get('status', '')):<16} {label[:28]:<28} "
             f"{it.get('started_at', '')}"
         )
 

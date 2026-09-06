@@ -170,6 +170,8 @@ async def _create_saga_and_steps(
         trace_id=trace_id,
         namespace=namespace,
         definition_id=str(definition.id),
+        definition_name=definition.name,
+        definition_version=definition.version,
         status=SagaStatus.PENDING,
         context=context,
         frozen_steps=frozen_steps,

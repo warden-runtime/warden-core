@@ -126,6 +126,8 @@ async def get_sagas(
             trace_id=r.trace_id,
             namespace=r.namespace,
             definition_id=r.definition_id,
+            definition_name=r.definition_name,
+            definition_version=r.definition_version,
             status=r.status.value,
             started_at=r.started_at,
             start_idempotency_key=r.start_idempotency_key,

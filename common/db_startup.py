@@ -41,6 +41,8 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
         "loop_definitions",
         "loop_state",
         "parent_trace_id",
+        "definition_name",
+        "definition_version",
     ),
     "saga_definitions": ("body", "is_active"),
     "step_definitions": ("body", "is_active"),
