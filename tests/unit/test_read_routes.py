@@ -235,6 +235,39 @@ async def test_get_sagas_in_flight_and_failed_conflict(read_app):
 
 
 @pytest.mark.asyncio
+async def test_get_sagas_exposes_definition_labels(read_app):
+    await SagaInstance.create(
+        trace_id="a" * 32,
+        namespace="default",
+        definition_id="def-labeled",
+        definition_name="demo-saga",
+        definition_version="2.0.0",
+        status=SagaStatus.COMPLETED,
+        context={},
+    )
+    await SagaInstance.create(
+        trace_id="b" * 32,
+        namespace="default",
+        definition_id="def-orphan",
+        status=SagaStatus.RUNNING,
+        context={},
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/v1/sagas")
+    assert resp.status_code == 200
+    by_trace = {it["trace_id"]: it for it in resp.json()["items"]}
+    labeled = by_trace["a" * 32]
+    assert labeled["definition_name"] == "demo-saga"
+    assert labeled["definition_version"] == "2.0.0"
+    assert labeled["definition_id"] == "def-labeled"
+    orphan = by_trace["b" * 32]
+    assert orphan["definition_name"] is None
+    assert orphan["definition_version"] is None
+    assert orphan["definition_id"] == "def-orphan"
+
+
+@pytest.mark.asyncio
 async def test_get_sagas_failed_filters(read_app):
     await SagaInstance.create(
         trace_id="a" * 32,

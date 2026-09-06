@@ -260,6 +260,8 @@ class SagaInstanceItem(BaseModel):
     trace_id: str
     namespace: str
     definition_id: str
+    definition_name: str | None = None
+    definition_version: str | None = None
     status: str
     started_at: datetime
     start_idempotency_key: str | None = None

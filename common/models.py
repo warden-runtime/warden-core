@@ -292,6 +292,16 @@ class SagaInstance(models.Model):
     namespace = fields.CharField(max_length=50, default="default", db_index=True)
 
     definition_id = fields.CharField(max_length=128)
+    definition_name = fields.CharField(
+        max_length=128,
+        null=True,
+        description="Catalog saga name copied at start (survives definition hard-delete).",
+    )
+    definition_version = fields.CharField(
+        max_length=50,
+        null=True,
+        description="Catalog saga version copied at start (survives definition hard-delete).",
+    )
     status = fields.CharEnumField(SagaStatus, default=SagaStatus.PENDING, max_length=50)
 
     context = fields.JSONField(default=dict)

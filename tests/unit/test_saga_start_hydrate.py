@@ -69,6 +69,9 @@ async def test_start_saga_hydrates_use_refs_into_frozen_steps() -> None:
         input={},
     )
     saga = await SagaInstance.get(trace_id=result.trace_id)
+    assert saga.definition_name == "hydrate-saga"
+    assert saga.definition_version == "1.0.0"
+    assert saga.definition_id == str(definition.id)
     assert saga.frozen_steps is not None
     assert len(saga.frozen_steps) == 1
     frozen = saga.frozen_steps[0]
@@ -275,6 +278,9 @@ steps:
 
     child = await SagaInstance.get(trace_id=child_trace)
     assert child.parent_trace_id == "a" * 32
+    assert child.definition_name == "child-hydrate-saga"
+    assert child.definition_version == "1.0.0"
+    assert child.definition_id == str(child_def.id)
     assert child.frozen_steps[0]["kind"] == "reason"
     assert child.frozen_steps[0]["step_definition_name"] == "hydrate-step"
     assert child.frozen_steps[0].get("prompt_definition")

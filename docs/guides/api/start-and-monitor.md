@@ -84,7 +84,9 @@ Optional query parameters:
 
 Read `items[0].status` when the filter matches (normally exactly one row). An empty `items` array right after **202** is unusual — double-check `trace_id` and any `namespace` filter before assuming the start failed.
 
-CLI equivalent: `warden list sagas --trace-id $TRACE_ID`.
+Each item includes `definition_id` plus **`definition_name`** / **`definition_version`** (copied from the catalog at saga start; may be `null` on pre-migration rows). Those labels survive a later hard-delete of the definition row.
+
+CLI equivalent: `warden list sagas --trace-id $TRACE_ID` (table shows `name@version` when labels are present).
 
 ## Poll step rows
 

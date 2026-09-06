@@ -576,6 +576,28 @@
             "title": "Definition Id",
             "type": "string"
           },
+          "definition_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Name"
+          },
+          "definition_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Version"
+          },
           "namespace": {
             "title": "Namespace",
             "type": "string"
@@ -1371,7 +1393,7 @@
   "info": {
     "description": "Control-plane HTTP API for deploying manifests, starting sagas, HITL review, and operator recovery. OSS surface under /v1.",
     "title": "API Reference",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
