@@ -30,26 +30,16 @@ def _default_policy_artifact_name(manifest_ref: str) -> str:
     return ref
 
 
-def _resolve_policy_path_with_legacy(*, policies_root: str, manifest_ref: str) -> tuple[Path, bool]:
-    """Resolve policy file: exact ``{root}/{ref}`` first, then legacy ``{root}/{ref}.yaml``."""
+def _resolve_policy_path(*, policies_root: str, manifest_ref: str) -> Path:
+    """Resolve policy file as exact ``{root}/{ref}`` (extension required in the ref)."""
     ref = manifest_ref.strip()
     if not ref:
         raise ValueError(f"Invalid policy ref: {manifest_ref!r}")
 
-    exact = candidate_asset_path(policies_root, ref, label="policy", root_var="POLICIES_ROOT")
-    if exact.is_file():
-        return exact, False
-
-    if ref.lower().endswith(_YAML_SUFFIXES):
-        raise FileNotFoundError(f"Policy file not found: {exact}")
-
-    legacy = candidate_asset_path(
-        policies_root, f"{ref}.yaml", label="policy", root_var="POLICIES_ROOT"
-    )
-    if legacy.is_file():
-        return legacy, True
-
-    raise FileNotFoundError(f"Policy file not found: {exact} or {legacy}")
+    path = candidate_asset_path(policies_root, ref, label="policy", root_var="POLICIES_ROOT")
+    if path.is_file():
+        return path
+    raise FileNotFoundError(f"Policy file not found: {path}")
 
 
 def _parse_policy_file(path: Path, *, manifest_ref: str) -> PolicyArtifact:
@@ -65,15 +55,11 @@ def _parse_policy_file(path: Path, *, manifest_ref: str) -> PolicyArtifact:
     return PolicyArtifact(name=name, version=version, cel_source=str(cel_raw).strip())
 
 
-def _load_policy_artifact_sync(
-    *, policies_root: str | None, policy_ref: str
-) -> tuple[PolicyArtifact, bool]:
+def _load_policy_artifact_sync(*, policies_root: str | None, policy_ref: str) -> PolicyArtifact:
     if not policies_root or not str(policies_root).strip():
         raise ValueError("policies_root is not configured; set POLICIES_ROOT in the environment.")
-    path, used_legacy = _resolve_policy_path_with_legacy(
-        policies_root=policies_root, manifest_ref=policy_ref
-    )
-    return _parse_policy_file(path, manifest_ref=policy_ref), used_legacy
+    path = _resolve_policy_path(policies_root=policies_root, manifest_ref=policy_ref)
+    return _parse_policy_file(path, manifest_ref=policy_ref)
 
 
 async def load_policy_artifact(*, policies_root: str | None, policy_name: str) -> PolicyArtifact:
@@ -91,20 +77,8 @@ async def load_policy_artifact(*, policies_root: str | None, policy_name: str) -
         FileNotFoundError: If the file does not exist.
         ValueError: If policies_root is missing, ref is unsafe, or YAML is invalid.
     """
-    artifact, _used_legacy = await asyncio.to_thread(
-        _load_policy_artifact_sync,
-        policies_root=policies_root,
-        policy_ref=policy_name,
-    )
-    return artifact
-
-
-async def load_policy_artifact_with_meta(
-    *, policies_root: str | None, policy_ref: str
-) -> tuple[PolicyArtifact, bool]:
-    """Load policy artifact; second value is True when legacy ``.yaml`` fallback was used."""
     return await asyncio.to_thread(
         _load_policy_artifact_sync,
         policies_root=policies_root,
-        policy_ref=policy_ref,
+        policy_ref=policy_name,
     )

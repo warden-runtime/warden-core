@@ -11,7 +11,7 @@ from common.manifest_validation import manifest_validation_error
 from common.models import SagaDefinition, StepDefinition, WorkerDefinition
 from common.plugins.registry import get_registry
 from common.policy.cel_eval import PolicyEvaluationError, compile_cel_program
-from common.policy.loader import load_policy_artifact_with_meta
+from common.policy.loader import load_policy_artifact
 from common.saga_assets import (
     assert_output_schema_readable,
     load_compensation_definition,
@@ -220,27 +220,18 @@ async def _validate_step_policy(
     policies_root: str | None,
     policy_ref: str | None,
     label: str,
-    legacy_policy_warned: set[str],
 ) -> None:
     ref = (policy_ref or "").strip()
     if not ref:
         return
     try:
-        artifact, used_legacy = await load_policy_artifact_with_meta(
+        artifact = await load_policy_artifact(
             policies_root=policies_root,
-            policy_ref=ref,
+            policy_name=ref,
         )
         compile_cel_program(artifact.cel_source)
     except (PolicyEvaluationError, OSError, ValueError, FileNotFoundError) as e:
         raise ValueError(f"{label} policy is invalid: {e}") from e
-    if used_legacy and ref not in legacy_policy_warned:
-        legacy_policy_warned.add(ref)
-        logger.warning(
-            "policy ref %r resolved via legacy .yaml suffix; "
-            "use an explicit path (e.g. %r.yaml) in the step or saga manifest",
-            ref,
-            ref,
-        )
 
 
 async def _validate_one_saga_step_at_registration(
@@ -248,7 +239,6 @@ async def _validate_one_saga_step_at_registration(
     index: int | str,
     step: SagaStep,
     settings: Any,
-    legacy_policy_warned: set[str],
 ) -> dict[str, Any] | None:
     step_label = f"Saga step {index} (id={step.id!r})"
     try:
@@ -279,7 +269,6 @@ async def _validate_one_saga_step_at_registration(
         policies_root=settings.policies_root,
         policy_ref=step.policy,
         label=step_label,
-        legacy_policy_warned=legacy_policy_warned,
     )
     if step.when is not None:
         try:
@@ -301,7 +290,6 @@ async def _validate_step_blueprint_at_registration(
 ) -> dict[str, Any] | None:
     """Validate on-disk artifacts for a catalog step (commit invariants already on blueprint)."""
     label = f"Step {blueprint.name!r}@{blueprint.version}"
-    legacy_policy_warned: set[str] = set()
     try:
         await _validate_step_assets(
             schemas_root=settings.schemas_root,
@@ -335,7 +323,6 @@ async def _validate_step_blueprint_at_registration(
         policies_root=settings.policies_root,
         policy_ref=blueprint.policy,
         label=label,
-        legacy_policy_warned=legacy_policy_warned,
     )
     from common.step_input_schema import validate_step_blueprint_input_schemas
 
@@ -403,7 +390,6 @@ async def _collect_saga_registration_workers(
     settings: Any,
 ) -> set[WorkerIdentity]:
     required_workers: set[WorkerIdentity] = set()
-    legacy_policy_warned: set[str] = set()
 
     async def _register_executable(index_label: str, step: SagaStep) -> None:
         required_workers.add((step.worker, step.worker_version))
@@ -411,7 +397,6 @@ async def _collect_saga_registration_workers(
             index=index_label,
             step=step,
             settings=settings,
-            legacy_policy_warned=legacy_policy_warned,
         )
         if comp_d:
             required_workers.add(

@@ -85,9 +85,10 @@ upgrade: migrate ## Alias for migrate
 define RUN_HOST_ENV
 set -a && [ -f .env ] && . ./.env; set +a; \
 export PROMPTS_ROOT="$${PROMPTS_ROOT:-./config/prompts}"; \
+export SKILLS_ROOT="$${SKILLS_ROOT:-./config/skills}"; \
 export POLICIES_ROOT="$${POLICIES_ROOT:-./config/policies}"; \
-export SCHEMAS_ROOT="$${SCHEMAS_ROOT:-./config/schemas}";
-export COMPENSATIONS_ROOT="$${COMPENSATIONS_ROOT:-./config/compensations}";
+export SCHEMAS_ROOT="$${SCHEMAS_ROOT:-./config/schemas}"; \
+export COMPENSATIONS_ROOT="$${COMPENSATIONS_ROOT:-./config/compensations}"
 endef
 
 run-engine: ## Run engine on host (not in Compose)
