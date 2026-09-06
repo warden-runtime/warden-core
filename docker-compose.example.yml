@@ -103,11 +103,6 @@ services:
       PATH: /app/.venv/bin:/usr/local/bin:/usr/bin:/bin
       PYTHONPATH: /app
       DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      PROMPTS_ROOT: /app/prompts
-      SKILLS_ROOT: /app/skills
-    volumes:
-      - ./config/prompts:/app/prompts:ro
-      - ./config/skills:/app/skills:ro
     depends_on:
       postgres:
         condition: service_healthy

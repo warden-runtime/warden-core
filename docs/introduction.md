@@ -51,10 +51,11 @@ The open kernel runs standalone. Need a tamper-evident forensic ledger, schedule
 
 | Term | Meaning |
 |------|---------|
-| **Saga** | A versioned workflow definition (`kind: saga`): steps, tool allowlists, policy and prompt references. Stored under `(namespace, name, version)` |
-| **Worker definition** | A versioned manifest (`kind: worker`) describing LLM config and MCP connections. Stored under `(namespace, name, version)` |
+| **Worker definition** | A versioned manifest (`kind: worker`): LLM provider, model, system prompt, MCP `tool_sources`. Stored under `(namespace, name, version)` |
+| **Step definition** | A versioned reusable capability (`kind: step`): `step_kind` (`reason` \| `commit`), declared `inputs`, worker pin, and capability fields. Sagas compose these via `use:` — see [Step manifests](guides/manifests/step-manifests.md) |
+| **Saga** | A versioned workflow definition (`kind: saga`): ordered `use:` refs, port bindings (`with`), and optional `when` gates. Deploy stores the authoring AST; each start hydrates refs into instance `frozen_steps` |
 | **Instance** | A live saga execution identified by `trace_id`—not by manifest name/version/namespace |
-| **Step** | A single unit of work within a saga — a durable Postgres row per step instance (`reason` with `agent-adapter: react \| simple`, or `commit`) |
+| **Step instance** | A single unit of work within a running saga — a durable Postgres row (`reason` with `agent-adapter: react \| simple`, or `commit`) |
 | **Engine** | Saga FSM, HTTP API, policy and human-in-the-loop gates; writes saga state and `worker-commands` rows; consumes `engine-events` from the outbox |
 | **Worker** | Polls and claims `worker-commands` rows, executes reason/commit steps, writes `engine-events` (e.g. `STEP_COMPLETED`) back to the outbox |
 | **Policy** | [CEL](https://cel.dev/) rules evaluated at key points in a step—defining the boundaries a step's output must stay within |
@@ -70,7 +71,7 @@ The sidebar is ordered concepts first, then hands-on. Understanding Warden's tra
 
 **Recommended.** Work through [Core concepts](concepts/terminology.md) ([Terminology](concepts/terminology.md) → [Durable execution boundaries](concepts/durable-execution.md) → [Lifecycle](concepts/lifecycle.md)), then Setup ([Prerequisites](getting-started/prerequisites.md) and [Installation](getting-started/installation.md)), then all four Demos in order — [Mock LLM and MCP](getting-started/demo-mock-llm-and-mcp.md) → [Observe Execution Timing](getting-started/demo-observe-execution-timing.md) → [Quickstart](getting-started/demo-quickstart.md) → [GitHub MCP](getting-started/demo-github-mcp.md). Keep [Configuration](getting-started/configuration.md) and [Troubleshooting](getting-started/troubleshooting.md) open when something in the environment breaks.
 
-**After Getting started.** [Guides → Manifests and artifacts](guides/manifests/overview.md) cover worker and saga YAML, on-disk artifacts, CLI, and API workflows. [Advanced](advanced/architecture.md) covers architecture and [testing](advanced/testing.md).
+**After Getting started.** [Guides → Manifests and artifacts](guides/manifests/overview.md) cover worker, step, and saga YAML, on-disk artifacts, CLI, and API workflows. [Advanced](advanced/architecture.md) covers architecture and [testing](advanced/testing.md).
 
 ## Try it locally
 
@@ -92,6 +93,8 @@ If `ping` fails right after `make up`, wait for migrations to finish and retry �
 
 ```bash
 warden deploy -f config/worker.mock-mcp.yaml
+warden deploy -f config/step.mock-greet.yaml
+warden deploy -f config/step.mock-summarize.yaml
 warden deploy -f config/saga.mock-mcp.yaml
 warden start saga -n mock-mcp-saga -v 0.1.0 --input '{"name":"Ada"}'
 warden list steps --trace-id <trace_id>

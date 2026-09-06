@@ -48,6 +48,8 @@ make sync-dev && make up
 export ENGINE_URL=http://127.0.0.1:8000
 
 warden deploy -f config/worker.mock-mcp.yaml
+warden deploy -f config/step.mock-greet.yaml
+warden deploy -f config/step.mock-summarize.yaml
 warden deploy -f config/saga.mock-mcp.yaml
 warden start saga -n mock-mcp-saga -v 0.1.0 --input '{"name":"Ada"}'
 warden list steps --trace-id <trace_id>

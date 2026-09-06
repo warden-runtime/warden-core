@@ -1,4 +1,4 @@
-"""Worker hydrate loads ``tools_bind`` from the step row and passes it to ``run_step``."""
+"""Worker command prepare loads ``tools_bind`` from the step row and passes it to ``run_step``."""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ import pytest
 from common.agent_adapter import StepResult
 from common.contracts import DoStepCommand
 from common.models import ProviderSecret, WorkerDefinition
+from tests.factories import worker_definition_body
 from tests.worker_hydration_helpers import seed_forward_step
-from workers.logic import _hydrate_forward_command, handle_worker_command
+from workers.logic import _prepare_forward_command, handle_worker_command
 
 
 def _do_step_command(
@@ -28,7 +29,7 @@ def _do_step_command(
         step_span_id=span_id,
         worker_name=worker,
         worker_version=worker_version,
-        idempotency_key=f"{trace_id}-bind-hydrate",
+        idempotency_key=f"{trace_id}-bind-prepare",
         prompt_ref="p.j2",
         arguments=arguments or {"container_id": "saga-c1"},
         tool_specs=[{"name": "sandbox_exec"}],
@@ -36,7 +37,7 @@ def _do_step_command(
 
 
 @pytest.mark.asyncio
-async def test_hydrate_forward_command_loads_tools_bind_from_step_row() -> None:
+async def test_prepare_forward_command_loads_tools_bind_from_step_row() -> None:
     trace_id = "a" * 32
     span_id = "b" * 16
     await seed_forward_step(
@@ -49,18 +50,18 @@ async def test_hydrate_forward_command_loads_tools_bind_from_step_row() -> None:
     )
     cmd = _do_step_command(trace_id=trace_id, span_id=span_id)
 
-    hydrated = await _hydrate_forward_command(
+    prepared = await _prepare_forward_command(
         cmd,
         namespace="default",
         saga_trace_id=trace_id,
         step_span_id=span_id,
     )
 
-    assert hydrated.tool_bind_keys == ["container_id"]
+    assert prepared.tool_bind_keys == ["container_id"]
 
 
 @pytest.mark.asyncio
-async def test_hydrate_forward_command_tools_bind_defaults_empty() -> None:
+async def test_prepare_forward_command_tools_bind_defaults_empty() -> None:
     trace_id = "e" * 32
     span_id = "f" * 16
     await seed_forward_step(
@@ -73,14 +74,14 @@ async def test_hydrate_forward_command_tools_bind_defaults_empty() -> None:
     )
     cmd = _do_step_command(trace_id=trace_id, span_id=span_id)
 
-    hydrated = await _hydrate_forward_command(
+    prepared = await _prepare_forward_command(
         cmd,
         namespace="default",
         saga_trace_id=trace_id,
         step_span_id=span_id,
     )
 
-    assert hydrated.tool_bind_keys == []
+    assert prepared.tool_bind_keys == []
 
 
 @pytest.mark.asyncio
@@ -99,9 +100,11 @@ async def test_handle_worker_command_passes_tools_bind_to_run_step(mocker) -> No
         namespace="default",
         name="bind-test-worker",
         version="1.0.0",
-        model_provider="openai",
-        model_name="gpt-4o-mini",
-        system_prompt="Bind hydration test.",
+        body=worker_definition_body(
+            name="bind-test-worker",
+            model_name="gpt-4o-mini",
+            system_prompt="Bind hydration test.",
+        ),
     )
     await ProviderSecret.create(
         id=uuid4(),

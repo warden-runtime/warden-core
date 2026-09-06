@@ -49,6 +49,43 @@ INTEGRATION_HITL_ONE_STEP_VERSION = "1.0.0"
 INTEGRATION_DIRTY_COMP_SAGA_NAME = "integration-dirty-comp-two-step"
 INTEGRATION_DIRTY_COMP_SAGA_VERSION = "1.0.0"
 
+INTEGRATION_PLAIN_STEP = "integration-plain-step"
+INTEGRATION_HITL_STEP = "integration-hitl-step"
+INTEGRATION_COMP_STEP = "integration-comp-step"
+
+
+def _plain_step_body(*, name: str, hitl: bool = False, compensation: str | None = None) -> dict:
+    from tests.factories import step_definition_body
+
+    body = step_definition_body(
+        name=name,
+        inputs={"message": {"required": True}},
+        worker=INTEGRATION_WORKER,
+        worker_version=INTEGRATION_WORKER_VERSION,
+        prompt="generic-step.j2",
+        tools={"allow": []},
+        timeout_seconds=600,
+    )
+    if hitl:
+        body["hitl"] = True
+        body["hitl_retry_guidance"] = "fix the summary before resubmitting"
+    if compensation is not None:
+        body["compensation"] = compensation
+    return body
+
+
+def _use_ref(step_id: str, *, use: str, message: str, hitl: bool | None = None) -> dict:
+    ref: dict = {
+        "id": step_id,
+        "use": use,
+        "version": "1.0.0",
+        "with": {"message": {"value": message}},
+    }
+    if hitl is True:
+        ref["hitl"] = True
+    return ref
+
+
 TWO_STEP_SAGA_BODY = {
     "kind": "saga",
     "name": INTEGRATION_SAGA_NAME,
@@ -56,28 +93,8 @@ TWO_STEP_SAGA_BODY = {
     "version": INTEGRATION_SAGA_VERSION,
     "description": "Integration wiring test",
     "steps": [
-        {
-            "id": "step-1",
-            "kind": "reason",
-            "name": "First step",
-            "worker": INTEGRATION_WORKER,
-            "worker_version": INTEGRATION_WORKER_VERSION,
-            "with": {"message": {"value": "integration step one"}},
-            "prompt": "generic-step.j2",
-            "tools": {"allow": []},
-            "timeout_seconds": 600,
-        },
-        {
-            "id": "step-2",
-            "kind": "reason",
-            "name": "Second step",
-            "worker": INTEGRATION_WORKER,
-            "worker_version": INTEGRATION_WORKER_VERSION,
-            "with": {"message": {"value": "integration step two"}},
-            "prompt": "generic-step.j2",
-            "tools": {"allow": []},
-            "timeout_seconds": 600,
-        },
+        _use_ref("step-1", use=INTEGRATION_PLAIN_STEP, message="integration step one"),
+        _use_ref("step-2", use=INTEGRATION_PLAIN_STEP, message="integration step two"),
     ],
 }
 
@@ -88,17 +105,7 @@ ONE_STEP_FAIL_SAGA_BODY = {
     "version": INTEGRATION_ONE_STEP_FAIL_VERSION,
     "description": "Integration failure-path test",
     "steps": [
-        {
-            "id": "only-step",
-            "kind": "reason",
-            "name": "Only step",
-            "worker": INTEGRATION_WORKER,
-            "worker_version": INTEGRATION_WORKER_VERSION,
-            "with": {"message": {"value": "integration failure path"}},
-            "prompt": "generic-step.j2",
-            "tools": {"allow": []},
-            "timeout_seconds": 600,
-        }
+        _use_ref("only-step", use=INTEGRATION_PLAIN_STEP, message="integration failure path"),
     ],
 }
 
@@ -109,30 +116,8 @@ HITL_TWO_STEP_SAGA_BODY = {
     "version": INTEGRATION_HITL_SAGA_VERSION,
     "description": "HITL hold then approve",
     "steps": [
-        {
-            "id": "step-1",
-            "kind": "reason",
-            "name": "Review gate",
-            "worker": INTEGRATION_WORKER,
-            "worker_version": INTEGRATION_WORKER_VERSION,
-            "with": {"message": {"value": "needs review"}},
-            "prompt": "generic-step.j2",
-            "tools": {"allow": []},
-            "timeout_seconds": 600,
-            "hitl": True,
-            "hitl_retry_guidance": "fix the summary before resubmitting",
-        },
-        {
-            "id": "step-2",
-            "kind": "reason",
-            "name": "After approval",
-            "worker": INTEGRATION_WORKER,
-            "worker_version": INTEGRATION_WORKER_VERSION,
-            "with": {"message": {"value": "post hitl"}},
-            "prompt": "generic-step.j2",
-            "tools": {"allow": []},
-            "timeout_seconds": 600,
-        },
+        _use_ref("step-1", use=INTEGRATION_HITL_STEP, message="needs review"),
+        _use_ref("step-2", use=INTEGRATION_PLAIN_STEP, message="post hitl"),
     ],
 }
 
@@ -143,37 +128,9 @@ HITL_ONE_STEP_SAGA_BODY = {
     "version": INTEGRATION_HITL_ONE_STEP_VERSION,
     "description": "Single HITL gate",
     "steps": [
-        {
-            "id": "only-step",
-            "kind": "reason",
-            "name": "Review only",
-            "worker": INTEGRATION_WORKER,
-            "worker_version": INTEGRATION_WORKER_VERSION,
-            "with": {"message": {"value": "reject path"}},
-            "prompt": "generic-step.j2",
-            "tools": {"allow": []},
-            "timeout_seconds": 600,
-            "hitl": True,
-        },
+        _use_ref("only-step", use=INTEGRATION_HITL_STEP, message="reject path"),
     ],
 }
-
-
-def _reason_step(*, step_id: str, name: str, compensation: str | None = None) -> dict:
-    body: dict = {
-        "id": step_id,
-        "kind": "reason",
-        "name": name,
-        "worker": INTEGRATION_WORKER,
-        "worker_version": INTEGRATION_WORKER_VERSION,
-        "with": {"message": {"value": name}},
-        "prompt": "generic-step.j2",
-        "tools": {"allow": []},
-        "timeout_seconds": 600,
-    }
-    if compensation is not None:
-        body["compensation"] = compensation
-    return body
 
 
 def compensating_two_step_saga_body(*, compensation_ref: str) -> dict:
@@ -184,8 +141,8 @@ def compensating_two_step_saga_body(*, compensation_ref: str) -> dict:
         "version": INTEGRATION_COMP_SAGA_VERSION,
         "description": "Step-two clean failure rolls back step one",
         "steps": [
-            _reason_step(step_id="step-1", name="First step", compensation=compensation_ref),
-            _reason_step(step_id="step-2", name="Second step"),
+            _use_ref("step-1", use=INTEGRATION_COMP_STEP, message="First step"),
+            _use_ref("step-2", use=INTEGRATION_PLAIN_STEP, message="Second step"),
         ],
     }
 
@@ -199,10 +156,35 @@ def dirty_compensating_two_step_saga_body(*, compensation_ref: str) -> dict:
         "version": INTEGRATION_DIRTY_COMP_SAGA_VERSION,
         "description": "Step-two timeout compensates self then prior step",
         "steps": [
-            _reason_step(step_id="step-1", name="First step", compensation=compensation_ref),
-            _reason_step(step_id="step-2", name="Second step", compensation=compensation_ref),
+            _use_ref("step-1", use=INTEGRATION_COMP_STEP, message="First step"),
+            _use_ref("step-2", use=INTEGRATION_COMP_STEP, message="Second step"),
         ],
     }
+
+
+async def _seed_integration_step_catalog(*, compensation_ref: str | None = None) -> None:
+    from common.models import StepDefinition
+
+    async def _ensure(name: str, body: dict) -> None:
+        existing = await StepDefinition.filter(
+            namespace="default", name=name, version="1.0.0"
+        ).first()
+        if existing is None:
+            await StepDefinition.create(
+                namespace="default",
+                name=name,
+                version="1.0.0",
+                body=body,
+                is_active=True,
+            )
+
+    await _ensure(INTEGRATION_PLAIN_STEP, _plain_step_body(name=INTEGRATION_PLAIN_STEP))
+    await _ensure(INTEGRATION_HITL_STEP, _plain_step_body(name=INTEGRATION_HITL_STEP, hitl=True))
+    if compensation_ref is not None:
+        await _ensure(
+            INTEGRATION_COMP_STEP,
+            _plain_step_body(name=INTEGRATION_COMP_STEP, compensation=compensation_ref),
+        )
 
 
 async def latest_outbox(
@@ -336,14 +318,17 @@ async def worker_runs_compensation_and_ingest(trace_id: str, undo: SagaStepInsta
 async def integration_worker() -> str:
     """Worker definition + provider secret for integration tests."""
     from common.models import ProviderSecret, WorkerDefinition
+    from tests.factories import worker_definition_body
 
     await WorkerDefinition.create(
         namespace="default",
         name=INTEGRATION_WORKER,
         version=INTEGRATION_WORKER_VERSION,
-        model_provider="openai",
-        model_name="gpt-4o",
-        system_prompt="You are a test assistant.",
+        body=worker_definition_body(
+            name=INTEGRATION_WORKER,
+            version=INTEGRATION_WORKER_VERSION,
+            system_prompt="You are a test assistant.",
+        ),
     )
     await ProviderSecret.create(
         id=uuid4(),
@@ -358,6 +343,7 @@ async def integration_worker() -> str:
 async def two_step_saga_definition(integration_worker: str) -> None:
     from common.models import SagaDefinition
 
+    await _seed_integration_step_catalog()
     await SagaDefinition.create(
         namespace="default",
         name=INTEGRATION_SAGA_NAME,
@@ -370,6 +356,7 @@ async def two_step_saga_definition(integration_worker: str) -> None:
 async def one_step_fail_saga_definition(integration_worker: str) -> None:
     from common.models import SagaDefinition
 
+    await _seed_integration_step_catalog()
     await SagaDefinition.create(
         namespace="default",
         name=INTEGRATION_ONE_STEP_FAIL_NAME,
@@ -382,6 +369,7 @@ async def one_step_fail_saga_definition(integration_worker: str) -> None:
 async def hitl_two_step_saga_definition(integration_worker: str) -> None:
     from common.models import SagaDefinition
 
+    await _seed_integration_step_catalog()
     await SagaDefinition.create(
         namespace="default",
         name=INTEGRATION_HITL_SAGA_NAME,
@@ -407,6 +395,7 @@ async def compensating_two_step_saga_definition(
     monkeypatch.setenv("SCHEMAS_ROOT", str(tmp_path))
     monkeypatch.setenv("COMPENSATIONS_ROOT", str(tmp_path))
     get_settings.cache_clear()
+    await _seed_integration_step_catalog(compensation_ref="undo.yaml")
     await SagaDefinition.create(
         namespace="default",
         name=INTEGRATION_COMP_SAGA_NAME,
@@ -421,6 +410,7 @@ async def compensating_two_step_saga_definition(
 async def hitl_one_step_saga_definition(integration_worker: str) -> None:
     from common.models import SagaDefinition
 
+    await _seed_integration_step_catalog()
     await SagaDefinition.create(
         namespace="default",
         name=INTEGRATION_HITL_ONE_STEP_NAME,
@@ -446,6 +436,7 @@ async def dirty_compensating_two_step_saga_definition(
     monkeypatch.setenv("SCHEMAS_ROOT", str(tmp_path))
     monkeypatch.setenv("COMPENSATIONS_ROOT", str(tmp_path))
     get_settings.cache_clear()
+    await _seed_integration_step_catalog(compensation_ref="undo.yaml")
     await SagaDefinition.create(
         namespace="default",
         name=INTEGRATION_DIRTY_COMP_SAGA_NAME,

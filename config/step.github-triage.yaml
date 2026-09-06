@@ -1,0 +1,32 @@
+# GitHub MCP demo — read-only triage of open issues.
+# Requires: config/worker.github-demo.yaml, PROMPTS_ROOT, SCHEMAS_ROOT.
+kind: step
+name: github-triage
+namespace: default
+version: "0.1.0"
+title: Triage open issues
+description: Triage open issues (reason + GitHub MCP).
+inputs:
+  owner:
+    required: true
+  repo:
+    required: true
+  focus_issue_number:
+    required: false
+step_kind: reason
+worker: github-demo-worker
+worker_version: "0.1.0"
+prompt: github-triage.j2
+tools:
+  allow:
+    - name: get_me
+    - name: list_issues
+    - name: issue_read
+output_schema: github-triage-output.json
+facts:
+  - tool: list_issues
+    into: triage_metrics
+    fields:
+      total_count: "$.totalCount"
+timeout_seconds: 600
+max_turns: 15

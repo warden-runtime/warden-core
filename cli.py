@@ -25,6 +25,7 @@ from common.cli_engine_client import (
     say_err,
 )
 from common.config import get_settings
+from common.definition_identity import DefinitionIdentityError, resolve_definition_identity
 from common.error_details import format_step_error_brief
 
 logging.basicConfig(
@@ -361,19 +362,20 @@ def _build_step_list_params(
     return params
 
 
-def _normalize_definition_list_kind(type_: str, *, is_active: bool | None) -> str:
+def _normalize_definition_list_kind(type_: str) -> str:
     kind = type_.strip().lower()
-    if kind not in ("saga", "worker"):
-        say_err("--type must be `saga` or `worker`.")
-        raise typer.Exit(code=1)
-    if kind == "worker" and is_active is not None:
-        say_err("--is-active is only valid with `--type saga`.")
+    if kind not in ("saga", "worker", "step"):
+        say_err("--type must be `saga`, `worker`, or `step`.")
         raise typer.Exit(code=1)
     return kind
 
 
 def _definition_list_path(kind: str) -> str:
-    return "/v1/definitions/sagas" if kind == "saga" else "/v1/definitions/workers"
+    if kind == "saga":
+        return "/v1/definitions/sagas"
+    if kind == "step":
+        return "/v1/definitions/steps"
+    return "/v1/definitions/workers"
 
 
 def _build_definition_list_params(
@@ -398,22 +400,13 @@ def _build_definition_list_params(
     return params
 
 
-def _print_saga_definition_rows(items: list[dict[str, Any]], *, kind: str) -> None:
-    if kind == "saga":
-        header = f"{'namespace':<12} {'name':<24} {'version':<10} {'active':<6} {'id':<36}"
-        print(header)
-        for it in items:
-            print(
-                f"{it.get('namespace', ''):<12} {it.get('name', '')[:24]:<24} "
-                f"{it.get('version', ''):<10} {str(it.get('is_active', '')):<6} {it.get('id', '')}"
-            )
-        return
-    print(f"{'namespace':<12} {'name':<24} {'version':<10} {'adapter':<12} {'id':<36}")
+def _print_definition_rows(items: list[dict[str, Any]]) -> None:
+    header = f"{'namespace':<12} {'name':<24} {'version':<10} {'active':<6} {'id':<36}"
+    print(header)
     for it in items:
         print(
             f"{it.get('namespace', ''):<12} {it.get('name', '')[:24]:<24} "
-            f"{str(it.get('version', ''))[:10]:<10} {str(it.get('adapter', ''))[:12]:<12} "
-            f"{it.get('id', '')}"
+            f"{it.get('version', ''):<10} {str(it.get('is_active', '')):<6} {it.get('id', '')}"
         )
 
 
@@ -847,19 +840,130 @@ def start_saga_cli(
 list_app = typer.Typer(
     name="list",
     help=(
-        "List resources from the engine: registered saga/worker definitions, "
-        "or saga instances (executions). All calls are GETs against ENGINE_URL."
+        "List resources from the engine: registered worker/step/saga definitions, "
+        "saga instances, or step instances for a trace. All calls are GETs against ENGINE_URL."
     ),
-    epilog="Examples: `warden list definitions --type saga` · `warden list sagas --in-flight` · `warden list steps --trace-id …`",
+    epilog=(
+        "Examples: `warden list definitions --type step` · `warden list sagas --in-flight` · "
+        "`warden list steps --trace-id …` (runtime rows; not catalog steps)."
+    ),
     no_args_is_help=True,
 )
 app.add_typer(list_app, name="list")
 
+definitions_app = typer.Typer(
+    name="definitions",
+    help="Mutate catalog definition metadata (soft-enable / soft-disable).",
+    no_args_is_help=True,
+)
+app.add_typer(definitions_app, name="definitions")
+
+
+@definitions_app.command(
+    "set-active",
+    help="Set is_active on a worker, step, or saga definition by UUID or identity triple.",
+    epilog=(
+        "Maps to PATCH /v1/definitions/{workers|steps|sagas}?id=… or "
+        '?namespace=&name=&version= with {"is_active": …}.'
+    ),
+)
+def definitions_set_active(
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--type",
+            "-t",
+            help="Definition kind: **saga**, **worker**, or **step**.",
+            metavar="saga|worker|step",
+            show_default=False,
+        ),
+    ],
+    definition_id: Annotated[
+        str | None,
+        typer.Option("--id", help="Definition UUID from `warden list definitions`."),
+    ] = None,
+    namespace: Annotated[
+        str | None,
+        typer.Option("--namespace", help="With --name/--version: identity triple."),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option("--name", help="With --namespace/--version: identity triple."),
+    ] = None,
+    version: Annotated[
+        str | None,
+        typer.Option("--version", help="With --namespace/--name: identity triple."),
+    ] = None,
+    active: Annotated[
+        bool,
+        typer.Option("--active/--inactive", help="Soft-enable or soft-disable the definition."),
+    ] = True,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Print the raw JSON response."),
+    ] = False,
+) -> None:
+    """PATCH is_active on a catalog definition."""
+    normalized = kind.strip().lower()
+    if normalized not in ("saga", "worker", "step"):
+        say_err("--type must be `saga`, `worker`, or `step`.")
+        raise typer.Exit(code=1)
+
+    try:
+        identity = resolve_definition_identity(
+            definition_id=definition_id,
+            namespace=namespace,
+            name=name,
+            version=version,
+            label="set-active",
+        )
+    except DefinitionIdentityError as e:
+        say_err(str(e))
+        raise typer.Exit(code=1) from e
+
+    path = _definition_list_path(normalized)
+    params: list[tuple[str, str]]
+    if identity.definition_id is not None:
+        params = [("id", identity.definition_id)]
+    elif identity.triple is not None:
+        ns, n, ver = identity.triple
+        params = [("namespace", ns), ("name", n), ("version", ver)]
+    else:
+        say_err("Provide --id or --namespace/--name/--version.")
+        raise typer.Exit(code=1)
+
+    async def _run() -> dict[str, Any]:
+        resp = await http_request("PATCH", path, params=params, json_body={"is_active": active})
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            detail = format_api_detail(e.response)
+            say_err(f"engine HTTP {e.response.status_code} PATCH {path}: {detail}")
+            raise typer.Exit(code=1) from e
+        return resp.json()
+
+    try:
+        data = asyncio.run(_run())
+    except typer.Exit:
+        raise
+    except httpx.RequestError as e:
+        handle_request_error(e, verb="PATCH", path=path)
+        raise typer.Exit(code=1) from e
+
+    if as_json:
+        print(json.dumps(data, indent=2))
+    else:
+        state = "active" if data.get("is_active") else "inactive"
+        say("OK", f"{normalized} {data.get('name')}@{data.get('version')} is now {state}")
+
 
 @list_app.command(
     "definitions",
-    help="List saga or worker definitions registered in the engine.",
-    epilog="Maps to GET /v1/definitions/sagas or GET /v1/definitions/workers.",
+    help=(
+        "List catalog definitions (worker, step, or saga manifests). "
+        "Not the same as `warden list steps`, which lists runtime step instances."
+    ),
+    epilog="Maps to GET /v1/definitions/sagas, /workers, or /steps.",
 )
 def list_definitions(
     type_: Annotated[
@@ -867,8 +971,8 @@ def list_definitions(
         typer.Option(
             "--type",
             "-t",
-            help="Which table to list: **saga** (blueprints) or **worker** (agent configs).",
-            metavar="saga|worker",
+            help="Which table to list: **saga**, **worker**, or **step**.",
+            metavar="saga|worker|step",
             show_default=False,
         ),
     ],
@@ -883,7 +987,7 @@ def list_definitions(
     is_active: Annotated[
         bool | None,
         typer.Option(
-            help="**Saga definitions only:** true or false to filter by is_active (ignored for --type worker).",
+            help="Filter by is_active (true/false) for saga, step, or worker definitions.",
         ),
     ] = None,
     limit: Annotated[
@@ -899,8 +1003,8 @@ def list_definitions(
         typer.Option("--json", help="Print the raw JSON response instead of a table."),
     ] = False,
 ) -> None:
-    """Print registered saga or worker definitions."""
-    kind = _normalize_definition_list_kind(type_, is_active=is_active)
+    """Print registered worker, step, or saga definitions."""
+    kind = _normalize_definition_list_kind(type_)
     params = _build_definition_list_params(
         namespace=namespace,
         name=name,
@@ -912,7 +1016,7 @@ def list_definitions(
     _print_list_items(
         data,
         as_json=as_json,
-        print_table=lambda items: _print_saga_definition_rows(items, kind=kind),
+        print_table=_print_definition_rows,
     )
 
 
@@ -1024,7 +1128,10 @@ def list_sagas(
 
 @list_app.command(
     "steps",
-    help="List step instances for one saga (ordered by forward_seq).",
+    help=(
+        "List runtime step instances for one saga (ordered by forward_seq). "
+        "For catalog step manifests, use `warden list definitions --type step`."
+    ),
     epilog=(
         "Requires `--trace-id`. Optional `--namespace` must match the saga row. "
         "Repeat `--status` to filter step rows. "

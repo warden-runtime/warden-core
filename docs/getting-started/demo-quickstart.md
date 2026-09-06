@@ -18,10 +18,11 @@ To isolate connectivity from open-ended tool loops, this walkthrough sets **`age
 |----------|------|
 | Cloud worker | `config/worker.minimal.yaml` — `provider: openai`, `gpt-4o-mini` |
 | Local worker | `config/worker.local-minimal.yaml` — `provider: local`, `llama3.2` |
-| Saga | `config/saga.minimal.yaml` — step `step1`, `agent-adapter: simple`, `tools.allow: []` |
+| Step | `config/step.minimal-step1.yaml` — `agent-adapter: simple`, `tools.allow: []` |
+| Saga | `config/saga.minimal.yaml` — composes `step1` via `use: minimal-step1` |
 | Prompt | `config/prompts/noop.j2` |
 
-Before you deploy, open the files in the table — especially `config/saga.minimal.yaml` and `noop.j2`. The walkthrough assumes you've seen what you're registering.
+Before you deploy, open the files in the table — especially the step manifest, saga, and `noop.j2`. The walkthrough assumes you've seen what you're registering.
 
 ## Before you start
 
@@ -50,6 +51,7 @@ Cloud or local LLM use the same commands; only the worker manifest from the tabl
 
 ```bash
 warden deploy -f config/worker.minimal.yaml          # or worker.local-minimal.yaml
+warden deploy -f config/step.minimal-step1.yaml
 warden deploy -f config/saga.minimal.yaml
 warden start saga -n minimal-saga -v 0.0.1 --namespace default
 warden list steps --trace-id <TRACE_ID> --namespace default
@@ -98,7 +100,7 @@ Expect `worker.llm_ms` to jump from single-digit milliseconds (mock) to **second
 
 `output_schema` is the contract between the model and saga context. On a reason step, the worker asks the LLM for JSON; Warden validates that payload against a JSON Schema file on disk and stores the result in `steps.<id>.output.data`. Downstream steps, CEL gates, and HITL read those fields — pin explicit schemas once a saga grows beyond one step.
 
-The bundled `config/saga.minimal.yaml` omits `output_schema` on purpose. With **`agent-adapter: simple`**, the worker then uses a built-in fallback that only requires a `summary` string. You can pin that shape yourself (or tighten it) without leaving this demo:
+The bundled `config/step.minimal-step1.yaml` omits `output_schema` on purpose. With **`agent-adapter: simple`**, the worker then uses a built-in fallback that only requires a `summary` string. You can pin that shape yourself (or tighten it) without leaving this demo:
 
 **1. Create a schema file** at `config/schemas/minimal-connectivity.json`:
 
@@ -116,29 +118,31 @@ The bundled `config/saga.minimal.yaml` omits `output_schema` on purpose. With **
 }
 ```
 
-**2. Reference it on `step1`** in `config/saga.minimal.yaml` (add one line under the existing step fields):
+**2. Reference it on the step definition** in `config/step.minimal-step1.yaml` (add one line under the existing fields):
 
 ```yaml
-  - id: step1
-    kind: reason
-    agent-adapter: simple
-    worker: minimal-worker
-    worker_version: "1.0.0"
-    prompt: noop.j2
-    output_schema: minimal-connectivity.json
-    tools:
-      allow: []
+kind: step
+name: minimal-step1
+step_kind: reason
+agent-adapter: simple
+worker: minimal-worker
+worker_version: "1.0.0"
+prompt: noop.j2
+output_schema: minimal-connectivity.json
+tools:
+  allow: []
 ```
 
-**3. Redeploy the saga and run again:**
+**3. Redeploy the step (then the saga) and run again:**
 
 ```bash
+warden deploy -f config/step.minimal-step1.yaml
 warden deploy -f config/saga.minimal.yaml
 warden start saga -n minimal-saga -v 0.0.1 --namespace default
 warden show step <TRACE_ID> --step-id step1 --namespace default
 ```
 
-The repo ships unchanged — these edits are yours to make locally. If the model drifts from the schema, the step fails with a validation error in `show step` — that is Warden doing its job. Full reference: [Saga manifests → Structured output](../guides/manifests/saga-manifests.md#structured-output-output_schema).
+The repo ships unchanged — these edits are yours to make locally. If the model drifts from the schema, the step fails with a validation error in `show step` — that is Warden doing its job. Full reference: [Step manifests → Capability fields](../guides/manifests/step-manifests.md) and [Saga manifests → Structured output](../guides/manifests/saga-manifests.md#structured-output-output_schema).
 
 :::tip[Feeling adventurous?]
 Add fields to the schema, pass values through `with` on the step, and update `config/prompts/noop.j2` so the model knows what to return — then redeploy and run again. That is how real sagas pin structure before downstream steps, CEL, or HITL read it.

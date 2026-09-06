@@ -1,21 +1,21 @@
 """Unit tests for worker manifest schema validation."""
 
+from typing import Any
+
 import pytest
 from common.schemas.worker import MCPServerConfig, WorkerBlueprint
 from pydantic import ValidationError
+from tests.factories import worker_definition_body
 
 
-def _minimal_worker(**overrides: object) -> dict[str, object]:
-    base: dict[str, object] = {
-        "kind": "worker",
-        "name": "test-worker",
-        "version": "0.1.0",
-        "provider": "mock",
-        "model_name": "demo",
-        "system_prompt": "You are a test worker.",
-    }
-    base.update(overrides)
-    return base
+def _minimal_worker(**overrides: Any) -> dict[str, Any]:
+    return worker_definition_body(
+        version="0.1.0",
+        provider="mock",
+        model_name="demo",
+        system_prompt="You are a test worker.",
+        **overrides,
+    )
 
 
 def test_mcp_server_config_defaults_to_streamable_http():
@@ -67,3 +67,17 @@ def test_worker_blueprint_rejects_sse_tool_source():
                 ]
             )
         )
+
+
+def test_parse_worker_blueprint_round_trips_body():
+    from common.schemas.worker import parse_worker_blueprint
+
+    raw = _minimal_worker(temperature=0.3, description="note")
+    blueprint = parse_worker_blueprint(raw)
+    assert blueprint.temperature == 0.3
+    assert blueprint.description == "note"
+    dumped = blueprint.model_dump(by_alias=True, exclude_none=True)
+    assert dumped["provider"] == "mock"
+    assert dumped["temperature"] == 0.3
+    again = parse_worker_blueprint(dumped)
+    assert again.model_name == "demo"

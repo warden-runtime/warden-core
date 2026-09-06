@@ -71,6 +71,23 @@ class SagaDefinition(models.Model):
         unique_together = (("namespace", "name", "version"),)
 
 
+class StepDefinition(models.Model):
+    """Versioned reusable step capability (catalog entry; hydrated into sagas at start)."""
+
+    id = fields.UUIDField(primary_key=True, default=uuid.uuid4)
+    namespace = fields.CharField(max_length=50, default="default", db_index=True)
+    name = fields.CharField(max_length=128)
+    version = fields.CharField(max_length=50, default="0.0.1")
+    is_active = fields.BooleanField(default=True)
+    body = fields.JSONField()
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "step_definitions"
+        unique_together = (("namespace", "name", "version"),)
+
+
 class SagaStepInstance(models.Model):
     """The definition of an individual Saga step."""
 
@@ -83,6 +100,23 @@ class SagaStepInstance(models.Model):
 
     step_id = fields.CharField(max_length=128)
     step_name = fields.CharField(max_length=128)
+    step_definition_name = fields.CharField(
+        max_length=128,
+        null=True,
+        description="Catalog step name when materialized from a hydrated use: ref.",
+    )
+    step_definition_version = fields.CharField(
+        max_length=50,
+        null=True,
+        description="Catalog step version when materialized from a hydrated use: ref.",
+    )
+    input_ports = fields.JSONField(
+        default=dict,
+        description=(
+            "Frozen catalog input ports (required/description/schema) for schedule-time "
+            "validation of resolved with values."
+        ),
+    )
     order_index = fields.IntField(
         description="Display/execution index; minted with forward_seq (not a stable blueprint id across loop iterations).",
     )
@@ -158,6 +192,13 @@ class SagaStepInstance(models.Model):
             "(name under SKILLS_ROOT/<worker>/)."
         ),
     )
+    skills_definition = fields.JSONField(
+        null=True,
+        description=(
+            "Resolved skill documents (name, description, allowed_tools, body) frozen at "
+            "saga start from SKILLS_ROOT; worker load_skill uses this embed."
+        ),
+    )
     parameters_spec = fields.JSONField(
         default=dict,
         description="Step ``with`` map: argument name → {from: JSONPath} or {value: literal}.",
@@ -167,6 +208,13 @@ class SagaStepInstance(models.Model):
         description="Evaluated arguments passed to the worker after JSONPath resolution.",
     )
     prompt_ref = fields.CharField(max_length=512, null=True)
+    prompt_definition = fields.TextField(
+        null=True,
+        description=(
+            "Inlined Jinja prompt template frozen at saga start from PROMPTS_ROOT "
+            "(static includes expanded); worker renders this embed."
+        ),
+    )
     output_payload = fields.JSONField(
         null=True,
         description="STEP_COMPLETED/FAILED worker output object; business data under output.data when set.",
@@ -184,6 +232,13 @@ class SagaStepInstance(models.Model):
         description="Resolved step output JSON Schema (Draft-7 object) loaded from SCHEMAS_ROOT.",
     )
     policy_name = fields.CharField(max_length=128, null=True)
+    policy_definition = fields.JSONField(
+        null=True,
+        description=(
+            "Resolved policy artifact dict (name, version, cel) frozen at saga start "
+            "from POLICIES_ROOT; runtime gates evaluate this embed."
+        ),
+    )
     hitl_required = fields.BooleanField(default=False)
     hitl_max_retries = fields.IntField(
         null=True,
@@ -287,23 +342,15 @@ class SagaChild(models.Model):
 
 
 class WorkerDefinition(models.Model):
-    """Configuration for a specific AI Agent."""
+    """Versioned worker agent configuration (manifest stored in body)."""
 
     id = fields.UUIDField(primary_key=True, default=uuid.uuid4)
     namespace = fields.CharField(max_length=50, default="default", db_index=True)
     name = fields.CharField(max_length=128)
-    version = fields.CharField(max_length=50, default="1.0.0")
+    version = fields.CharField(max_length=50, default="0.0.1")
+    is_active = fields.BooleanField(default=True)
+    body = fields.JSONField()
 
-    # CharFields aren't great here. Enum would be better. Gotta figure out how
-    # we can populate this without restarting the container.
-    model_provider = fields.CharField(max_length=64)
-    model_name = fields.CharField(max_length=128)
-
-    system_prompt = fields.TextField()
-    tool_sources = fields.JSONField(default=list)
-    adapter = fields.CharField(max_length=32, default="langchain")
-
-    # This is good, but we'll need versioning at some point.
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 

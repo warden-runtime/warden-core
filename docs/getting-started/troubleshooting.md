@@ -63,7 +63,8 @@ Use **Stack and CLI** for the first; **Runtime** for the second. **Deploy and st
 |--------------|--------------|------------|
 | `ERROR file not found: config/…` | Wrong `-f` path | Run from repo root |
 | `… workers that are not registered …` | Saga deployed before worker | Register the worker manifest first — see [Demo: Mock LLM and MCP](demo-mock-llm-and-mcp.md#manual-cli-walkthrough) |
-| `… prompt is invalid: Prompt file not found …` | Missing template or wrong `PROMPTS_ROOT` on engine | Mount `./config/prompts`; see [Configuration](configuration.md) |
+| `… prompt is invalid: Prompt file not found …` | Missing template or wrong `PROMPTS_ROOT` on engine | Mount `./config/prompts` on the engine; see [Configuration](configuration.md) |
+| Start fails freezing prompts/skills | Engine missing `PROMPTS_ROOT` / `SKILLS_ROOT`, or empty skill body / bad include | Check engine mounts and [Prompts](../guides/manifests/prompts.md) / [MCP and tools → Skills](../guides/manifests/mcp-and-tools.md#skills-skillsallow) |
 | `SagaDefinition not found …` on start | Definition not deployed, or `(namespace, name, version)` mismatch | Redeploy; match `-n`, `-v`, and `--namespace` to manifest fields (omit `--namespace` only when manifest uses `default`) |
 
 ## Runtime (outbox and worker)

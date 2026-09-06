@@ -16,7 +16,7 @@ from workers.logic import _run_forward_command
 async def test_run_forward_command_emits_timing_after_run():
     timing_acc = WorkerTimingAccumulator()
     usage_acc = WorkerUsageAccumulator()
-    timing_acc.add_ms("hydration_ms", 1)
+    timing_acc.add_ms("worker_init_ms", 1)
     timing_acc.add_ms("setup_ms", 2)
     emitted_timing: dict | None = None
     emitted_usage: dict | None = None
@@ -64,7 +64,7 @@ async def test_run_forward_command_emits_timing_after_run():
 
     assert emitted_timing is not None
     worker = emitted_timing.get("worker") or {}
-    assert worker.get("hydration_ms") == 1
+    assert worker.get("worker_init_ms") == 1
     assert worker.get("setup_ms") == 2
     assert worker.get("llm_ms") == 2500
     assert emitted_usage is not None

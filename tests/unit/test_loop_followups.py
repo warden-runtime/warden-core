@@ -11,6 +11,7 @@ from common.models import (
     SagaInstance,
     SagaStatus,
     SagaStepInstance,
+    StepDefinition,
     StepStatus,
     WorkerDefinition,
 )
@@ -22,20 +23,15 @@ from tests.factories import create_saga_with_steps
 _WORKER = "loop-followup-worker"
 _SAGA_NAME = "loop-followup"
 _SAGA_VERSION = "1.0.0"
+_STEP_NAME = "loop-followup-attempt"
 
 
-def _reason_step(step_id: str, *, when_cel: str | None = None) -> dict:
+def _use_ref(step_id: str, *, when_cel: str | None = None) -> dict:
     step: dict = {
         "id": step_id,
-        "kind": "reason",
-        "name": step_id.title(),
-        "worker": _WORKER,
-        "worker_version": "1.0.0",
-        "agent-adapter": "simple",
+        "use": _STEP_NAME,
+        "version": "1.0.0",
         "with": {},
-        "prompt": "noop.j2",
-        "tools": {"allow": []},
-        "timeout_seconds": 600,
     }
     if when_cel is not None:
         step["when"] = {"cel": when_cel}
@@ -62,13 +58,25 @@ def _saga_body(*, max_iterations: int, until_cel: str, body_steps: list[dict]) -
 
 
 async def _seed_worker_and_saga(body: dict) -> None:
+    from tests.factories import step_definition_body, worker_definition_body
+
     await WorkerDefinition.create(
         namespace="default",
         name=_WORKER,
         version="1.0.0",
-        model_provider="openai",
-        model_name="gpt-4o",
-        system_prompt="Hi.",
+        body=worker_definition_body(name=_WORKER),
+    )
+    await StepDefinition.create(
+        namespace="default",
+        name=_STEP_NAME,
+        version="1.0.0",
+        body=step_definition_body(
+            name=_STEP_NAME,
+            worker=_WORKER,
+            prompt="noop.j2",
+            tools={"allow": []},
+            **{"agent-adapter": "simple", "timeout_seconds": 600},
+        ),
     )
     await SagaDefinition.create(
         namespace="default",
@@ -79,15 +87,14 @@ async def _seed_worker_and_saga(body: dict) -> None:
 
 
 async def _start_and_kick(trace_id: str) -> SagaStepInstance:
-    with patch("engine.logic.assert_prompt_file_exists"):
-        await process_saga_event(
-            {
-                "event_type": "SAGA_STARTED",
-                "saga_trace_id": trace_id,
-                "namespace": "default",
-                "step_span_id": None,
-            }
-        )
+    await process_saga_event(
+        {
+            "event_type": "SAGA_STARTED",
+            "saga_trace_id": trace_id,
+            "namespace": "default",
+            "step_span_id": None,
+        }
+    )
     step = (
         await SagaStepInstance.filter(
             saga_trace_id=trace_id,
@@ -104,16 +111,15 @@ async def _start_and_kick(trace_id: str) -> SagaStepInstance:
 async def _complete_step(
     trace_id: str, step: SagaStepInstance, *, data: dict | None = None
 ) -> None:
-    with patch("engine.logic.assert_prompt_file_exists"):
-        await process_saga_event(
-            {
-                "event_type": "STEP_COMPLETED",
-                "saga_trace_id": trace_id,
-                "namespace": "default",
-                "step_span_id": step.span_id,
-                "output": {"data": data or {"ok": True}},
-            }
-        )
+    await process_saga_event(
+        {
+            "event_type": "STEP_COMPLETED",
+            "saga_trace_id": trace_id,
+            "namespace": "default",
+            "step_span_id": step.span_id,
+            "output": {"data": data or {"ok": True}},
+        }
+    )
 
 
 @pytest.mark.asyncio
@@ -122,7 +128,7 @@ async def test_until_evaluation_failed_persists_loop_exhausted_status() -> None:
         _saga_body(
             max_iterations=2,
             until_cel="true",
-            body_steps=[_reason_step("attempt")],
+            body_steps=[_use_ref("attempt")],
         )
     )
     trace_id = (
@@ -204,7 +210,7 @@ async def test_loop_exhausted_when_until_stays_false() -> None:
         _saga_body(
             max_iterations=1,
             until_cel="false",
-            body_steps=[_reason_step("attempt")],
+            body_steps=[_use_ref("attempt")],
         )
     )
     trace_id = (

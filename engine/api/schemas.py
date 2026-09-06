@@ -190,6 +190,12 @@ class SagaDefinitionListResponse(BaseModel):
     )
 
 
+class DefinitionActiveUpdate(BaseModel):
+    """PATCH body to soft-enable or soft-disable a catalog definition."""
+
+    is_active: bool
+
+
 class WorkerDefinitionItem(BaseModel):
     """One row in GET /v1/definitions/workers."""
 
@@ -197,7 +203,7 @@ class WorkerDefinitionItem(BaseModel):
     namespace: str
     name: str
     version: str
-    adapter: str
+    is_active: bool
     created_at: datetime
     updated_at: datetime
     body: dict[str, Any] | None = Field(
@@ -210,6 +216,35 @@ class WorkerDefinitionListResponse(BaseModel):
     """Response for GET /v1/definitions/workers."""
 
     items: list[WorkerDefinitionItem]
+    limit: int
+    offset: int
+    has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")
+    total: int | None = Field(
+        default=None,
+        description="Total matching rows when include_total=true was requested.",
+    )
+
+
+class StepDefinitionItem(BaseModel):
+    """One row in GET /v1/definitions/steps."""
+
+    id: str = Field(..., description="Step definition UUID")
+    namespace: str
+    name: str
+    version: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    body: dict[str, Any] | None = Field(
+        default=None,
+        description="Full step manifest blueprint when include_body=true on by-id GET.",
+    )
+
+
+class StepDefinitionListResponse(BaseModel):
+    """Response for GET /v1/definitions/steps."""
+
+    items: list[StepDefinitionItem]
     limit: int
     offset: int
     has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")

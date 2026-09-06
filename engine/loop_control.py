@@ -6,7 +6,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from common.config import get_settings
 from common.error_details import build_step_error_details
 from common.loops import (
     LOOP_STATUS_EXHAUSTED,
@@ -23,7 +22,6 @@ from common.loops import (
 from common.models import SagaInstance, SagaStepInstance
 from common.utils import coerce_dict
 
-from engine.api.saga_start import resolve_executable_step_assets
 from engine.step_materialize import materialize_executable_steps
 
 if TYPE_CHECKING:
@@ -55,12 +53,6 @@ async def _mint_and_schedule(
     trace_context: dict[str, Any] | None,
     schedule_next: ScheduleNext,
 ) -> None:
-    settings = get_settings()
-    resolved = await resolve_executable_step_assets(
-        step_specs,
-        schemas_root=settings.schemas_root,
-        compensations_root=settings.compensations_root,
-    )
     max_seq = await _max_forward_seq(saga, db_conn=db_conn)
     created = await materialize_executable_steps(
         saga=saga,
@@ -68,7 +60,6 @@ async def _mint_and_schedule(
         start_forward_seq=max_seq + 1,
         start_order_index=max_seq + 1,
         conn=db_conn,
-        resolved_assets=resolved,
     )
     await schedule_next(
         saga,
@@ -259,14 +250,12 @@ async def handle_possible_loop_boundary(
     db_conn: BaseDBAsyncClient,
     trace_context: dict[str, Any] | None,
     schedule_next: ScheduleNext,
-    apply_step_failure: Any = None,
 ) -> bool:
     """If ``step`` ends a loop body, evaluate until / mint / exit.
 
     Returns True when this function took ownership of scheduling (caller must not
     call the default forward_seq advance). Returns False to use normal advance.
     """
-    del apply_step_failure
     loop_id = step.loop_id
     if not loop_id:
         return False

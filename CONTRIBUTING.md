@@ -23,6 +23,8 @@ Credential-free walkthrough after `make up`:
 ```bash
 # See docs/getting-started/demo-mock-llm-and-mcp.md
 warden deploy -f config/worker.mock-mcp.yaml
+warden deploy -f config/step.mock-greet.yaml
+warden deploy -f config/step.mock-summarize.yaml
 warden deploy -f config/saga.mock-mcp.yaml
 warden start saga -n mock-mcp-saga -v 0.1.0 --input '{"name":"Ada"}'
 ```

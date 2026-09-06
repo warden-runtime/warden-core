@@ -10,6 +10,8 @@ Warden sagas support a single-level **loop** block: a bounded do-while over nest
 
 ## Authoring
 
+Loop bodies compose catalog steps the same way top-level saga steps do — `use:` refs, not inline capability blobs:
+
 ```yaml
 steps:
   - id: refine
@@ -19,22 +21,25 @@ steps:
       cel: "steps.validate.facts.ok == true"
     steps:
       - id: attempt
-        kind: reason
-        # ...
+        use: attempt-step
+        version: "1.0.0"
+        with: {}
       - id: validate
-        kind: commit
-        # ...
+        use: validate-step
+        version: "1.0.0"
+        with: {}
 
   - id: finalize
-    kind: commit
-    # ...
+    use: finalize-step
+    version: "1.0.0"
+    with: {}
 ```
 
 Rules:
 
 - `max_iterations` is required and must be `>= 1`.
 - `until.cel` is required and compile-checked at deploy.
-- Loop bodies may contain `reason` / `commit` only (no nested loops in v1).
+- Loop bodies may contain catalog step refs only (no nested loops, spawn, or join in v1).
 - Multiple sibling loops in one saga are allowed; each has an isolated `context.loops.<id>` bucket.
 - Step ids must be unique across the whole blueprint, including every loop body.
 - `when.cel` inside a body is allowed; `SKIPPED` counts as a clean step completion and clears that step’s latest-wins `context.steps.<id>` entry for the current body pass (so `until.cel` cannot see a prior iteration’s output).

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 from common.models import (
     SagaDefinition,
     SagaInstance,
     SagaStatus,
     SagaStepInstance,
+    StepDefinition,
     StepStatus,
     WorkerDefinition,
 )
@@ -19,6 +18,8 @@ from engine.logic import process_saga_event
 _WORKER = "loop-smoke-worker"
 _SAGA_NAME = "loop-smoke"
 _SAGA_VERSION = "1.0.0"
+_ATTEMPT_STEP = "loop-smoke-attempt"
+_FINALIZE_STEP = "loop-smoke-finalize"
 
 _LOOP_SMOKE_BODY = {
     "kind": "saga",
@@ -35,58 +36,69 @@ _LOOP_SMOKE_BODY = {
             "steps": [
                 {
                     "id": "attempt",
-                    "kind": "reason",
-                    "name": "Attempt",
-                    "worker": _WORKER,
-                    "worker_version": "1.0.0",
-                    "agent-adapter": "simple",
+                    "use": _ATTEMPT_STEP,
+                    "version": "1.0.0",
                     "with": {},
-                    "prompt": "noop.j2",
-                    "tools": {"allow": []},
-                    "timeout_seconds": 600,
                 }
             ],
         },
         {
             "id": "finalize",
-            "kind": "reason",
-            "name": "Finalize",
-            "worker": _WORKER,
-            "worker_version": "1.0.0",
-            "agent-adapter": "simple",
+            "use": _FINALIZE_STEP,
+            "version": "1.0.0",
             "with": {},
-            "prompt": "noop.j2",
-            "tools": {"allow": []},
-            "timeout_seconds": 600,
         },
     ],
 }
 
 
+def _simple_step_body(name: str) -> dict:
+    from tests.factories import step_definition_body
+
+    return step_definition_body(
+        name=name,
+        worker=_WORKER,
+        prompt="noop.j2",
+        tools={"allow": []},
+        **{"agent-adapter": "simple", "timeout_seconds": 600},
+    )
+
+
 async def _complete_step(
     trace_id: str, step: SagaStepInstance, *, data: dict | None = None
 ) -> None:
-    with patch("engine.logic.assert_prompt_file_exists"):
-        await process_saga_event(
-            {
-                "event_type": "STEP_COMPLETED",
-                "saga_trace_id": trace_id,
-                "namespace": "default",
-                "step_span_id": step.span_id,
-                "output": {"data": data or {"ok": True}},
-            }
-        )
+    await process_saga_event(
+        {
+            "event_type": "STEP_COMPLETED",
+            "saga_trace_id": trace_id,
+            "namespace": "default",
+            "step_span_id": step.span_id,
+            "output": {"data": data or {"ok": True}},
+        }
+    )
 
 
 @pytest.mark.asyncio
 async def test_loop_smoke_until_true_exits_and_runs_tail() -> None:
+    from tests.factories import worker_definition_body
+
     await WorkerDefinition.create(
         namespace="default",
         name=_WORKER,
         version="1.0.0",
-        model_provider="openai",
-        model_name="gpt-4o",
-        system_prompt="Hi.",
+        body=worker_definition_body(name=_WORKER),
+    )
+    await StepDefinition.create(
+        namespace="default",
+        name=_ATTEMPT_STEP,
+        version="1.0.0",
+        body=_simple_step_body(_ATTEMPT_STEP),
+    )
+    await StepDefinition.create(
+        namespace="default",
+        name=_FINALIZE_STEP,
+        version="1.0.0",
+        body=_simple_step_body(_FINALIZE_STEP),
     )
     await SagaDefinition.create(
         namespace="default",
@@ -112,15 +124,14 @@ async def test_loop_smoke_until_true_exits_and_runs_tail() -> None:
     assert steps[0].iteration == 1
     assert steps[0].forward_seq == 0
 
-    with patch("engine.logic.assert_prompt_file_exists"):
-        await process_saga_event(
-            {
-                "event_type": "SAGA_STARTED",
-                "saga_trace_id": trace_id,
-                "namespace": "default",
-                "step_span_id": None,
-            }
-        )
+    await process_saga_event(
+        {
+            "event_type": "SAGA_STARTED",
+            "saga_trace_id": trace_id,
+            "namespace": "default",
+            "step_span_id": None,
+        }
+    )
 
     attempt = await SagaStepInstance.get(span_id=steps[0].span_id)
     assert attempt.status == StepStatus.IN_PROGRESS

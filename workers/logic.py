@@ -8,11 +8,11 @@ from types import SimpleNamespace
 from typing import Any
 
 from common.agent_adapter import StepResult
+from common.catalog_errors import CatalogError
 from common.compensation_context import (
     compensation_parameter_context,
     effective_forward_step_output,
 )
-from common.config import get_settings
 from common.contracts import (
     CommandType,
     CompensationFailedEvent,
@@ -31,7 +31,7 @@ from common.execution_usage import (
     effective_max_completion_tokens,
     effective_max_step_tokens,
 )
-from common.models import ProcessedCommand, ProviderSecret, WorkerDefinition
+from common.models import ProcessedCommand, ProviderSecret
 from common.outbox import emit_saga_event
 from common.plugins.context import ExecutionScope
 from common.plugins.registry import get_registry
@@ -41,8 +41,8 @@ from common.processed_command_claim import (
     verify_claim_before_emit,
 )
 from common.processed_command_reap import reap_stale_claim_by_key
-from common.prompts import load_prompt_content
-from common.telemetry import run_in_executor_with_log_context, trace_boundary
+from common.schemas.worker import WorkerBlueprint, parse_worker_blueprint
+from common.telemetry import trace_boundary
 from common.topics import TOPIC_ORCHESTRATOR_EVENTS
 from common.worker_ref import assert_worker_snapshot_version, require_worker_definition
 from opentelemetry.propagate import inject
@@ -71,10 +71,11 @@ def _tool_names_from_specs(tool_specs: list[dict[str, Any]] | None) -> list[str]
 
 
 @dataclass(frozen=True)
-class _HydratedExecution:
+class _PreparedExecution:
     tool_specs: list[dict[str, Any]]
     resource_specs: list[Any]
     skill_specs: list[dict[str, Any]]
+    skills_definition: list[dict[str, Any]]
     output_schema: dict[str, Any] | None
     prompt_template: str | None
     step_output: dict[str, Any] | None
@@ -88,13 +89,13 @@ class _HydratedExecution:
     tool_bind_keys: list[str]
 
 
-async def _hydrate_compensation_command(
+async def _prepare_compensation_command(
     cmd: DoCompensationCommand,
     *,
     namespace: str,
     saga_trace_id: str,
     step_span_id: str,
-) -> _HydratedExecution:
+) -> _PreparedExecution:
     comp_step = await load_forward_step(
         namespace=namespace,
         saga_trace_id=saga_trace_id,
@@ -112,16 +113,17 @@ async def _hydrate_compensation_command(
         undo_span_id=step_span_id,
         idempotency_key=cmd.idempotency_key,
     )
-    return _HydratedExecution(
+    return _PreparedExecution(
         tool_specs=merge_tool_specs(cmd.tool_specs, comp_step.tools_allow),
         resource_specs=merge_resource_specs(cmd.resource_specs, comp_step.resources_allow),
         skill_specs=[],
+        skills_definition=[],
         output_schema=None,
         prompt_template=None,
         step_output=effective_forward_step_output(forward),
         context_snapshot=context_snapshot,
         saga_vars=dict(context_snapshot),
-        # Unused on the undo path (dataclass fields shared with forward hydrate).
+        # Unused on the undo path (dataclass fields shared with forward prepare).
         max_turns=1,
         max_step_tokens=None,
         max_completion_tokens=None,
@@ -131,15 +133,22 @@ async def _hydrate_compensation_command(
     )
 
 
-async def _hydrate_do_step_prompt(cmd: DoStepCommand) -> str:
-    prompts_root = get_settings().prompts_root
-    if not prompts_root or not str(prompts_root).strip():
-        raise ValueError("prompts_root is not configured; set PROMPTS_ROOT on the worker service.")
-    return await run_in_executor_with_log_context(
-        load_prompt_content,
-        prompts_root,
-        cmd.prompt_ref,
+async def _load_do_step_prompt(cmd: DoStepCommand, step: Any) -> str:
+    """Return frozen prompt text from the step row (no live PROMPTS_ROOT read)."""
+    frozen = getattr(step, "prompt_definition", None)
+    if isinstance(frozen, str) and frozen.strip():
+        return frozen
+    raise ValueError(
+        f"Step {cmd.step_span_id} has no prompt_definition; "
+        "cannot execute reason step without a start-frozen prompt template."
     )
+
+
+def _skills_definition_from_step(step: Any) -> list[dict[str, Any]]:
+    raw = getattr(step, "skills_definition", None)
+    if not isinstance(raw, list):
+        return []
+    return [entry for entry in raw if isinstance(entry, dict)]
 
 
 def _facts_extractors_from_step(step: Any) -> list[dict[str, Any]]:
@@ -147,13 +156,13 @@ def _facts_extractors_from_step(step: Any) -> list[dict[str, Any]]:
     return [entry for entry in raw_facts if isinstance(entry, dict)]
 
 
-async def _hydrate_forward_command(
+async def _prepare_forward_command(
     cmd: DoStepCommand | DoCommitCommand,
     *,
     namespace: str,
     saga_trace_id: str,
     step_span_id: str,
-) -> _HydratedExecution:
+) -> _PreparedExecution:
     step = await load_forward_step(
         namespace=namespace,
         saga_trace_id=saga_trace_id,
@@ -161,14 +170,15 @@ async def _hydrate_forward_command(
     )
     prompt_template: str | None = None
     if isinstance(cmd, DoStepCommand):
-        prompt_template = await _hydrate_do_step_prompt(cmd)
+        prompt_template = await _load_do_step_prompt(cmd, step)
     output_schema = step.output_schema if isinstance(step.output_schema, dict) else None
     skill_wire = getattr(cmd, "skill_specs", None) if isinstance(cmd, DoStepCommand) else None
     skill_full = getattr(step, "skills_allow", None)
-    return _HydratedExecution(
+    return _PreparedExecution(
         tool_specs=merge_tool_specs(cmd.tool_specs, step.tools_allow),
         resource_specs=merge_resource_specs(cmd.resource_specs, step.resources_allow),
         skill_specs=merge_skill_specs(skill_wire, skill_full),
+        skills_definition=_skills_definition_from_step(step),
         output_schema=output_schema,
         prompt_template=prompt_template,
         step_output=None,
@@ -183,21 +193,21 @@ async def _hydrate_forward_command(
     )
 
 
-async def _hydrate_worker_command(
+async def _prepare_worker_command(
     cmd: DoStepCommand | DoCommitCommand | DoCompensationCommand,
     *,
     namespace: str,
     saga_trace_id: str,
     step_span_id: str,
-) -> _HydratedExecution:
+) -> _PreparedExecution:
     if isinstance(cmd, DoCompensationCommand):
-        return await _hydrate_compensation_command(
+        return await _prepare_compensation_command(
             cmd,
             namespace=namespace,
             saga_trace_id=saga_trace_id,
             step_span_id=step_span_id,
         )
-    return await _hydrate_forward_command(
+    return await _prepare_forward_command(
         cmd,
         namespace=namespace,
         saga_trace_id=saga_trace_id,
@@ -223,7 +233,7 @@ def _build_execution_scope(
     step_span_id: str,
     idempotency_key: str,
     command_type: Any,
-    worker_definition: WorkerDefinition,
+    worker_definition: WorkerBlueprint,
     trace_context: dict[str, Any],
 ) -> ExecutionScope:
     return ExecutionScope(
@@ -305,10 +315,10 @@ async def _claim_idempotency_key(
 async def _record_definition_snapshot(
     *,
     scope: ExecutionScope,
-    worker_definition: WorkerDefinition,
+    worker_definition: WorkerBlueprint,
     tool_names_requested: list[str],
 ) -> None:
-    """Persist worker definition snapshot after hydration (winner path only)."""
+    """Persist worker definition snapshot after command prepare (winner path only)."""
     async with in_transaction() as conn:
         await get_registry().worker.on_definition_snapshot(
             scope=scope,
@@ -368,7 +378,7 @@ async def _run_forward_command(
     *,
     run: Callable[[], Awaitable[StepResult]],
     scope: ExecutionScope,
-    worker_definition: WorkerDefinition,
+    worker_definition: WorkerBlueprint,
     idempotency_key: str,
     claim_token: uuid.UUID,
     handler_started_at: datetime,
@@ -434,8 +444,8 @@ async def _run_compensation_command(
     *,
     adapter: Any,
     cmd: DoCompensationCommand,
-    hydrated: _HydratedExecution,
-    worker_definition: WorkerDefinition,
+    prepared: _PreparedExecution,
+    worker_definition: WorkerBlueprint,
     injection_context: dict[str, Any],
     scope: ExecutionScope,
     idempotency_key: str,
@@ -450,11 +460,11 @@ async def _run_compensation_command(
     try:
         result = await adapter.run_compensation(
             original_input=cmd.original_input,
-            step_output=hydrated.step_output,
+            step_output=prepared.step_output,
             failure_reason=cmd.failure_reason,
-            context_snapshot=hydrated.context_snapshot or {},
-            tool_specs=hydrated.tool_specs,
-            resource_specs=hydrated.resource_specs,
+            context_snapshot=prepared.context_snapshot or {},
+            tool_specs=prepared.tool_specs,
+            resource_specs=prepared.resource_specs,
             context=injection_context,
             idempotency_key=cmd.idempotency_key,
         )
@@ -509,7 +519,7 @@ async def _run_compensation_command(
 async def _finalize_success(
     *,
     scope: ExecutionScope,
-    worker_definition: WorkerDefinition,
+    worker_definition: WorkerBlueprint,
     idempotency_key: str,
     claim_token: uuid.UUID,
     handler_started_at: datetime,
@@ -550,7 +560,7 @@ async def _finalize_success(
 async def _finalize_adapter_resolution_failure(
     *,
     scope: ExecutionScope,
-    worker_definition: WorkerDefinition | None,
+    worker_definition: WorkerBlueprint | None,
     idempotency_key: str,
     claim_token: uuid.UUID,
     handler_started_at: datetime,
@@ -586,6 +596,7 @@ async def _finalize_worker_config_load_failure(
     trace_context: dict[str, Any],
     claim_token: uuid.UUID,
     handler_started_at: datetime,
+    error_code: str = "worker_config_load_failed",
 ) -> None:
     """Notify engine and audit when worker definition/secret cannot be loaded."""
     result_event = (
@@ -604,7 +615,7 @@ async def _finalize_worker_config_load_failure(
         trace_context=trace_context,
     )
     detail = error[:512]
-    failure_output = {"error": detail, "code": "worker_config_load_failed"}
+    failure_output = {"error": detail, "code": error_code}
     raw = cmd.model_dump(mode="json")
     async with in_transaction() as conn:
         await get_registry().worker.on_command_rejected(
@@ -612,7 +623,7 @@ async def _finalize_worker_config_load_failure(
             reason=detail,
             conn=conn,
             raw_command=raw,
-            rejection_code="worker_config_load_failed",
+            rejection_code=error_code,
             detail=detail,
         )
         await _finalize_failure(
@@ -626,7 +637,7 @@ async def _finalize_worker_config_load_failure(
             step_span_id=cmd.step_span_id,
             event_type=result_event,
             output=failure_output,
-            error_code="worker_config_load_failed",
+            error_code=error_code,
             release_claim=True,
             conn=conn,
         )
@@ -635,7 +646,7 @@ async def _finalize_worker_config_load_failure(
 async def _finalize_failure(
     *,
     scope: ExecutionScope,
-    worker_definition: WorkerDefinition | None,
+    worker_definition: WorkerBlueprint | None,
     idempotency_key: str,
     claim_token: uuid.UUID,
     handler_started_at: datetime,
@@ -700,8 +711,8 @@ class _WorkerCommandExecution:
     cmd: DoStepCommand | DoCommitCommand | DoCompensationCommand
     command_type: CommandType
     adapter: Any
-    hydrated: _HydratedExecution
-    worker_definition: WorkerDefinition
+    prepared: _PreparedExecution
+    worker_definition: WorkerBlueprint
     injection_context: dict[str, Any]
     scope: ExecutionScope
     idempotency_key: str
@@ -764,17 +775,17 @@ async def _prepare_worker_command_execution(
     timing_acc = WorkerTimingAccumulator()
     usage_acc = WorkerUsageAccumulator()
 
-    timing_acc.start("hydrate")
+    timing_acc.start("worker_init")
     try:
-        hydrated = await _hydrate_worker_command(
+        prepared = await _prepare_worker_command(
             cmd,
             namespace=namespace,
             saga_trace_id=saga_trace_id,
             step_span_id=step_span_id,
         )
     except ValueError as e:
-        timing_acc.stop("hydrate", bucket="hydration_ms")
-        logger.error("Command hydration failed: %s", e)
+        timing_acc.stop("worker_init", bucket="worker_init_ms")
+        logger.error("Command prepare failed: %s", e)
         await _finalize_worker_config_load_failure(
             cmd=cmd,
             command_type=command_type,
@@ -784,7 +795,7 @@ async def _prepare_worker_command_execution(
             handler_started_at=handler_started_at,
         )
         return None
-    timing_acc.stop("hydrate", bucket="hydration_ms")
+    timing_acc.stop("worker_init", bucket="worker_init_ms")
 
     timing_acc.start("setup")
     try:
@@ -793,7 +804,7 @@ async def _prepare_worker_command_execution(
             expected_version=worker_version,
         )
         worker_definition, secret = await load_worker_config(worker_name, namespace, worker_version)
-    except ValueError as e:
+    except (ValueError, CatalogError) as e:
         timing_acc.stop("setup", bucket="setup_ms")
         logger.error("Worker config load failed: %s", e)
         await _finalize_worker_config_load_failure(
@@ -803,6 +814,7 @@ async def _prepare_worker_command_execution(
             trace_context=trace_context,
             claim_token=claim_token,
             handler_started_at=handler_started_at,
+            error_code=e.code if isinstance(e, CatalogError) else "worker_config_load_failed",
         )
         return None
 
@@ -820,13 +832,12 @@ async def _prepare_worker_command_execution(
         "headers": headers_to_pass,
         "execution_scope": scope,
         "worker_definition": worker_definition,
-        "resource_specs": hydrated.resource_specs,
-        "saga_vars": hydrated.saga_vars,
+        "resource_specs": prepared.resource_specs,
+        "skills_definition": prepared.skills_definition,
+        "saga_vars": prepared.saga_vars,
         "timing": timing_acc,
         "usage": usage_acc,
     }
-    if isinstance(cmd, DoStepCommand) and getattr(cmd, "prompt_ref", None):
-        injection_context["prompt_ref"] = cmd.prompt_ref
 
     try:
         adapter = resolve_adapter(
@@ -854,7 +865,7 @@ async def _prepare_worker_command_execution(
     await _record_definition_snapshot(
         scope=scope,
         worker_definition=worker_definition,
-        tool_names_requested=_tool_names_from_specs(hydrated.tool_specs),
+        tool_names_requested=_tool_names_from_specs(prepared.tool_specs),
     )
 
     logger.info(
@@ -875,7 +886,7 @@ async def _prepare_worker_command_execution(
         cmd=cmd,
         command_type=command_type,
         adapter=adapter,
-        hydrated=hydrated,
+        prepared=prepared,
         worker_definition=worker_definition,
         injection_context=injection_context,
         scope=scope,
@@ -896,7 +907,7 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
         await _run_compensation_command(
             adapter=execution.adapter,
             cmd=cmd,
-            hydrated=execution.hydrated,
+            prepared=execution.prepared,
             worker_definition=execution.worker_definition,
             injection_context=execution.injection_context,
             scope=execution.scope,
@@ -912,27 +923,27 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
         return
 
     if isinstance(cmd, DoStepCommand):
-        prompt_template = execution.hydrated.prompt_template
+        prompt_template = execution.prepared.prompt_template
         if not prompt_template:
-            raise ValueError("DO_STEP hydration did not load prompt_template")
+            raise ValueError("DO_STEP prepare did not load prompt_template")
         await _run_forward_command(
             run=lambda: execution.adapter.run_step(
                 system_prompt=execution.worker_definition.system_prompt,
                 prompt_template=prompt_template,
                 arguments=cmd.arguments,
-                tool_specs=execution.hydrated.tool_specs,
-                resource_specs=execution.hydrated.resource_specs,
-                skill_specs=execution.hydrated.skill_specs,
+                tool_specs=execution.prepared.tool_specs,
+                resource_specs=execution.prepared.resource_specs,
+                skill_specs=execution.prepared.skill_specs,
                 context=execution.injection_context,
-                output_schema=execution.hydrated.output_schema,
-                max_turns=execution.hydrated.max_turns,
-                max_step_tokens=effective_max_step_tokens(execution.hydrated.max_step_tokens),
+                output_schema=execution.prepared.output_schema,
+                max_turns=execution.prepared.max_turns,
+                max_step_tokens=effective_max_step_tokens(execution.prepared.max_step_tokens),
                 max_completion_tokens=effective_max_completion_tokens(
-                    execution.hydrated.max_completion_tokens
+                    execution.prepared.max_completion_tokens
                 ),
-                facts_extractors=execution.hydrated.facts_extractors or None,
-                agent_adapter=execution.hydrated.agent_adapter,  # type: ignore[arg-type]
-                tool_bind_keys=execution.hydrated.tool_bind_keys or None,
+                facts_extractors=execution.prepared.facts_extractors or None,
+                agent_adapter=execution.prepared.agent_adapter,  # type: ignore[arg-type]
+                tool_bind_keys=execution.prepared.tool_bind_keys or None,
             ),
             scope=execution.scope,
             worker_definition=execution.worker_definition,
@@ -954,10 +965,10 @@ async def _dispatch_worker_command_execution(execution: _WorkerCommandExecution)
         await _run_forward_command(
             run=lambda: execution.adapter.run_commit(
                 arguments=cmd.arguments,
-                tool_specs=execution.hydrated.tool_specs,
-                resource_specs=execution.hydrated.resource_specs,
+                tool_specs=execution.prepared.tool_specs,
+                resource_specs=execution.prepared.resource_specs,
                 context=execution.injection_context,
-                output_schema=execution.hydrated.output_schema,
+                output_schema=execution.prepared.output_schema,
             ),
             scope=execution.scope,
             worker_definition=execution.worker_definition,
@@ -1135,8 +1146,8 @@ async def _parse_worker_command(
 
 async def load_worker_config(
     worker_name: str, namespace: str, worker_version: str
-) -> tuple[WorkerDefinition, ProviderSecret | SimpleNamespace]:
-    """Fetch WorkerDefinition and API key for the given worker identity.
+) -> tuple[WorkerBlueprint, ProviderSecret | SimpleNamespace]:
+    """Fetch WorkerBlueprint and API key for the given worker identity.
 
     Resolves the API key from (1) ProviderSecret in the DB, or (2) the provider's
     environment variable (e.g. OPENAI_API_KEY) when no secret exists or api_key
@@ -1149,17 +1160,24 @@ async def load_worker_config(
         worker_version: Worker definition version.
 
     Returns:
-        Tuple of (WorkerDefinition, object with .api_key). The second element is
+        Tuple of (WorkerBlueprint, object with .api_key). The second element is
         either a ProviderSecret (from DB) or a SimpleNamespace(api_key=...) from env.
 
     Raises:
-        ValueError: If WorkerDefinition not found or no API key in DB or env.
+        CatalogDefinitionNotFoundError: When no matching worker row exists.
+        InactiveCatalogDefinitionError: When the worker pin is soft-disabled.
+        ValueError: If body is invalid or no API key.
     """
-    worker_definition = await require_worker_definition(
+    row = await require_worker_definition(
         namespace=namespace,
         name=worker_name,
         version=worker_version,
     )
+    try:
+        worker_definition = parse_worker_blueprint(row.body)
+    except ValidationError as exc:
+        label = f"{worker_name}@{worker_version}"
+        raise ValueError(f"WorkerDefinition {label} body is invalid: {exc}") from exc
     return worker_definition, await _resolve_provider_secret(
         namespace=namespace,
         worker_definition=worker_definition,
@@ -1169,11 +1187,11 @@ async def load_worker_config(
 async def _resolve_provider_secret(
     *,
     namespace: str,
-    worker_definition: WorkerDefinition,
+    worker_definition: WorkerBlueprint,
 ) -> ProviderSecret | SimpleNamespace:
-    provider = (worker_definition.model_provider or "").strip().lower()
+    provider = (worker_definition.provider or "").strip().lower()
     secret = await ProviderSecret.get_or_none(
-        namespace=namespace, provider=worker_definition.model_provider
+        namespace=namespace, provider=worker_definition.provider
     )
     api_key = _api_key_from_secret(secret) or _api_key_from_env(provider)
     if not api_key and provider not in ("local", "mock"):

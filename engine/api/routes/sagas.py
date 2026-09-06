@@ -3,17 +3,15 @@
 import logging
 from typing import Annotated
 
+from common.catalog_errors import CatalogError
 from common.models import SagaStatus
 from fastapi import APIRouter, HTTPException, Query
 
 from engine.api import read_queries
+from engine.api.http_errors import http_exception_for_catalog
 from engine.api.ids import validate_namespace, validate_step_span_id, validate_trace_id
 from engine.api.pagination import validated_limit_offset
-from engine.api.saga_errors import (
-    DefinitionNotFoundError,
-    InactiveSagaDefinitionError,
-    StartIdempotencyConflictError,
-)
+from engine.api.saga_errors import StartIdempotencyConflictError
 from engine.api.saga_start import start_saga
 from engine.api.schemas import (
     SagaInstanceItem,
@@ -242,7 +240,9 @@ async def post_sagas_start(body: StartSagaRequest) -> StartSagaResponse:
         StartSagaResponse with trace_id.
 
     Raises:
-        HTTPException: 404 if definition not found; 409 on idempotency conflict or inactive definition; 400 on other ValueError.
+        HTTPException: 404 if definition not found; 409 on idempotency conflict or inactive
+            catalog definition (structured ``INACTIVE_CATALOG_DEFINITION`` /
+            ``CATALOG_DEFINITION_NOT_FOUND``); 400 on other ValueError.
     """
     try:
         result = await start_saga(
@@ -253,9 +253,9 @@ async def post_sagas_start(body: StartSagaRequest) -> StartSagaResponse:
             idempotency_key=body.idempotency_key,
         )
         return StartSagaResponse(trace_id=result.trace_id, created=result.created)
-    except DefinitionNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except (StartIdempotencyConflictError, InactiveSagaDefinitionError) as e:
+    except CatalogError as e:
+        raise http_exception_for_catalog(e) from e
+    except StartIdempotencyConflictError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

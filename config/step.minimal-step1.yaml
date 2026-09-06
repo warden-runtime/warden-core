@@ -1,0 +1,17 @@
+# Minimal reason step for local CLI/API smoke tests.
+# Requires: warden deploy -f config/worker.minimal.yaml
+kind: step
+name: minimal-step1
+namespace: default
+version: "0.0.1"
+title: step1
+description: One simple reason step with empty tools.
+inputs: {}
+step_kind: reason
+agent-adapter: simple
+worker: minimal-worker
+worker_version: "1.0.0"
+prompt: noop.j2
+tools:
+  allow: []
+timeout_seconds: 300

@@ -64,16 +64,19 @@ async def test_get_definitions_saga_by_id_200(read_app):
 @pytest.mark.asyncio
 async def test_get_definitions_worker_by_id_200_with_body(read_app):
     from common.models import WorkerDefinition
+    from tests.factories import worker_definition_body
 
     row = await WorkerDefinition.create(
         namespace="default",
         name="by-id-worker",
         version="1.0.0",
-        model_provider="mock",
-        model_name="demo",
-        system_prompt="You are a test worker.",
-        tool_sources=[{"name": "mock", "transport": "stdio", "command": "python"}],
-        adapter="langchain",
+        body=worker_definition_body(
+            name="by-id-worker",
+            provider="mock",
+            model_name="demo",
+            system_prompt="You are a test worker.",
+            tool_sources=[{"name": "mock", "transport": "stdio", "command": "python"}],
+        ),
     )
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -84,9 +87,75 @@ async def test_get_definitions_worker_by_id_200_with_body(read_app):
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "by-id-worker"
+    assert data["is_active"] is True
+    assert "adapter" not in data
     assert data["body"]["kind"] == "worker"
     assert data["body"]["provider"] == "mock"
+    assert data["body"]["adapter"] == "langchain"
     assert data["body"]["system_prompt"] == "You are a test worker."
+
+
+@pytest.mark.asyncio
+async def test_patch_definitions_worker_set_inactive(read_app):
+    from common.models import WorkerDefinition
+    from tests.factories import worker_definition_body
+
+    row = await WorkerDefinition.create(
+        namespace="default",
+        name="toggle-worker",
+        version="1.0.0",
+        body=worker_definition_body(
+            name="toggle-worker",
+            provider="mock",
+            model_name="demo",
+            system_prompt="x",
+        ),
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.patch(
+            "/v1/definitions/workers",
+            params={"id": str(row.id)},
+            json={"is_active": False},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["is_active"] is False
+    await row.refresh_from_db()
+    assert row.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_patch_definitions_worker_by_triple(read_app):
+    from common.models import WorkerDefinition
+    from tests.factories import worker_definition_body
+
+    row = await WorkerDefinition.create(
+        namespace="default",
+        name="triple-worker",
+        version="2.0.0",
+        body=worker_definition_body(
+            name="triple-worker",
+            provider="mock",
+            model_name="demo",
+            system_prompt="x",
+        ),
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.patch(
+            "/v1/definitions/workers",
+            params={
+                "namespace": "default",
+                "name": "triple-worker",
+                "version": "2.0.0",
+            },
+            json={"is_active": False},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is False
+    await row.refresh_from_db()
+    assert row.is_active is False
 
 
 @pytest.mark.asyncio

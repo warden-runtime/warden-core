@@ -12,18 +12,18 @@ End-to-end example: [GitHub MCP demo](../../getting-started/demo-github-mcp.md) 
 
 ## Attaching to a saga step
 
-Add a `when` block with a `cel` string on any forward step:
+Add a `when` block with a `cel` string on any forward `use:` ref (saga-local wiring — not on the catalog step):
 
 ```yaml
   - id: post-comment
-    kind: commit
-    worker: github-demo-worker
-    worker_version: "1.0.0"
+    use: github-post-comment
+    version: "0.1.0"
     when:
       cel: "has(steps.triage.facts.triage_metrics) && steps.triage.facts.triage_metrics.total_count > 0"
-    tools:
-      allow:
-        - name: add_issue_comment
+    with:
+      owner:
+        from: $.input.owner
+      # …other ports — see config/saga.github-demo.yaml
 ```
 
 | Result | What happens |

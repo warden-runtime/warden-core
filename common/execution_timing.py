@@ -15,7 +15,7 @@ from typing import Any
 DISPATCH_PERF_ANCHOR_KEY = "_dispatch_perf_anchor"
 
 WORKER_BUCKETS: tuple[str, ...] = (
-    "hydration_ms",
+    "worker_init_ms",
     "setup_ms",
     "llm_ms",
     "tool_ms",
@@ -179,7 +179,7 @@ def merge_pending_engine(
 
 @dataclass
 class WorkerTimingAccumulator:
-    hydration_ms: int = 0
+    worker_init_ms: int = 0
     setup_ms: int = 0
     llm_ms: int = 0
     tool_ms: int = 0

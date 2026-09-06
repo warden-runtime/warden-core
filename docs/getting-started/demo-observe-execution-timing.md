@@ -32,7 +32,7 @@ warden show step <YOUR_TRACE_ID> --step-id greet --namespace default
 ```json
 {
   "worker": {
-    "hydration_ms": 5,
+    "worker_init_ms": 5,
     "setup_ms": 4
   },
   "engine": {
@@ -46,7 +46,7 @@ Mock runs often omit `llm_ms` and `tool_ms` — sub-millisecond work is dropped 
 
 | Domain | Key | What it measures |
 |--------|-----|------------------|
-| Worker | `hydration_ms` | Worker manifest load and prompt render |
+| Worker | `worker_init_ms` | Load step row + prompt template for the command |
 | Worker | `setup_ms` | Provider client init and tool binding |
 | Worker | `llm_ms` | Wall-clock on model responses (`react`: across ReAct turns; `simple`: one call) |
 | Worker | `tool_ms` | MCP tool execution |
@@ -69,7 +69,7 @@ On reason steps with live inference, the envelope grows with LLM + tool time plu
 
 :::note
 
-With `OUTBOX_WAKE_ENABLED=true` (default in `.env.example` for local compose), the Postgres outbox consumer waits on topic-scoped `LISTEN/NOTIFY` after an empty poll, with `OUTBOX_POLL_INTERVAL_S` (default 1s) as a **safety** timeout. Under load, claim latency is roughly DB RTT — not half a poll interval. When wake is off, the consumer sleeps `OUTBOX_POLL_INTERVAL_S` after every empty poll (legacy behavior).
+With `OUTBOX_WAKE_ENABLED=true` (default in `.env.example` for local compose), the Postgres outbox consumer waits on topic-scoped `LISTEN/NOTIFY` after an empty poll, with `OUTBOX_POLL_INTERVAL_S` (default 1s) as a **safety** timeout. Under load, claim latency is roughly DB RTT — not half a poll interval. When wake is off, the consumer sleeps `OUTBOX_POLL_INTERVAL_S` after every empty poll.
 
 Even on a fast mock step, `dispatch_to_ingest_ms` still counts the **whole step** — worker claim and execution, the worker writing its result to the outbox, and the engine picking that result up. With wake enabled that handoff is usually tens of milliseconds locally; with wake off, poll jitter often lands between a few hundred milliseconds and about two seconds.
 

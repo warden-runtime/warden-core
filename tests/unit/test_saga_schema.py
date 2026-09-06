@@ -3,8 +3,8 @@
 import pytest
 from common.schemas.saga import (
     CommitSagaStep,
+    HydratedSagaBlueprint,
     ReasonSagaStep,
-    SagaBlueprint,
     SagaStep,
     StepFactsExtractor,
     StepWhenSpec,
@@ -59,7 +59,7 @@ def test_commit_step_requires_one_tool() -> None:
 
 
 def test_blueprint_parses_reason_and_commit_steps() -> None:
-    bp = SagaBlueprint.model_validate(
+    bp = HydratedSagaBlueprint.model_validate(
         {
             "kind": "saga",
             "name": "mixed",
@@ -188,7 +188,7 @@ def test_reason_step_rejects_duplicate_facts_into() -> None:
 def test_blueprint_parses_loop_block() -> None:
     from common.schemas.saga import LoopSagaStep
 
-    bp = SagaBlueprint.model_validate(
+    bp = HydratedSagaBlueprint.model_validate(
         {
             "kind": "saga",
             "name": "with-loop",
@@ -232,7 +232,7 @@ def test_blueprint_parses_loop_block() -> None:
 
 def test_loop_requires_max_iterations_and_until() -> None:
     with pytest.raises(ValidationError):
-        SagaBlueprint.model_validate(
+        HydratedSagaBlueprint.model_validate(
             {
                 "kind": "saga",
                 "name": "bad",
@@ -261,7 +261,7 @@ def test_loop_requires_max_iterations_and_until() -> None:
 
 def test_loop_rejects_empty_body() -> None:
     with pytest.raises(ValidationError, match="non-empty"):
-        SagaBlueprint.model_validate(
+        HydratedSagaBlueprint.model_validate(
             {
                 "kind": "saga",
                 "name": "bad",
@@ -282,7 +282,7 @@ def test_loop_rejects_empty_body() -> None:
 
 def test_loop_rejects_duplicate_body_step_ids() -> None:
     with pytest.raises(ValidationError, match="unique"):
-        SagaBlueprint.model_validate(
+        HydratedSagaBlueprint.model_validate(
             {
                 "kind": "saga",
                 "name": "bad",

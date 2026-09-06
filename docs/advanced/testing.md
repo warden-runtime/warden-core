@@ -172,6 +172,8 @@ The autouse fixture in `conftest.py` resets the registry before and after each t
 
 Complexity limits (xenon) apply to `common/`, `engine/`, `workers/`, and `cli.py`. Refactor rather than raising thresholds when a check fails. Modules like `engine/recovery.py` may legitimately reach grade B — add branch coverage in unit tests when you extend conditional paths.
 
+Dead code: `make vulture` scans the same kernel packages (see `[tool.vulture]` in `pyproject.toml`). Protocol hook stubs are excluded; clear unused imports when it fails.
+
 We enforce strict architectural boundaries to keep the core kernel lightweight. If `make check` reports an import-boundary failure, a kernel package is probably importing an extension module directly instead of going through the plugin registry. See [Architecture → Plugin architecture](architecture.md#plugin-architecture) for how to extend without crossing that line.
 
 ## Updating API reference docs

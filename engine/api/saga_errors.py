@@ -1,5 +1,10 @@
 """Typed errors for saga start handling."""
 
+from common.catalog_errors import (
+    CatalogDefinitionNotFoundError,
+    InactiveCatalogDefinitionError,
+)
+
 
 class StartIdempotencyConflictError(Exception):
     """Raised when an idempotency key was already used for a different saga definition."""
@@ -17,25 +22,15 @@ class StartIdempotencyConflictError(Exception):
         )
 
 
-class InactiveSagaDefinitionError(Exception):
-    """Raised when start is requested against an inactive saga definition."""
+class InactiveSagaDefinitionError(InactiveCatalogDefinitionError):
+    """Raised when start/spawn targets an inactive saga definition."""
 
     def __init__(self, *, namespace: str, name: str, version: str) -> None:
-        self.namespace = namespace
-        self.name = name
-        self.version = version
-        super().__init__(
-            f"Saga definition is inactive: namespace={namespace!r}, name={name!r}, version={version!r}"
-        )
+        super().__init__(kind="saga", namespace=namespace, name=name, version=version)
 
 
-class DefinitionNotFoundError(Exception):
-    """Raised when a saga definition cannot be resolved for start."""
+class DefinitionNotFoundError(CatalogDefinitionNotFoundError):
+    """Raised when a saga definition cannot be resolved for start/spawn."""
 
     def __init__(self, *, namespace: str, name: str, version: str) -> None:
-        self.namespace = namespace
-        self.name = name
-        self.version = version
-        super().__init__(
-            f"SagaDefinition not found: namespace={namespace!r}, name={name!r}, version={version!r}"
-        )
+        super().__init__(kind="saga", namespace=namespace, name=name, version=version)

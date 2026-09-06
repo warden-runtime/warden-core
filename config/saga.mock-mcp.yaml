@@ -1,5 +1,5 @@
-# Mock MCP demo saga — two reason steps: greet, then summarize prior output (no policy/HITL).
-# Requires: warden deploy -f config/worker.mock-mcp.yaml
+# Mock MCP demo saga — compose greet then summarize from catalog steps.
+# Requires: worker.mock-mcp.yaml, step.mock-greet.yaml, step.mock-summarize.yaml
 kind: saga
 name: mock-mcp-saga
 namespace: default
@@ -7,31 +7,15 @@ version: "0.1.0"
 description: Greet by name via mock LLM and echo MCP; summarize the greeting in a second step.
 steps:
   - id: greet
-    name: greet
-    kind: reason
-    worker: mock-mcp-worker
-    worker_version: "0.1.0"
-    prompt: mock-greet.j2
+    use: mock-greet
+    version: "0.1.0"
     with:
       name:
         from: $.input.name
-    tools:
-      allow:
-        - name: echo
-    timeout_seconds: 300
-    max_turns: 5
 
   - id: summarize
-    name: summarize
-    kind: reason
-    worker: mock-mcp-worker
-    worker_version: "0.1.0"
-    prompt: mock-summarize.j2
+    use: mock-summarize
+    version: "0.1.0"
     with:
       greeting:
         from: $.steps.greet.output.data.greeting
-    tools:
-      allow:
-        - name: echo
-    timeout_seconds: 300
-    max_turns: 5

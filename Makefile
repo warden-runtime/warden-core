@@ -6,7 +6,7 @@ COMPOSE ?= docker compose
 .PHONY: help sync-dev up up-db stop down clean reset \
 	build rebuild logs ps doctor migrate migrate-compose \
 	run-engine \
-	check check-boundary lint ruff radon typecheck audit-deps audit-semgrep audit tests upgrade \
+	check check-boundary lint ruff radon vulture typecheck audit-deps audit-semgrep audit tests upgrade \
 	docs-api docs-check
 
 .DEFAULT_GOAL := help
@@ -85,9 +85,10 @@ upgrade: migrate ## Alias for migrate
 define RUN_HOST_ENV
 set -a && [ -f .env ] && . ./.env; set +a; \
 export PROMPTS_ROOT="$${PROMPTS_ROOT:-./config/prompts}"; \
+export SKILLS_ROOT="$${SKILLS_ROOT:-./config/skills}"; \
 export POLICIES_ROOT="$${POLICIES_ROOT:-./config/policies}"; \
-export SCHEMAS_ROOT="$${SCHEMAS_ROOT:-./config/schemas}";
-export COMPENSATIONS_ROOT="$${COMPENSATIONS_ROOT:-./config/compensations}";
+export SCHEMAS_ROOT="$${SCHEMAS_ROOT:-./config/schemas}"; \
+export COMPENSATIONS_ROOT="$${COMPENSATIONS_ROOT:-./config/compensations}"
 endef
 
 run-engine: ## Run engine on host (not in Compose)
@@ -106,6 +107,9 @@ ruff:
 
 radon:
 	@./scripts/check_xenon_kernel.sh
+
+vulture: ## Find unused code (kernel packages; see [tool.vulture] in pyproject.toml)
+	uv run vulture
 
 typecheck:
 	@./scripts/check_pyright.sh

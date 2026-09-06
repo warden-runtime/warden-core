@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 from common.models import (
     OutboxEvent,
@@ -80,21 +78,35 @@ async def _schedule_after(
             .first()
         )
         assert locked is not None
-        with patch("engine.logic.assert_prompt_file_exists"):
-            await _schedule_next_forward_step(locked, after_seq, db_conn=conn)
+        await _schedule_next_forward_step(locked, after_seq, db_conn=conn)
         return locked
 
 
 @pytest.mark.asyncio
 async def test_register_manifest_rejects_invalid_when_cel():
+    from tests.factories import worker_definition_body
+
     await WorkerDefinition.create(
         namespace="default",
         name="when-test-worker",
-        model_provider="openai",
-        model_name="gpt-4o",
-        system_prompt="Hi.",
+        version="1.0.0",
+        body=worker_definition_body(name="when-test-worker"),
     )
     service = RegistryService()
+    await service.register_manifest(
+        """
+kind: step
+name: when-test-step
+namespace: default
+version: "1.0.0"
+title: S1
+inputs: {}
+step_kind: reason
+worker: when-test-worker
+worker_version: "1.0.0"
+prompt: noop.j2
+"""
+    )
     bad_saga = """
 kind: saga
 name: bad-when
@@ -103,12 +115,9 @@ version: "1.0.0"
 description: Invalid when
 steps:
   - id: s1
-    kind: reason
-    name: S1
-    worker: when-test-worker
-    worker_version: "1.0.0"
+    use: when-test-step
+    version: "1.0.0"
     with: {}
-    prompt: noop.j2
     when:
       cel: "!!! not valid cel @@@"
 """

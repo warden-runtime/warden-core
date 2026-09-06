@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from unittest.mock import patch
 
 import pytest
 from common.models import (
@@ -185,15 +184,14 @@ async def test_human_retry_requeues_worker_and_preserves_context(recording_hooks
     await ProcessedIngestEvent.create(event_dedup_key=dedup_key)
     context_before = dict(saga.context or {})
 
-    with patch("engine.logic.assert_prompt_file_exists"):
-        await process_saga_event(
-            {
-                "event_type": EventType.HUMAN_RETRY.value,
-                "saga_trace_id": saga.trace_id,
-                "step_span_id": step0.span_id,
-                "namespace": saga.namespace,
-            }
-        )
+    await process_saga_event(
+        {
+            "event_type": EventType.HUMAN_RETRY.value,
+            "saga_trace_id": saga.trace_id,
+            "step_span_id": step0.span_id,
+            "namespace": saga.namespace,
+        }
+    )
 
     await saga.refresh_from_db()
     await step0.refresh_from_db()
@@ -229,16 +227,15 @@ async def test_human_retry_merges_guidance_into_worker_command(recording_hooks):
     saga.status = SagaStatus.AWAITING_HUMAN
     await saga.save()
 
-    with patch("engine.logic.assert_prompt_file_exists"):
-        await process_saga_event(
-            {
-                "event_type": EventType.HUMAN_RETRY.value,
-                "saga_trace_id": saga.trace_id,
-                "step_span_id": step.span_id,
-                "namespace": saga.namespace,
-                "retry_guidance": "override for this run",
-            }
-        )
+    await process_saga_event(
+        {
+            "event_type": EventType.HUMAN_RETRY.value,
+            "saga_trace_id": saga.trace_id,
+            "step_span_id": step.span_id,
+            "namespace": saga.namespace,
+            "retry_guidance": "override for this run",
+        }
+    )
 
     worker_events = await OutboxEvent.filter(
         destination_topic=TOPIC_WORKER_COMMANDS,

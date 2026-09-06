@@ -12,17 +12,30 @@ Reason and commit steps share that contract. On a mutating **reason** step, decl
 
 ## Declaring compensation
 
-Add a `compensation` field on the forward step. The value is a **path relative to `COMPENSATIONS_ROOT`** (alongside `PROMPTS_ROOT`, `POLICIES_ROOT`, and `SCHEMAS_ROOT`).
+Add a `compensation` field on the forward **step** definition. The value is a **path relative to `COMPENSATIONS_ROOT`** (alongside `PROMPTS_ROOT`, `POLICIES_ROOT`, and `SCHEMAS_ROOT`).
 
 With the repo defaults (`COMPENSATIONS_ROOT=./config/compensations`), a file at `config/compensations/disburse_undo.yaml` is referenced as `disburse_undo.yaml`:
 
 ```yaml
+# step catalog
+kind: step
+name: disburse
+version: "1.0.0"
+step_kind: reason
+worker: payments-worker
+worker_version: "1.0.0"
+prompt: disburse.j2
+compensation: disburse_undo.yaml
+inputs: {}
+```
+
+```yaml
+# saga composition
 steps:
   - id: disburse
-    kind: reason
-    worker: payments-worker
-    worker_version: "1.0.0"
-    compensation: disburse_undo.yaml
+    use: disburse
+    version: "1.0.0"
+    with: {}
 ```
 
 The compensation file lists the worker, bindings, and **exactly one** tool:
@@ -42,7 +55,7 @@ Supported fields: `worker`, `worker_version`, `with`, `tools` (exactly one allow
 
 `worker_version` must match a deployed worker row in the saga's namespace. The worker invokes that MCP tool once with the resolved `with` arguments — no LLM.
 
-Warden resolves and freezes the compensation definition when you deploy the saga. At saga start, that block is copied onto each forward step row. Disk changes after a saga starts don't affect **running sagas**.
+Warden validates compensation YAML when you deploy a step (and again when a saga link-checks that step). At saga **start**, the engine resolves the artifact and freezes the compensation block onto each forward step row in the instance. Disk changes after a saga starts don't affect **running sagas**.
 
 ## Which steps get undone
 
@@ -109,7 +122,7 @@ Do not schedule a second compensation child row for the same forward span. The e
 
 Compensation undo rows use the same `execution_timing` column as forward steps. Timing is stored on the **child** row (`compensates_span_id` set), not the forward row.
 
-Worker buckets: `hydration_ms`, `setup_ms`, `tool_ms`; `llm_ms` is `0`. Engine buckets: `schedule_ms` (child create + `EXECUTE_COMPENSATION` emit) and `dispatch_to_ingest_ms`. Inspect via `GET /v1/sagas/steps` or SQL filtered on `compensates_span_id IS NOT NULL` — see [Observability](../observability.md).
+Worker buckets: `worker_init_ms`, `setup_ms`, `tool_ms`; `llm_ms` is `0`. Engine buckets: `schedule_ms` (child create + `EXECUTE_COMPENSATION` emit) and `dispatch_to_ingest_ms`. Inspect via `GET /v1/sagas/steps` or SQL filtered on `compensates_span_id IS NOT NULL` — see [Observability](../observability.md).
 
 ## What's next
 

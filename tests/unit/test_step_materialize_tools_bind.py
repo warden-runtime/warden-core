@@ -27,8 +27,6 @@ def test_reason_step_materialize_writes_tools_bind() -> None:
         },
         forward_seq=0,
         order_index=0,
-        resolved_output_schema=None,
-        compensation_definition=None,
     )
     assert fields["tools_bind"] == ["container_id"]
     assert fields["tools_allow"][0]["name"] == "sandbox_exec"
@@ -49,7 +47,5 @@ def test_commit_step_materialize_tools_bind_empty() -> None:
         },
         forward_seq=1,
         order_index=1,
-        resolved_output_schema=None,
-        compensation_definition=None,
     )
     assert fields["tools_bind"] == []

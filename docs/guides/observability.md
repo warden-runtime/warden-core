@@ -138,7 +138,7 @@ Worker result events (`STEP_COMPLETED`, `STEP_FAILED`, `STEP_COMPENSATED`, `COMP
 
 | Bucket | Process | Forward step | Compensation undo row |
 |--------|---------|--------------|------------------------|
-| `hydration_ms` | Worker | Command hydrate | Same |
+| `worker_init_ms` | Worker | Command prepare (step row + prompt template) | Same |
 | `setup_ms` | Worker | Adapter + MCP bootstrap | Same |
 | `llm_ms` | Worker | **`react`:** ReAct turns; **`simple`:** single structured LLM call | `0` (undo is deterministic MCP) |
 | `tool_ms` | Worker | MCP invokes | Single `ainvoke` |

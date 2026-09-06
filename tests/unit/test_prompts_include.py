@@ -32,27 +32,52 @@ def test_resolve_input_string_templates_unchanged():
     assert resolve_input("Hello {{ name }}", {"name": "Ada"}) == "Hello Ada"
 
 
-def test_resolve_step_prompt_uses_file_loader_when_prompt_ref_set(tmp_path: Path, monkeypatch):
-    (tmp_path / "step.j2").write_text("Hi {{ who }}\n", encoding="utf-8")
+def test_resolve_step_prompt_renders_frozen_template_ignoring_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    (tmp_path / "step.j2").write_text("FROM_DISK {{ who }}\n", encoding="utf-8")
     monkeypatch.setenv("PROMPTS_ROOT", str(tmp_path))
     from common.config import get_settings
 
     get_settings.cache_clear()
     try:
         rendered = resolve_step_prompt(
-            prompt_template="ignored body",
+            prompt_template="FROZEN {{ who }}",
             template_context={"who": "Bob"},
-            context={"prompt_ref": "step.j2"},
         )
-        assert "Hi Bob" in rendered
+        assert rendered == "FROZEN Bob"
     finally:
+        monkeypatch.delenv("PROMPTS_ROOT", raising=False)
         get_settings.cache_clear()
 
 
-def test_resolve_step_prompt_falls_back_to_resolve_input_without_ref():
+def test_resolve_step_prompt_renders_template_string():
     rendered = resolve_step_prompt(
         prompt_template="Claim {{ claim_id }}",
         template_context={"claim_id": "c-1"},
-        context={},
     )
     assert rendered == "Claim c-1"
+
+
+def test_render_prompt_file_rejects_attr_escape_ssti(tmp_path: Path):
+    (tmp_path / "evil.j2").write_text(
+        "{{ ''.__class__.__mro__[1].__subclasses__() }}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unsafe|blocked"):
+        render_prompt_file(str(tmp_path), "evil.j2", {})
+
+
+def test_resolve_input_rejects_attr_escape_ssti():
+    with pytest.raises(ValueError, match="unsafe|blocked"):
+        resolve_input("{{ ''.__class__.__mro__ }}", {})
+
+
+def test_prompt_environment_strips_introspection_globals():
+    from common.prompts import make_prompt_environment
+
+    env = make_prompt_environment()
+    for key in ("cycler", "joiner", "namespace", "lipsum"):
+        assert key not in env.globals
+    # Undefined helpers render empty rather than exposing object graphs.
+    assert env.from_string("{{ cycler }}").render() == ""

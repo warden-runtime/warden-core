@@ -1,0 +1,32 @@
+# GitHub MCP demo — governed issue comment (HITL + policy at saga compose).
+# Requires: config/worker.github-demo.yaml, POLICIES_ROOT.
+kind: step
+name: github-post-comment
+namespace: default
+version: "0.1.0"
+title: Post triage comment
+description: Post a governed issue comment via GitHub MCP.
+inputs:
+  owner:
+    required: true
+  repo:
+    required: true
+  issue_number:
+    required: true
+    schema:
+      type: integer
+      minimum: 1
+  body:
+    required: true
+    schema:
+      type: string
+      minLength: 1
+step_kind: commit
+worker: github-demo-worker
+worker_version: "0.1.0"
+policy: github-issue-comment.yaml
+hitl: true
+tools:
+  allow:
+    - name: add_issue_comment
+timeout_seconds: 300
