@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-06
+
 ### Breaking
 
 - Saga authoring no longer inlines reason/commit capability blobs. Deploy `kind: step` manifests first, then compose with `use:` / `version` / `with` / `when` (workers → steps → sagas). Migration `011_step_definitions.sql` adds `step_definitions` and pins `step_definition_name` / `step_definition_version` on step instances.
@@ -75,5 +77,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Documentation and website branding for public open-core launch
 
-[Unreleased]: https://github.com/warden-runtime/warden-core/compare/v0.1.0...main
+[Unreleased]: https://github.com/warden-runtime/warden-core/compare/v0.2.0...main
+[0.2.0]: https://github.com/warden-runtime/warden-core/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/warden-runtime/warden-core/releases/tag/v0.1.0
