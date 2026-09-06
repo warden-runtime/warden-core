@@ -57,7 +57,7 @@ Rules:
 - Resolve context for `spawn.input` is the parent context plus `$.item` and `$.{item_var}`.
 - Children inherit the parent **namespace**. Deploy the child saga definition before the parent; the child must be **active** at parent deploy time.
 - Spawning an inactive or missing child definition fails the spawn step (`SPAWN_CHILD_DEFINITION_INACTIVE` / `SPAWN_CHILD_DEFINITION_NOT_FOUND`) instead of raising an unhandled exception.
-- Child start hydrate / asset freeze failures (missing schema, inactive step, invalid embed) fail the spawn step with `SPAWN_CHILD_HYDRATE_FAILED` and abort remaining child creations.
+- Child start hydrate / asset freeze failures (missing schema, inactive step, invalid embed) fail the spawn step with `SPAWN_CHILD_HYDRATE_FAILED`. Child creates run in a nested transaction (savepoint): a mid-loop failure rolls back any children already written in that spawn attempt so the parent does not commit orphans next to a failed spawn.
 - Spawn/join are **not** allowed inside loop bodies.
 - Each `join.spawn_step_id` must reference a `spawn_sagas` step; at most one join per spawn.
 

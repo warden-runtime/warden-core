@@ -231,11 +231,17 @@ async def test_execute_spawn_sagas_maps_hydrate_value_error_to_step_failed(mocke
         new_callable=AsyncMock,
         return_value=None,
     )
-    mocker.patch(
+    create = mocker.patch(
         "engine.child_sagas._create_saga_and_steps",
         new_callable=AsyncMock,
-        side_effect=ValueError("Step definition 'missing'@'1.0.0' is inactive."),
+        side_effect=[
+            "c" * 32,
+            ValueError("Step definition 'missing'@'1.0.0' is inactive."),
+        ],
     )
+    link_filter = mocker.patch("engine.child_sagas.SagaChild.filter")
+    link_filter.return_value.using_db.return_value.first = AsyncMock(return_value=None)
+    mocker.patch("engine.child_sagas.SagaChild.create", new_callable=AsyncMock)
     fail = mocker.patch("engine.logic._apply_step_failure_lifecycle", new_callable=AsyncMock)
     finalize = mocker.patch(
         "engine.logic._finalize_step_output_and_advance", new_callable=AsyncMock
@@ -243,8 +249,65 @@ async def test_execute_spawn_sagas_maps_hydrate_value_error_to_step_failed(mocke
 
     await execute_spawn_sagas(saga=saga, step=step, db_conn=object())
 
+    assert create.await_count == 2
     fail.assert_awaited_once()
     finalize.assert_not_awaited()
     synthetic = fail.await_args.args[2]
     assert synthetic.error_details["code"] == "SPAWN_CHILD_HYDRATE_FAILED"
     assert "inactive" in synthetic.error_details["message"]
+
+
+@pytest.mark.asyncio
+async def test_execute_spawn_sagas_uses_nested_transaction_for_child_creates(mocker):
+    """Mid-loop failures must run under a nested txn so partial children roll back."""
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from engine.child_sagas import execute_spawn_sagas
+
+    data = _parent_blueprint(items_from="$.input.items")
+    saga = SimpleNamespace(
+        trace_id="a" * 32,
+        namespace="default",
+        context={"input": {"items": [{"id": "one"}, {"id": "two"}]}},
+        frozen_steps=data["steps"],
+    )
+    step = SimpleNamespace(step_id="dispatch", span_id="b" * 16)
+    outer_conn = object()
+    spawn_conn = object()
+    entered = {"nested": False}
+
+    @asynccontextmanager
+    async def _fake_txn():
+        entered["nested"] = True
+        yield spawn_conn
+
+    mocker.patch("engine.child_sagas.in_transaction", _fake_txn)
+    mocker.patch(
+        "engine.child_sagas._require_saga_definition",
+        new_callable=AsyncMock,
+        return_value=SimpleNamespace(id="def-1"),
+    )
+    mocker.patch(
+        "engine.child_sagas._resolve_idempotent_start",
+        new_callable=AsyncMock,
+        return_value=None,
+    )
+    create = mocker.patch(
+        "engine.child_sagas._create_saga_and_steps",
+        new_callable=AsyncMock,
+        side_effect=ValueError("hydrate failed on second item"),
+    )
+    link_filter = mocker.patch("engine.child_sagas.SagaChild.filter")
+    link_filter.return_value.using_db.return_value.first = AsyncMock(return_value=None)
+    mocker.patch("engine.child_sagas.SagaChild.create", new_callable=AsyncMock)
+    fail = mocker.patch("engine.logic._apply_step_failure_lifecycle", new_callable=AsyncMock)
+
+    await execute_spawn_sagas(saga=saga, step=step, db_conn=outer_conn)
+
+    assert entered["nested"] is True
+    create.assert_awaited_once()
+    assert create.await_args.kwargs["conn"] is spawn_conn
+    fail.assert_awaited_once()
+    assert fail.await_args.args[3] is outer_conn

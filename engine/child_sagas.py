@@ -33,6 +33,7 @@ from common.models import (
 from common.schemas.saga import JoinSagasStep, SpawnSagasStep, SpawnSpec
 from common.step_output import wrap_step_output_data
 from common.utils import status_value
+from tortoise.transactions import in_transaction
 
 from engine.api.saga_start import (
     _create_saga_and_steps,
@@ -182,7 +183,13 @@ async def execute_spawn_sagas(
     db_conn: BaseDBAsyncClient,
     trace_context: dict[str, Any] | None = None,
 ) -> None:
-    """Create child sagas for each item and complete the spawn step."""
+    """Create child sagas for each item and complete the spawn step.
+
+    Child creates run in a nested transaction (savepoint). Hydrate / catalog
+    failures after some children were written roll that savepoint back before the
+    spawn step is marked failed on ``db_conn``, so the outer schedule transaction
+    never commits orphan children alongside a failed spawn.
+    """
     from engine.logic import _finalize_step_output_and_advance
 
     try:
@@ -203,17 +210,20 @@ async def execute_spawn_sagas(
 
     children_out: list[dict[str, str]] = []
     try:
-        for item_id, item in validated:
-            children_out.append(
-                await _spawn_one_child(
-                    saga=saga,
-                    step=step,
-                    spec=spec,
-                    item_id=item_id,
-                    item=item,
-                    db_conn=db_conn,
+        # Nested txn → SAVEPOINT when the caller already holds ``db_conn`` in a
+        # transaction (schedule / ingest). Rollback on error drops partial children.
+        async with in_transaction() as spawn_conn:
+            for item_id, item in validated:
+                children_out.append(
+                    await _spawn_one_child(
+                        saga=saga,
+                        step=step,
+                        spec=spec,
+                        item_id=item_id,
+                        item=item,
+                        db_conn=spawn_conn,
+                    )
                 )
-            )
     except InactiveCatalogDefinitionError as exc:
         await _fail_spawn_step(
             saga=saga,
