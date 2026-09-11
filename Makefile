@@ -3,11 +3,12 @@
 
 COMPOSE ?= docker compose
 
-.PHONY: help sync-dev up up-db stop down clean reset \
+.PHONY: help sync-dev up up-db stop clean reset \
 	build rebuild logs ps doctor migrate migrate-compose \
 	run-engine \
-	check check-boundary lint ruff radon vulture typecheck audit-deps audit-semgrep audit tests upgrade \
-	docs-api docs-check
+	test-mcp \
+	check check-boundary check-docs lint ruff radon vulture typecheck audit-deps audit-semgrep audit tests \
+	gen-docs-api
 
 .DEFAULT_GOAL := help
 
@@ -22,8 +23,13 @@ help: ## Show local deploy targets (default)
 
 # --- Dependencies ---
 
-sync-dev: ## Install uv deps (dev + engine + worker + cli extras)
-	uv sync --extra dev --extra engine --extra worker --extra cli
+sync-dev: ## Install all workspace packages (warden + warden-mcp) and extras into root .venv
+	uv sync --all-packages --all-extras
+
+# --- Control-plane MCP (nested package under mcp/; HTTP-only → ENGINE_URL) ---
+
+test-mcp: ## Run warden-mcp unit tests (unified root .venv)
+	uv run --package warden-mcp pytest mcp/tests
 
 # --- Compose stack (migrate one-shot runs before engine/worker via depends_on) ---
 
@@ -35,8 +41,6 @@ up-db: ## Start Postgres only (then: make migrate-compose or make migrate on hos
 
 stop: ## Stop containers; keep Postgres volume (engine_db_data)
 	@$(COMPOSE) down --remove-orphans
-
-down: stop ## Alias for stop
 
 clean: ## Stop containers and delete Postgres volume (empty DB on next up)
 	@$(COMPOSE) down --volumes --remove-orphans
@@ -78,8 +82,6 @@ migrate: ## Apply migrations from host (DB_URL@127.0.0.1:5432; use when DB up, s
 migrate-compose: ## Run migrate container once (DB must be up; alternative to make migrate)
 	@$(COMPOSE) up migrate --abort-on-container-exit
 
-upgrade: migrate ## Alias for migrate
-
 # --- Host processes (auto-load .env; default manifest roots when unset) ---
 
 define RUN_HOST_ENV
@@ -96,7 +98,7 @@ run-engine: ## Run engine on host (not in Compose)
 
 # --- Quality ---
 
-LINT_PATHS = common engine workers cli.py tests
+LINT_PATHS = common engine workers cli.py tests mcp/src mcp/tests
 SEMGREP_PATHS = common engine workers cli.py
 SEMGREP_CACHE ?= .semgrep-cache
 SEMGREP_ENV = XDG_CONFIG_HOME=$(CURDIR)/$(SEMGREP_CACHE) XDG_CACHE_HOME=$(CURDIR)/$(SEMGREP_CACHE)
@@ -119,7 +121,7 @@ lint: ruff radon typecheck
 check-boundary:
 	@./scripts/check_open_core_boundary.sh
 
-check: lint check-boundary docs-check
+check: lint check-boundary check-docs
 
 PIP_AUDIT_CACHE ?= .pip-audit-cache
 
@@ -134,11 +136,11 @@ audit-semgrep:
 
 audit: audit-deps audit-semgrep
 
-docs-api: ## Export OpenAPI JSON and generate docs/api reference MDX (requires website npm install)
+gen-docs-api: ## Export OpenAPI JSON and generate docs/api reference MDX (requires website npm install)
 	uv run --extra engine python scripts/export_openapi.py
 	cd website && npm run gen-api-docs -- engine
 
-docs-check: ## Verify docs deploy gates (OpenAPI drift + Docusaurus build)
+check-docs: ## Verify docs deploy gates (OpenAPI drift + Docusaurus build)
 	uv run --extra engine python scripts/export_openapi.py --check
 	cd website && npm ci && npm run build
 

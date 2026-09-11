@@ -62,6 +62,6 @@ website/node_modules/
 website/.docusaurus/
 website/build/
 
-# Generated OpenAPI reference MDX (run `make docs-api`)
+# Generated OpenAPI reference MDX (run `make gen-docs-api`)
 docs/api/
 .aider*

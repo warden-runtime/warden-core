@@ -83,7 +83,7 @@ concat_files \
   echo ""
   echo "# API Reference — route index"
   echo ""
-  echo "Auto-generated from \`website/openapi/engine.openapi.json\`. Regenerate with \`make docs-api\`."
+  echo "Auto-generated from \`website/openapi/engine.openapi.json\`. Regenerate with \`make gen-docs-api\`."
   echo ""
   echo "| Method | Path | Tag | Summary |"
   echo "|--------|------|-----|---------|"

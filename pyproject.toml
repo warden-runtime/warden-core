@@ -76,6 +76,10 @@ include = ["common*", "engine*", "workers*"]
 [tool.setuptools]
 py-modules = ["cli"]
 
+# Nested control-plane MCP adapter (separate package; HTTP-only → ENGINE_URL).
+[tool.uv.workspace]
+members = ["mcp"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
@@ -85,6 +89,8 @@ src = [
     "workers",
     "cli.py",
     "tests",
+    "mcp/src",
+    "mcp/tests",
 ]
 
 [tool.ruff.lint]

@@ -19,24 +19,25 @@ Engine, worker, and Postgres share one coordination model: **Postgres is the mes
 
 The execution loop flows in a continuous, database-backed cycle:
 
-1. **Control** — The CLI drives and monitors the workflow lifecycle over HTTP to the engine.
+1. **Control** — Operators and integrators drive the workflow lifecycle over HTTP to the engine (host `warden` CLI, the in-repo control-plane MCP adapter `warden-mcp`, or any HTTP client).
 2. **Stage** — The engine advances the saga FSM and commits both the new state and a `worker-commands` outbox row in the *same atomic transaction*.
 3. **Execute** — Workers poll the outbox, claim `worker-commands` rows, and run LLM or MCP reasoning loops.
 4. **Advance** — The worker writes an `engine-events` row (e.g. `STEP_COMPLETED`). The engine consumer ingests it and loops back to step 2 to schedule the next phase.
 
 ```text
-  [ warden CLI ]
-        │
-      HTTP
-        ▼
-   [ Engine ] ◄─────── polls: engine-events ───────┐
-        │                                          │
- writes: worker-commands                           ▼
-        │                                     [ Postgres ]
-        ▼                                   (outbox_events)
-   [ Worker ] ◄──── polls: worker-commands ────────│
-        │                                          │
-        └─────────── writes: engine-events ────────┘
+  [ warden CLI ]  [ warden-mcp ]  [ other HTTP clients ]
+        │                │                  │
+        └────── HTTP ────┴──────── HTTP ────┘
+                         │
+                         ▼
+                    [ Engine ] ◄─────── polls: engine-events ───────┐
+                         │                                          │
+              writes: worker-commands                               ▼
+                         │                                     [ Postgres ]
+                         ▼                                   (outbox_events)
+                    [ Worker ] ◄──── polls: worker-commands ────────│
+                         │                                          │
+                         └─────────── writes: engine-events ────────┘
 ```
 
 Here is how responsibilities split across your infrastructure:
@@ -44,6 +45,7 @@ Here is how responsibilities split across your infrastructure:
 - **Engine** — The brain. Manages the saga FSM, exposes the public HTTP API (start saga, human-in-the-loop review, operator recovery), evaluates CEL policy gates, and commits worker commands to the outbox in the same transaction as saga state updates.
 - **Worker** — The muscle. Polls for commands, runs reason and commit steps (LLM agent loops and MCP tool calls), and reports results back through the outbox — never by writing directly into engine-owned saga rows.
 - **Postgres** — The single source of truth. Stores manifest definitions, saga and step state, `outbox_events`, and idempotency guards (`processed_commands`, `processed_ingest_events`).
+- **Control-plane clients** — The host `warden` CLI and the nested `mcp/` package (`warden-mcp`) speak only HTTP to `ENGINE_URL`. They do not share a process, database connection, or Python imports with the engine. Worker-side MCP (`tool_sources` on a worker manifest) is a different path: those servers are tools the **worker** calls during a step, not the control plane.
 
 | Process | Role | Outbox topic consumed |
 |---------|------|------------------------|
@@ -56,7 +58,7 @@ The engine and worker do not depend on extension packages at import time. Option
 :::info[Deployment network topology]
 Both the engine and worker are **outbound clients to Postgres**. The engine exposes HTTP for operators and integrators (`POST /v1/sagas/start`, human-in-the-loop review, recovery, deploy). Workers **do not** receive push commands from the engine over HTTP — they poll `outbox_events` for `worker-commands` rows. Step results flow the same way in reverse: the worker writes `STEP_COMPLETED` / `STEP_FAILED` rows to the `engine-events` topic, and the engine's outbox consumer ingests them.
 
-For firewall planning: allow engine → Postgres, worker → Postgres, and clients → engine HTTP. You do **not** need a network path between the engine and worker zones—they only meet in Postgres.
+For firewall planning: allow engine → Postgres, worker → Postgres, and control-plane clients → engine HTTP (CLI, `warden-mcp`, curl, or your own integrator). You do **not** need a network path between the engine and worker zones—they only meet in Postgres.
 :::
 
 ### Namespaces and tenancy
@@ -70,8 +72,10 @@ Warden isolates customer or environment data with a logical **`namespace`** colu
 | `common/` | Models, contracts, transactional outbox, CEL policy gate, plugin registry |
 | `engine/` | Saga FSM, API routes, human-in-the-loop gate |
 | `workers/` | Command handling, LLM/MCP adapters, tool governance, in-process claim reap |
+| `cli.py` | Host CLI over engine HTTP |
+| `mcp/` | Separate package (`warden-mcp`): control-plane MCP adapter over engine HTTP (not imported by the kernel) |
 
-Kernel code (`common/`, `engine/`, `workers/`, `cli.py`) runs its own logic first, then calls registry hooks for optional side effects. How to implement those hooks: [Extending Warden](extending-warden.md).
+Kernel code (`common/`, `engine/`, `workers/`, `cli.py`) runs its own logic first, then calls registry hooks for optional side effects. How to implement those hooks: [Extending Warden](extending-warden.md). The control-plane MCP adapter stays an HTTP client — see in-repo `mcp/README.md` and [Testing](testing.md).
 
 ## Plugin architecture
 
@@ -182,7 +186,7 @@ If a worker drops offline mid-step, claim reap may redeliver. Commit steps and M
 
 ## What's next
 
-You now have the runtime map: engine, worker, Postgres, outbox, registry. When you extend Warden — a new LLM provider, agent adapter, or lifecycle hook — you plug into the slots above without changing the FSM core. [Extending Warden](extending-warden.md) is the hands-on guide; [Testing](testing.md) shows where to add coverage for kernel changes.
+You now have the runtime map: engine, worker, Postgres, outbox, registry, and HTTP control-plane clients. When you extend Warden — a new LLM provider, agent adapter, or lifecycle hook — you plug into the slots above without changing the FSM core. [Extending Warden](extending-warden.md) is the hands-on guide; [Testing](testing.md) shows where to add coverage for kernel changes.
 
 ## Related
 

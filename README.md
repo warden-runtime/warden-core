@@ -65,6 +65,29 @@ make up          # Postgres + migrate + engine + worker (+ Jaeger, Adminer)
 
 MCP demos that spawn Docker stdio servers (e.g. GitHub MCP) use the Compose `worker` service with the host Docker socket mounted—the same `make up` path.
 
+### Control-plane MCP
+
+The repo includes a nested **HTTP-only** MCP adapter under [`mcp/`](mcp/) (package `warden-mcp`). It talks to the engine at `ENGINE_URL` and must not import `common` / `engine` / `workers`. See [`mcp/README.md`](mcp/README.md).
+
+```bash
+make sync-dev
+make test-mcp
+```
+
+Cursor (point `--directory` at this checkout’s `mcp/` folder):
+
+```json
+{
+  "mcpServers": {
+    "warden": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/warden-core/mcp", "warden-mcp"],
+      "env": { "ENGINE_URL": "http://127.0.0.1:8000" }
+    }
+  }
+}
+```
+
 ---
 
 ## Core architecture

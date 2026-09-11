@@ -24,7 +24,7 @@ Engine and worker run in containers; you run `warden` on the host.
 |---------|------------|------------------------------|
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | `.env` — read by Compose `postgres` service | same values bootstrap the DB on first volume init |
 | `DB_URL` | `postgres://...@127.0.0.1:5432/engine_db` (host CLI, `make migrate`) | Built by Compose → `...@postgres:5432/...` (**engine + worker**) |
-| `ENGINE_URL` | `http://127.0.0.1:8000` (**CLI only**) | not set — engine/worker use Postgres, not HTTP to each other |
+| `ENGINE_URL` | `http://127.0.0.1:8000` (**host CLI + control-plane MCP**) | not set — engine/worker use Postgres, not HTTP to each other |
 | `PROMPTS_ROOT` | **Leave unset** in `.env` | `/app/prompts` (engine; set in `docker-compose.yml`) |
 | `SKILLS_ROOT` | **Leave unset** in `.env` | `/app/skills` (engine) |
 | `POLICIES_ROOT` | **Leave unset** in `.env` | `/app/policies` |
@@ -62,7 +62,7 @@ Same host `DB_URL`, in-compose `postgres:5432`, and container `*_ROOT` paths as 
 | `POLICIES_ROOT` | leave unset in `.env` | `/app/policies` |
 | `SCHEMAS_ROOT` | leave unset in `.env` | `/app/schemas` |
 | `COMPENSATIONS_ROOT` | leave unset in `.env` | `/app/compensations` |
-| `ENGINE_URL` | `http://127.0.0.1:8000` (CLI only) | not set |
+| `ENGINE_URL` | `http://127.0.0.1:8000` (host CLI + control-plane MCP) | not set |
 
 ### Database (Compose)
 
@@ -100,7 +100,7 @@ When you use `make up`, Postgres data persists in the Docker named volume `engin
 |--------|--------|
 | `make up` | Start dev compose (db, migrate, engine, worker, jaeger, adminer) |
 | `make up-db` | Postgres only |
-| `make stop` / `make down` | Stop containers; keep `engine_db_data` |
+| `make stop` | Stop containers; keep `engine_db_data` |
 | `make clean` | Stop and delete `engine_db_data` |
 | `make reset` | `make clean` then `make up` |
 | `make migrate` | Apply migrations from the host (`DB_URL` → `127.0.0.1:5432`) |
@@ -123,7 +123,7 @@ You normally do not run `make migrate` for a first boot — the one-shot **migra
 |----------|----------|-------|
 | `DB_URL` | **engine**, **worker**, migrations | **Both engine and worker** need Postgres for the outbox loop. Host: `127.0.0.1:5432`. Compose containers: built from `POSTGRES_*` → `postgres:5432` |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | `postgres` service (Compose) | Must match credentials in host `DB_URL` |
-| `ENGINE_URL` | **host CLI only** | `http://127.0.0.1:8000` from your machine (published port). Engine and worker containers do **not** use this variable—they coordinate through Postgres. If you run the CLI inside the Compose network, use `http://engine:8000` instead of loopback |
+| `ENGINE_URL` | **host CLI**, **control-plane MCP** (`warden-mcp`) | `http://127.0.0.1:8000` from your machine (published port). Engine and worker containers do **not** use this variable—they coordinate through Postgres. If you run the CLI or MCP adapter inside the Compose network, use `http://engine:8000` instead of loopback. Optional MCP-only overrides: `WARDEN_MCP_ENGINE_URL`, `WARDEN_MCP_TRANSPORT`, `WARDEN_MCP_HOST`, `WARDEN_MCP_PORT` (see in-repo `mcp/README.md`) |
 | `ENGINE_API_HOST` | **engine** | Defaults to `127.0.0.1` when running the engine on the host. Docker Compose sets `0.0.0.0` so published port `8000` is reachable |
 | `ENGINE_OPENAPI_ENABLED` | **engine** | When `false`, disables `/docs` OpenAPI UI (default `true`) |
 | `MANIFEST_MAX_BODY_BYTES` | **engine** | Max `POST /v1/manifests` body size (default 2 MiB) |
@@ -154,7 +154,7 @@ COMPANY_MCP_TOKEN=your-bearer-token
 
 See [MCP and tools → Hosted MCP authentication](../guides/manifests/mcp-and-tools.md#hosted-mcp-authentication-streamable-http) and [Worker manifests](../guides/manifests/worker-manifests.md#mcp-tool-sources).
 
-A minimal `.env` for Compose + host CLI:
+A minimal `.env` for Compose + host CLI / control-plane MCP:
 
 ```bash
 POSTGRES_DB=engine_db
