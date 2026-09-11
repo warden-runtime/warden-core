@@ -30,7 +30,7 @@ make doctor
 | Added LLM or MCP credentials to `.env` but steps still fail with missing key / connection errors | Restart the **worker** (`docker compose up -d worker`) — not the engine. Compose injects `.env` at container start. Retry the failed step or start a new saga. |
 | Local Ollama works on the host (`curl localhost:11434`) but worker steps fail with connection errors | Ollama may bind only `127.0.0.1`, or `host.docker.internal` may not resolve in the worker container on Linux — [Configuration → Local LLM under Docker (Ollama)](configuration.md#local-llm-under-docker-ollama) |
 | Stale schema or bad credentials after editing `.env` | `make reset` (wipes `engine_db_data` and runs `make up`) — only when you can lose local DB state |
-| Stop stack, keep data | `make down` |
+| Stop stack, keep data | `make stop` |
 | Wipe data without full restart sequence | `make clean`, then `make up` |
 | Minimal template, migration failed | `docker compose -f docker-compose.example.yml logs migrate` |
 

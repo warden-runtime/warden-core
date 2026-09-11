@@ -30,8 +30,16 @@ check_grep "audit routes/CLI in kernel" \
   'audit_app|/v1/audit-events' \
   cli.py "${KERNEL_PATHS[@]}"
 
+# warden-mcp is an HTTP client of the engine — never import kernel packages.
+if git grep -nE \
+  '^[[:space:]]*(from (common|engine|workers|cli)(\.|[[:space:]])|import (common|engine|workers|cli)(\.|[[:space:]]|$))' \
+  -- mcp/src mcp/tests 2>/dev/null; then
+  echo "FAIL: warden_mcp imported kernel packages (common/engine/workers/cli)" >&2
+  FAIL=1
+fi
+
 if [[ "$FAIL" -ne 0 ]]; then
   exit 1
 fi
 
-echo "OK: kernel import gate clean (${KERNEL_PATHS[*]})"
+echo "OK: kernel import gate clean (${KERNEL_PATHS[*]}); warden-mcp has no kernel imports"

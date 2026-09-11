@@ -29,6 +29,12 @@ make sync-dev
 make tests
 ```
 
+**Control-plane MCP adapter** (`mcp/`, package `warden-mcp`) — same root `.venv` after `make sync-dev`:
+
+```bash
+make test-mcp
+```
+
 **Quick pass** — same tests, no coverage report:
 
 ```bash
@@ -112,6 +118,7 @@ To keep local development fast without sacrificing production reliability, tests
 | `tests/unit/` | One module or a small interaction; fast, heavy use of mocks |
 | `tests/integration/` | Engine and worker agree on outbox dispatch and saga transitions |
 | `tests/postgres/` | Postgres-specific SQL, row locking, migration backfill |
+| `mcp/tests/unit/` | Control-plane MCP adapter (`warden-mcp`); HTTP client mocks, no engine process |
 | `tests/conftest.py` | Shared fixtures: asyncio backend, in-memory DB, registry reset |
 | `tests/fixtures/` | Prompt templates for saga and worker hydration tests |
 | `tests/factories.py` | Helpers to build model instances and payloads |
@@ -183,7 +190,7 @@ When you modify API routes or request schemas, the OpenAPI specification needs t
 Regenerate and preview locally:
 
 ```bash
-make docs-api
+make gen-docs-api
 cd website && npm run build
 ```
 

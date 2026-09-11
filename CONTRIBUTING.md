@@ -1,6 +1,6 @@
 # Contributing to Warden
 
-Thank you for helping improve Warden. This repository is the **open-core kernel** — saga engine, workers, CLI, manifests, and docs.
+Thank you for helping improve Warden. This repository is the **open-core kernel** — saga engine, workers, CLI, manifests, docs, and the nested control-plane MCP adapter under [`mcp/`](mcp/).
 
 ## Before you start
 
@@ -32,7 +32,7 @@ warden start saga -n mock-mcp-saga -v 0.1.0 --input '{"name":"Ada"}'
 Docs site locally:
 
 ```bash
-make docs-api          # after API changes
+make gen-docs-api      # after API changes
 cd website && npm install && npm start
 ```
 
@@ -43,8 +43,9 @@ Full testing and lint detail: **[Testing](docs/advanced/testing.md)**.
 Before opening a PR, run:
 
 ```bash
-make check    # ruff, xenon, typecheck, open-core import boundary
-make tests    # pytest with coverage (Docker for Postgres slice)
+make check     # ruff (kernel + mcp/), xenon, typecheck, open-core import boundary
+make tests     # pytest with coverage (Docker for Postgres slice)
+make test-mcp  # warden-mcp unit tests (same root .venv as sync-dev)
 ```
 
 For doc-only changes that touch the site:
@@ -73,6 +74,15 @@ The kernel (`common/`, `engine/`, `workers/`, `cli.py`) **must not import** `ent
 | New optional side effect | Protocol + NoOp in `common/plugins/`, call site in kernel, observer in plugin |
 
 OSS tests use the default NoOp registry. Enterprise plugin tests live in the separate **warden-enterprise** repository.
+
+### Control-plane MCP (`mcp/`)
+
+[`mcp/`](mcp/) is a **separate** Python package (`warden-mcp`) in this repo. It must remain an HTTP client of the engine:
+
+- Do **not** import `common`, `engine`, `workers`, or `cli` from `warden_mcp`.
+- Engine behavior changes go in `engine/api` first; MCP only wraps HTTP.
+- `make sync-dev` installs `warden` and `warden-mcp` into the root `.venv` (`uv sync --all-packages --all-extras`). Do not `uv sync --directory mcp` — that prunes kernel packages.
+- `make test-mcp` (also run in CI) exercises the adapter. `make check` lints `mcp/` and rejects kernel imports from `warden_mcp`.
 
 ### Documentation
 
