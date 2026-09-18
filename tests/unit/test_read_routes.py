@@ -34,16 +34,18 @@ async def test_get_definitions_saga_by_id_404(read_app):
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
-            "/v1/definitions/sagas/00000000-0000-4000-8000-000000000001",
+            "/v1/definitions/sagas",
+            params={"id": "00000000-0000-4000-8000-000000000001"},
         )
     assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "CATALOG_DEFINITION_NOT_FOUND"
 
 
 @pytest.mark.asyncio
 async def test_get_definitions_saga_by_id_404_invalid_uuid(read_app):
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/v1/definitions/sagas/not-a-uuid")
+        resp = await client.get("/v1/definitions/sagas", params={"id": "not-a-uuid"})
     assert resp.status_code == 422
 
 
@@ -58,7 +60,7 @@ async def test_get_definitions_saga_by_id_200(read_app):
     )
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(f"/v1/definitions/sagas/{row.id}")
+        resp = await client.get("/v1/definitions/sagas", params={"id": str(row.id)})
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "by-id"
@@ -86,8 +88,8 @@ async def test_get_definitions_worker_by_id_200_with_body(read_app):
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
-            f"/v1/definitions/workers/{row.id}",
-            params={"include_body": "true"},
+            "/v1/definitions/workers",
+            params={"id": str(row.id), "include_body": "true"},
         )
     assert resp.status_code == 200
     data = resp.json()
@@ -412,7 +414,7 @@ async def test_pending_review_not_shadowed_by_trace_id_path(read_app):
 
 
 @pytest.mark.asyncio
-async def test_get_saga_steps_by_path_matches_query_form(read_app):
+async def test_get_saga_steps_by_path(read_app):
     trace_id = "c" * 32
     saga = await SagaInstance.create(
         trace_id=trace_id,
@@ -439,12 +441,13 @@ async def test_get_saga_steps_by_path_matches_query_form(read_app):
     )
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        query_resp = await client.get("/v1/sagas/steps", params={"trace_id": trace_id})
-        path_resp = await client.get(f"/v1/sagas/{trace_id}/steps")
-    assert query_resp.status_code == 200
-    assert path_resp.status_code == 200
-    assert path_resp.json()["items"] == query_resp.json()["items"]
-    assert path_resp.json()["limit"] == query_resp.json()["limit"]
+        resp = await client.get(f"/v1/sagas/{trace_id}/steps")
+        # Literal /steps is not a collection route; treated as invalid trace_id.
+        literal = await client.get("/v1/sagas/steps")
+    assert resp.status_code == 200
+    assert len(resp.json()["items"]) == 1
+    assert resp.json()["items"][0]["step_id"] == "only"
+    assert literal.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -491,7 +494,7 @@ async def test_get_saga_steps_ordered(read_app):
     )
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/v1/sagas/steps", params={"trace_id": trace_id})
+        resp = await client.get(f"/v1/sagas/{trace_id}/steps")
     assert resp.status_code == 200
     items = resp.json()["items"]
     assert [it["step_id"] for it in items] == ["first", "second"]
@@ -502,12 +505,10 @@ async def test_get_saga_steps_ordered(read_app):
 async def test_get_saga_steps_not_found(read_app):
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/v1/sagas/steps", params={"trace_id": "f" * 32})
+        resp = await client.get(f"/v1/sagas/{'f' * 32}/steps")
     assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "SAGA_INSTANCE_NOT_FOUND"
 
-
-@pytest.mark.asyncio
-async def test_get_saga_steps_status_filter(read_app):
     trace_id = "0" * 32
     saga = await SagaInstance.create(
         trace_id=trace_id,
@@ -549,8 +550,8 @@ async def test_get_saga_steps_status_filter(read_app):
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
-            "/v1/sagas/steps",
-            params=[("trace_id", trace_id), ("status", "IN_PROGRESS")],
+            f"/v1/sagas/{trace_id}/steps",
+            params=[("status", "IN_PROGRESS")],
         )
     assert resp.status_code == 200
     items = resp.json()["items"]
@@ -608,7 +609,7 @@ async def test_get_saga_steps_includes_timing_on_undo_row(read_app):
     )
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/v1/sagas/steps", params={"trace_id": trace_id})
+        resp = await client.get(f"/v1/sagas/{trace_id}/steps")
     assert resp.status_code == 200
     undo = next(it for it in resp.json()["items"] if it["step_span_id"] == undo_span)
     assert undo["compensates_span_id"] == forward_span
@@ -662,7 +663,7 @@ async def test_get_saga_steps_includes_error_details(read_app):
     )
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/v1/sagas/steps", params={"trace_id": trace_id})
+        resp = await client.get(f"/v1/sagas/{trace_id}/steps")
     assert resp.status_code == 200
     by_step = {it["step_id"]: it for it in resp.json()["items"]}
     assert by_step["denied"]["error_details"] == error_details
@@ -701,7 +702,7 @@ async def test_get_saga_step_detail_returns_payloads(read_app):
     )
     transport = ASGITransport(app=read_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        list_resp = await client.get("/v1/sagas/steps", params={"trace_id": trace_id})
+        list_resp = await client.get(f"/v1/sagas/{trace_id}/steps")
         detail_resp = await client.get(
             f"/v1/sagas/{trace_id}/steps/1111111111111111",
             params={"namespace": "default"},
@@ -1001,19 +1002,6 @@ async def test_get_definition_by_triple_404_structured(read_app):
     assert detail["code"] == "CATALOG_DEFINITION_NOT_FOUND"
     assert detail["kind"] == "saga"
     assert detail["name"] == "missing"
-
-
-@pytest.mark.asyncio
-async def test_get_definition_by_path_404_structured(read_app):
-    transport = ASGITransport(app=read_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(
-            "/v1/definitions/sagas/00000000-0000-4000-8000-000000000001",
-        )
-    assert resp.status_code == 404
-    detail = resp.json()["detail"]
-    assert detail["code"] == "CATALOG_DEFINITION_NOT_FOUND"
-    assert detail["id"] == "00000000-0000-4000-8000-000000000001"
 
 
 @pytest.mark.asyncio

@@ -127,11 +127,12 @@ def test_list_steps_watch_stops_on_completed(monkeypatch: pytest.MonkeyPatch):
 
 def test_list_sagas_watch_stops_on_completed_trace(monkeypatch: pytest.MonkeyPatch):
     responses = [
-        {"items": [{"namespace": "default", "trace_id": "c" * 32, "status": "RUNNING"}]},
-        {"items": [{"namespace": "default", "trace_id": "c" * 32, "status": "COMPLETED"}]},
+        {"namespace": "default", "trace_id": "c" * 32, "status": "RUNNING"},
+        {"namespace": "default", "trace_id": "c" * 32, "status": "COMPLETED"},
     ]
 
-    def _fake_fetch(_path: str, *, params=None):
+    def _fake_fetch(path: str, *, params=None):
+        assert path == f"/v1/sagas/{'c' * 32}"
         return responses.pop(0)
 
     monkeypatch.setattr("cli._fetch_engine_get_json", _fake_fetch)

@@ -78,15 +78,7 @@ curl -sS "$ENGINE_URL/v1/definitions/steps?namespace=default&name=greet&version=
 curl -sS "$ENGINE_URL/v1/definitions/workers?namespace=default&name=mock-worker&version=0.1.0"
 ```
 
-Path form by UUID still works:
-
-```bash
-curl -sS "$ENGINE_URL/v1/definitions/steps/<definition-uuid>?include_body=true"
-curl -sS "$ENGINE_URL/v1/definitions/sagas/<definition-uuid>?include_body=true"
-curl -sS "$ENGINE_URL/v1/definitions/workers/<definition-uuid>?include_body=true"
-```
-
-Returns **`404`** with structured `CATALOG_DEFINITION_NOT_FOUND` when unknown; partial triple → **400**; invalid UUID syntax on path → **422**.
+Returns **`404`** with structured `CATALOG_DEFINITION_NOT_FOUND` when unknown; partial triple → **400**; invalid UUID on `id=` → **422**.
 
 ## What's next
 

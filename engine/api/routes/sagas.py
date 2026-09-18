@@ -205,42 +205,6 @@ async def _list_steps_for_saga(
     )
 
 
-@router.get("/steps", response_model=SagaStepInstanceListResponse)
-async def get_saga_steps(
-    trace_id: Annotated[
-        str,
-        Query(description="Saga instance trace_id (32-char hex)."),
-    ],
-    namespace: Annotated[
-        str | None,
-        Query(description="Optional namespace guard; must match the saga row."),
-    ] = None,
-    status: Annotated[
-        list[str] | None,
-        Query(description="Repeat for multiple step statuses."),
-    ] = None,
-    include_total: Annotated[
-        bool,
-        Query(description="Include total matching row count."),
-    ] = False,
-    limit: Annotated[int | None, Query()] = None,
-    offset: Annotated[int | None, Query()] = None,
-) -> SagaStepInstanceListResponse:
-    """List step instances for one saga, ordered by forward_seq.
-
-    Prefer ``GET /v1/sagas/{trace_id}/steps``. This query form remains for
-    back-compat with older clients.
-    """
-    return await _list_steps_for_saga(
-        trace_id=trace_id,
-        namespace=namespace,
-        status=status,
-        include_total=include_total,
-        limit=limit,
-        offset=offset,
-    )
-
-
 @router.get("/{trace_id}", response_model=SagaInstanceItem)
 async def get_saga(
     trace_id: str,
@@ -260,7 +224,7 @@ async def get_saga(
 
 
 @router.get("/{trace_id}/steps", response_model=SagaStepInstanceListResponse)
-async def get_saga_steps_by_path(
+async def get_saga_steps(
     trace_id: str,
     namespace: Annotated[
         str | None,
@@ -277,7 +241,7 @@ async def get_saga_steps_by_path(
     limit: Annotated[int | None, Query()] = None,
     offset: Annotated[int | None, Query()] = None,
 ) -> SagaStepInstanceListResponse:
-    """List step instances for one saga (path form of GET /v1/sagas/steps)."""
+    """List step instances for one saga, ordered by forward_seq."""
     return await _list_steps_for_saga(
         trace_id=trace_id,
         namespace=namespace,

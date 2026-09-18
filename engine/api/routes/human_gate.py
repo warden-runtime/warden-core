@@ -14,10 +14,8 @@ from engine.api.ids import (
 )
 from engine.api.pagination import validated_limit_offset
 from engine.api.schemas import (
-    HumanApproveRequest,
     HumanDecisionRequest,
     HumanDecisionResponse,
-    HumanRejectRequest,
     HumanRetryRequest,
     HumanRetryResponse,
     PendingReviewStepItem,
@@ -181,58 +179,6 @@ async def decide_step(
         decision=body.decision,
         output=body.output,
         error_details=body.error_details,
-    )
-    return HumanDecisionResponse.model_validate(data)
-
-
-@router.post(
-    "/{trace_id}/steps/{step_span_id}/approve",
-    status_code=202,
-    response_model=HumanDecisionResponse,
-    responses=_MUTATION_RESPONSES,
-)
-async def approve_step(
-    trace_id: str,
-    step_span_id: str,
-    namespace: str = Query(default="default"),
-    body: HumanApproveRequest | None = None,
-) -> HumanDecisionResponse:
-    """Approve a HITL-held step and enqueue HUMAN_APPROVED for the engine."""
-    validate_saga_step_path_params(
-        trace_id=trace_id, step_span_id=step_span_id, namespace=namespace
-    )
-    data = await _enqueue_human_decision(
-        trace_id=trace_id,
-        step_span_id=step_span_id,
-        namespace=namespace,
-        decision="APPROVE",
-        output=body.output if body else None,
-    )
-    return HumanDecisionResponse.model_validate(data)
-
-
-@router.post(
-    "/{trace_id}/steps/{step_span_id}/reject",
-    status_code=202,
-    response_model=HumanDecisionResponse,
-    responses=_MUTATION_RESPONSES,
-)
-async def reject_step(
-    trace_id: str,
-    step_span_id: str,
-    namespace: str = Query(default="default"),
-    body: HumanRejectRequest | None = None,
-) -> HumanDecisionResponse:
-    """Reject a HITL-held step and enqueue HUMAN_REJECTED for the engine."""
-    validate_saga_step_path_params(
-        trace_id=trace_id, step_span_id=step_span_id, namespace=namespace
-    )
-    data = await _enqueue_human_decision(
-        trace_id=trace_id,
-        step_span_id=step_span_id,
-        namespace=namespace,
-        decision="REJECT",
-        error_details=body.error_details if body else None,
     )
     return HumanDecisionResponse.model_validate(data)
 

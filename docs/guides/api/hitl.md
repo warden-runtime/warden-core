@@ -57,9 +57,9 @@ curl -sS "$ENGINE_URL/v1/sagas/pending-review?trace_id=$TRACE_ID"
 
 You can also poll saga status: `GET /v1/sagas/$TRACE_ID` → `status: "AWAITING_HUMAN"`.
 
-## Submit a decision (canonical)
+## Submit a decision
 
-For control-plane integrations, use the unified **`POST .../decision`** endpoint. It is the same route the CLI calls for approve and reject:
+Use **`POST .../decision`** (same route the CLI calls for approve and reject):
 
 ```bash
 curl -sS -X POST "$ENGINE_URL/v1/sagas/$TRACE_ID/steps/$STEP_SPAN_ID/decision" \
@@ -73,31 +73,7 @@ curl -sS -X POST "$ENGINE_URL/v1/sagas/$TRACE_ID/steps/$STEP_SPAN_ID/decision" \
 | `output` | Optional override on approve (reason steps — approve-with-edit) |
 | `error_details` | Optional structured rejection reason on reject |
 
-Returns **202** — the engine enqueues the decision and processes it asynchronously.
-
-## Approve (shorthand)
-
-Same behavior as `decision` with `APPROVE`:
-
-```bash
-curl -sS -X POST "$ENGINE_URL/v1/sagas/$TRACE_ID/steps/$STEP_SPAN_ID/approve" \
-  -H "Content-Type: application/json" \
-  -d '{"output": {}}'
-```
-
-Optional body `output` overrides reason-step output on approve-with-edit. Empty body is valid.
-
-## Reject (shorthand)
-
-Same behavior as `decision` with `REJECT`:
-
-```bash
-curl -sS -X POST "$ENGINE_URL/v1/sagas/$TRACE_ID/steps/$STEP_SPAN_ID/reject" \
-  -H "Content-Type: application/json" \
-  -d '{"error_details": {"reason": "operator rejected"}}'
-```
-
-Rejection triggers compensation for completed forward steps — [Compensation](../manifests/compensation.md).
+Returns **202** — the engine enqueues the decision and processes it asynchronously. Rejection triggers compensation for completed forward steps — [Compensation](../manifests/compensation.md).
 
 ## HITL retry (not operator recovery)
 

@@ -107,8 +107,6 @@ For Streamable HTTP instead:
 | `warden_wait_for_review` | Polls until `AWAITING_HUMAN` / pending-review non-empty |
 | `warden_list_pending_reviews` | `GET /v1/sagas/pending-review` |
 | `warden_decide_step` | `POST .../decision` |
-| `warden_approve_step` | `POST .../approve` |
-| `warden_reject_step` | `POST .../reject` |
 | `warden_retry_hitl_step` | `POST .../retry` |
 | `warden_retry_stuck_step` | `POST .../retry-step` |
 | `warden_retry_compensation` | `POST .../retry-compensation` |

@@ -169,21 +169,6 @@ async def _get_definition(
     return _definition_item(row, item_cls=item_cls, include_body=include_body)
 
 
-async def _get_definition_by_path_id(
-    *,
-    kind: CatalogKind,
-    item_cls: type[ItemT],
-    get_by_uuid: GetByUuidFn,
-    definition_id: str,
-    include_body: bool,
-) -> ItemT:
-    uid = validate_definition_id(definition_id)
-    row = await get_by_uuid(definition_id=uid)
-    if row is None:
-        raise definition_not_found_http(kind=kind, definition_id=definition_id)
-    return _definition_item(row, item_cls=item_cls, include_body=include_body)
-
-
 async def _patch_definition_active(
     *,
     kind: CatalogKind,
@@ -347,28 +332,6 @@ async def patch_definitions_saga_active(
     )
 
 
-@router.get(
-    "/sagas/{definition_id}",
-    response_model=SagaDefinitionItem,
-    response_model_exclude_none=True,
-)
-async def get_definitions_saga_by_id(
-    definition_id: str,
-    include_body: bool = Query(
-        default=False,
-        description="When true, include the full manifest blueprint in body.",
-    ),
-) -> SagaDefinitionItem:
-    """Return one saga definition by primary key UUID (for start-saga resolution)."""
-    return await _get_definition_by_path_id(
-        kind="saga",
-        item_cls=SagaDefinitionItem,
-        get_by_uuid=read_queries.get_saga_definition_by_uuid,
-        definition_id=definition_id,
-        include_body=include_body,
-    )
-
-
 # --- workers ---------------------------------------------------------------
 
 
@@ -445,28 +408,6 @@ async def patch_definitions_worker_active(
     )
 
 
-@router.get(
-    "/workers/{definition_id}",
-    response_model=WorkerDefinitionItem,
-    response_model_exclude_none=True,
-)
-async def get_definitions_worker_by_id(
-    definition_id: str,
-    include_body: bool = Query(
-        default=False,
-        description="When true, include the full manifest body.",
-    ),
-) -> WorkerDefinitionItem:
-    """Return one worker definition by primary key UUID."""
-    return await _get_definition_by_path_id(
-        kind="worker",
-        item_cls=WorkerDefinitionItem,
-        get_by_uuid=read_queries.get_worker_definition_by_uuid,
-        definition_id=definition_id,
-        include_body=include_body,
-    )
-
-
 # --- steps -----------------------------------------------------------------
 
 
@@ -540,26 +481,4 @@ async def patch_definitions_step_active(
         namespace=namespace,
         name=name,
         version=version,
-    )
-
-
-@router.get(
-    "/steps/{definition_id}",
-    response_model=StepDefinitionItem,
-    response_model_exclude_none=True,
-)
-async def get_definitions_step_by_id(
-    definition_id: str,
-    include_body: bool = Query(
-        default=False,
-        description="When true, include the full step manifest blueprint in body.",
-    ),
-) -> StepDefinitionItem:
-    """Return one step definition by primary key UUID."""
-    return await _get_definition_by_path_id(
-        kind="step",
-        item_cls=StepDefinitionItem,
-        get_by_uuid=read_queries.get_step_definition_by_uuid,
-        definition_id=definition_id,
-        include_body=include_body,
     )

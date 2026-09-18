@@ -73,64 +73,6 @@ def register(mcp: FastMCP) -> None:
         return {"accepted": True, **data}
 
     @mcp.tool
-    async def warden_approve_step(
-        trace_id: str,
-        step_span_id: str,
-        namespace: str = "default",
-        output: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Approve a HITL-held step (POST /v1/sagas/.../approve). Returns HTTP 202."""
-        if err := validate_trace_id(trace_id):
-            return err
-        if err := validate_step_span_id(step_span_id):
-            return err
-
-        body: dict[str, Any] = {}
-        if output is not None:
-            body["output"] = output
-
-        client = get_engine_client()
-        path = f"{saga_step_path(trace_id, step_span_id)}/approve"
-        try:
-            data = await client.post_json(
-                path,
-                json_body=body or None,
-                params=[("namespace", namespace)],
-            )
-        except (EngineAPIError, EngineTransportError) as exc:
-            return engine_error_result(exc)
-        return {"accepted": True, **data}
-
-    @mcp.tool
-    async def warden_reject_step(
-        trace_id: str,
-        step_span_id: str,
-        namespace: str = "default",
-        error_details: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Reject a HITL-held step (POST /v1/sagas/.../reject). Returns HTTP 202."""
-        if err := validate_trace_id(trace_id):
-            return err
-        if err := validate_step_span_id(step_span_id):
-            return err
-
-        body: dict[str, Any] = {}
-        if error_details is not None:
-            body["error_details"] = error_details
-
-        client = get_engine_client()
-        path = f"{saga_step_path(trace_id, step_span_id)}/reject"
-        try:
-            data = await client.post_json(
-                path,
-                json_body=body or None,
-                params=[("namespace", namespace)],
-            )
-        except (EngineAPIError, EngineTransportError) as exc:
-            return engine_error_result(exc)
-        return {"accepted": True, **data}
-
-    @mcp.tool
     async def warden_retry_hitl_step(
         trace_id: str,
         step_span_id: str,
