@@ -15,12 +15,14 @@ After start, **`trace_id`** is your handle for everything — a 32-character hex
 | Operation | Method | Literal path | `trace_id` |
 |-----------|--------|--------------|------------|
 | Start | `POST` | `/v1/sagas/start` | Response body |
-| Poll saga | `GET` | `/v1/sagas` | Query: `?trace_id=<hex>` |
-| Poll steps | `GET` | `/v1/sagas/steps` | Query: `?trace_id=<hex>` (required) |
+| Get one saga | `GET` | `/v1/sagas/{trace_id}` | Path segment (**404** if missing) |
+| List sagas | `GET` | `/v1/sagas` | Optional query filters (`?trace_id=` still works) |
+| List steps | `GET` | `/v1/sagas/{trace_id}/steps` | Path segment (preferred) |
+| List steps (legacy) | `GET` | `/v1/sagas/steps` | Query: `?trace_id=<hex>` (required) |
 
 `trace_id` must match `^[a-f0-9]{32}$` (32-character lowercase hex); invalid values → **422**.
 
-There is **no** path-parameter GET for a saga instance (no `/v1/sagas/{trace_id}`). Poll the saga with `GET /v1/sagas?trace_id=…` instead. Once you have a `step_span_id` from the step list, you **can** fetch one step directly — see [Step detail](#step-detail) below.
+Prefer **path** GETs when you already know `trace_id`. Collection `GET /v1/sagas` remains for fleet filters (`in_flight`, `failed`, `status`, …). Once you have a `step_span_id` from the step list, fetch one step via [Step detail](#step-detail).
 
 ## Start a saga
 
@@ -69,32 +71,43 @@ CLI equivalent: `warden start saga -n minimal-saga -v 0.0.1 --namespace default`
 ENGINE_URL=http://127.0.0.1:8000
 TRACE_ID=<from start response>
 
-curl -sS "$ENGINE_URL/v1/sagas?trace_id=$TRACE_ID"
+curl -sS "$ENGINE_URL/v1/sagas/$TRACE_ID"
 ```
 
-Optional query parameters:
+Returns one saga object (**404** if unknown). Optional `?namespace=` must match the instance row when set.
+
+For **fleet** browsing (not a single known id), use the collection endpoint:
+
+```bash
+curl -sS "$ENGINE_URL/v1/sagas?trace_id=$TRACE_ID"
+# or: ?in_flight=true  ?failed=true  ?status=RUNNING
+```
+
+Optional query parameters on the collection:
 
 | Parameter | Description |
 |-----------|-------------|
-| `trace_id` | Single saga instance (32-char hex) |
+| `trace_id` | Single saga instance (32-char hex) — prefer path GET when you only need one row |
 | `in_flight` | `true` — non-terminal sagas (`PENDING`, `RUNNING`, `AWAITING_HUMAN`, `COMPENSATING`); do not combine with `status` filters |
 | `failed` | `true` — only `FAILED` sagas |
 | `status` | Filter by saga status (repeatable) |
 | `namespace` | Filter by namespace |
 
-Read `items[0].status` when the filter matches (normally exactly one row). An empty `items` array right after **202** is unusual — double-check `trace_id` and any `namespace` filter before assuming the start failed.
+On the collection form, read `items[0].status` when the filter matches (normally exactly one row). An empty `items` array right after **202** is unusual — double-check `trace_id` and any `namespace` filter before assuming the start failed. Path GET returns **404** instead of an empty list.
 
-Each item includes `definition_id` plus **`definition_name`** / **`definition_version`** (copied from the catalog at saga start; may be `null` on pre-migration rows). Those labels survive a later hard-delete of the definition row.
+Each saga object includes `definition_id` plus **`definition_name`** / **`definition_version`** (copied from the catalog at saga start; may be `null` on pre-migration rows). Those labels survive a later hard-delete of the definition row.
 
 CLI equivalent: `warden list sagas --trace-id $TRACE_ID` (table shows `name@version` when labels are present).
 
 ## Poll step rows
 
 ```bash
-curl -sS "$ENGINE_URL/v1/sagas/steps?trace_id=$TRACE_ID"
+curl -sS "$ENGINE_URL/v1/sagas/$TRACE_ID/steps"
 ```
 
-Optional query filters: `namespace=default` (must match instance row if set), repeatable `status=IN_PROGRESS` (etc.). Returns **404** if no saga row exists for that `trace_id`.
+Equivalent legacy form: `GET /v1/sagas/steps?trace_id=$TRACE_ID`.
+
+Optional query filters: `namespace=default` (must match instance row if set), repeatable `status=IN_PROGRESS` (etc.), `limit` / `offset` (same defaults as other list endpoints). Returns **404** if no saga row exists for that `trace_id`.
 
 Each item includes `step_span_id`, `step_id`, `status`, `order_index`, `step_kind`, `worker`, `compensates_span_id` (set on undo rows), timestamps, and `error_details` (nullable — present when the step failed).
 
@@ -114,7 +127,7 @@ CLI equivalent: `warden show step <trace_id> <step_span_id>` or `warden show ste
 
 ## Poll loop example
 
-Poll saga and step collection endpoints until `items[0].status` on the saga response is terminal (`COMPLETED`, `FAILED`, or `COMPENSATED`). Parse JSON with your HTTP client or language library — do not rely on shell `grep` against raw JSON.
+Poll saga and step endpoints until saga `status` is terminal (`COMPLETED`, `FAILED`, or `COMPENSATED`). Parse JSON with your HTTP client or language library — do not rely on shell `grep` against raw JSON.
 
 ```bash
 ENGINE_URL=http://127.0.0.1:8000
@@ -122,8 +135,8 @@ TRACE_ID=<your trace_id>
 
 # Example: poll every 2s (stop when saga status is terminal)
 while true; do
-  curl -sS "$ENGINE_URL/v1/sagas?trace_id=$TRACE_ID"
-  curl -sS "$ENGINE_URL/v1/sagas/steps?trace_id=$TRACE_ID"
+  curl -sS "$ENGINE_URL/v1/sagas/$TRACE_ID"
+  curl -sS "$ENGINE_URL/v1/sagas/$TRACE_ID/steps"
   sleep 2
 done
 ```
@@ -138,8 +151,8 @@ sequenceDiagram
   Client->>Engine: POST /v1/sagas/start
   Engine-->>Client: 202 trace_id
   loop until terminal
-    Client->>Engine: GET /v1/sagas?trace_id=...
-    Client->>Engine: GET /v1/sagas/steps?trace_id=...
+    Client->>Engine: GET /v1/sagas/{trace_id}
+    Client->>Engine: GET /v1/sagas/{trace_id}/steps
   end
   Worker->>Engine: STEP_COMPLETED / STEP_FAILED ingest
 ```

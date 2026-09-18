@@ -8,7 +8,7 @@ from common.models import SagaStatus
 from fastapi import APIRouter, HTTPException, Query
 
 from engine.api import read_queries
-from engine.api.http_errors import http_exception_for_catalog
+from engine.api.http_errors import http_exception_for_catalog, structured_detail
 from engine.api.ids import validate_namespace, validate_step_span_id, validate_trace_id
 from engine.api.pagination import validated_limit_offset
 from engine.api.saga_errors import StartIdempotencyConflictError
@@ -29,6 +29,20 @@ from engine.api.step_serializers import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sagas", tags=["sagas"])
+
+
+def _saga_instance_item(row) -> SagaInstanceItem:
+    return SagaInstanceItem(
+        trace_id=row.trace_id,
+        namespace=row.namespace,
+        definition_id=row.definition_id,
+        definition_name=row.definition_name,
+        definition_version=row.definition_version,
+        status=row.status.value,
+        started_at=row.started_at,
+        start_idempotency_key=row.start_idempotency_key,
+        parent_trace_id=row.parent_trace_id,
+    )
 
 
 def _resolve_list_saga_statuses(
@@ -121,20 +135,7 @@ async def get_sagas(
         limit=lim,
         offset=off,
     )
-    items = [
-        SagaInstanceItem(
-            trace_id=r.trace_id,
-            namespace=r.namespace,
-            definition_id=r.definition_id,
-            definition_name=r.definition_name,
-            definition_version=r.definition_version,
-            status=r.status.value,
-            started_at=r.started_at,
-            start_idempotency_key=r.start_idempotency_key,
-            parent_trace_id=r.parent_trace_id,
-        )
-        for r in rows
-    ]
+    items = [_saga_instance_item(r) for r in rows]
     total = None
     if include_total:
         total = await read_queries.count_saga_instances(
@@ -152,24 +153,15 @@ async def get_sagas(
     )
 
 
-@router.get("/steps", response_model=SagaStepInstanceListResponse)
-async def get_saga_steps(
-    trace_id: Annotated[
-        str,
-        Query(description="Saga instance trace_id (32-char hex)."),
-    ],
-    namespace: Annotated[
-        str | None,
-        Query(description="Optional namespace guard; must match the saga row."),
-    ] = None,
-    status: Annotated[
-        list[str] | None,
-        Query(description="Repeat for multiple step statuses."),
-    ] = None,
-    limit: Annotated[int | None, Query()] = None,
-    offset: Annotated[int | None, Query()] = None,
+async def _list_steps_for_saga(
+    *,
+    trace_id: str,
+    namespace: str | None,
+    status: list[str] | None,
+    include_total: bool,
+    limit: int | None,
+    offset: int | None,
 ) -> SagaStepInstanceListResponse:
-    """List step instances for one saga, ordered by forward_seq."""
     validate_trace_id(trace_id)
     if namespace is not None:
         validate_namespace(namespace)
@@ -192,11 +184,98 @@ async def get_saga_steps(
         offset=off,
     )
     items = [saga_step_instance_item_from_row(r) for r in rows]
+    total = None
+    if include_total:
+        total = await read_queries.count_saga_step_instances(
+            saga_trace_id=trace_id,
+            namespace=namespace,
+            statuses=statuses,
+        )
     return SagaStepInstanceListResponse(
         items=items,
         limit=lim,
         offset=off,
         has_more=len(items) == lim,
+        total=total,
+    )
+
+
+@router.get("/steps", response_model=SagaStepInstanceListResponse)
+async def get_saga_steps(
+    trace_id: Annotated[
+        str,
+        Query(description="Saga instance trace_id (32-char hex)."),
+    ],
+    namespace: Annotated[
+        str | None,
+        Query(description="Optional namespace guard; must match the saga row."),
+    ] = None,
+    status: Annotated[
+        list[str] | None,
+        Query(description="Repeat for multiple step statuses."),
+    ] = None,
+    include_total: Annotated[
+        bool,
+        Query(description="Include total matching row count."),
+    ] = False,
+    limit: Annotated[int | None, Query()] = None,
+    offset: Annotated[int | None, Query()] = None,
+) -> SagaStepInstanceListResponse:
+    """List step instances for one saga, ordered by forward_seq."""
+    return await _list_steps_for_saga(
+        trace_id=trace_id,
+        namespace=namespace,
+        status=status,
+        include_total=include_total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/{trace_id}", response_model=SagaInstanceItem)
+async def get_saga(
+    trace_id: str,
+    namespace: Annotated[
+        str | None,
+        Query(description="Optional namespace guard; must match the saga row."),
+    ] = None,
+) -> SagaInstanceItem:
+    """Return one saga instance by trace_id (404 if missing)."""
+    validate_trace_id(trace_id)
+    if namespace is not None:
+        validate_namespace(namespace)
+    saga = await read_queries.get_saga_instance(namespace=namespace, trace_id=trace_id)
+    if saga is None:
+        raise HTTPException(status_code=404, detail="Saga instance not found.")
+    return _saga_instance_item(saga)
+
+
+@router.get("/{trace_id}/steps", response_model=SagaStepInstanceListResponse)
+async def get_saga_steps_by_path(
+    trace_id: str,
+    namespace: Annotated[
+        str | None,
+        Query(description="Optional namespace guard; must match the saga row."),
+    ] = None,
+    status: Annotated[
+        list[str] | None,
+        Query(description="Repeat for multiple step statuses."),
+    ] = None,
+    include_total: Annotated[
+        bool,
+        Query(description="Include total matching row count."),
+    ] = False,
+    limit: Annotated[int | None, Query()] = None,
+    offset: Annotated[int | None, Query()] = None,
+) -> SagaStepInstanceListResponse:
+    """List step instances for one saga (path form of GET /v1/sagas/steps)."""
+    return await _list_steps_for_saga(
+        trace_id=trace_id,
+        namespace=namespace,
+        status=status,
+        include_total=include_total,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -258,6 +337,15 @@ async def post_sagas_start(body: StartSagaRequest) -> StartSagaResponse:
     except CatalogError as e:
         raise http_exception_for_catalog(e) from e
     except StartIdempotencyConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+        raise HTTPException(
+            status_code=409,
+            detail=structured_detail(
+                code="START_IDEMPOTENCY_CONFLICT",
+                message=str(e),
+                namespace=e.namespace,
+                idempotency_key=e.idempotency_key,
+                existing_definition_id=e.existing_definition_id,
+            ),
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

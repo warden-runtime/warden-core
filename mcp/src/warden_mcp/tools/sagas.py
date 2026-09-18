@@ -10,7 +10,13 @@ from fastmcp import FastMCP
 
 from warden_mcp.client import EngineClient, get_engine_client
 from warden_mcp.errors import EngineAPIError, EngineTransportError, engine_error_result
-from warden_mcp.ids import saga_step_path, validate_step_span_id, validate_trace_id
+from warden_mcp.ids import (
+    saga_instance_path,
+    saga_step_path,
+    saga_steps_path,
+    validate_step_span_id,
+    validate_trace_id,
+)
 from warden_mcp.tools._params import query_params
 
 _TERMINAL_SAGA_STATUSES = frozenset({"COMPLETED", "FAILED", "COMPENSATED", "CANCELLED", "REJECTED"})
@@ -35,21 +41,92 @@ def _slim_steps(items: list[Any]) -> list[dict[str, Any]]:
     return slim
 
 
+async def _fetch_saga(
+    client: EngineClient,
+    *,
+    trace_id: str,
+    namespace: str | None,
+) -> dict[str, Any] | None:
+    """Return saga JSON, None if 404, or raise/propagate other errors as Exception."""
+    params = query_params(namespace=namespace)
+    path = saga_instance_path(trace_id)
+    try:
+        return await client.get_json(path, params=params or None)
+    except EngineAPIError as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+
+
 async def _fetch_step_summary(
     client: EngineClient,
     *,
     trace_id: str,
     namespace: str | None,
 ) -> list[dict[str, Any]] | None:
-    params = query_params(trace_id=trace_id, namespace=namespace)
+    params = query_params(namespace=namespace)
     try:
-        data = await client.get_json("/v1/sagas/steps", params=params)
+        data = await client.get_json(saga_steps_path(trace_id), params=params or None)
     except (EngineAPIError, EngineTransportError):
         return None
     items = data.get("items")
     if not isinstance(items, list):
         return None
     return _slim_steps(items)
+
+
+async def _wait_for_saga_impl(
+    client: EngineClient,
+    *,
+    trace_id: str,
+    namespace: str | None,
+    timeout_s: float,
+    poll_interval_s: float,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_s
+    last: dict[str, Any] | None = None
+
+    while time.monotonic() < deadline:
+        try:
+            last = await _fetch_saga(client, trace_id=trace_id, namespace=namespace)
+        except (EngineAPIError, EngineTransportError) as exc:
+            return engine_error_result(exc)
+
+        if last is None:
+            return {
+                "done": False,
+                "found": False,
+                "trace_id": trace_id,
+                "error": "No saga found for trace_id",
+            }
+
+        status = str(last.get("status", ""))
+        if status == "AWAITING_HUMAN" or status in _TERMINAL_SAGA_STATUSES:
+            steps = await _fetch_step_summary(client, trace_id=trace_id, namespace=namespace)
+            result: dict[str, Any] = {
+                "done": True,
+                "found": True,
+                "status": status,
+                "saga": last,
+                "trace_id": trace_id,
+            }
+            if steps is not None:
+                result["steps"] = steps
+            return result
+        await asyncio.sleep(poll_interval_s)
+
+    steps = await _fetch_step_summary(client, trace_id=trace_id, namespace=namespace)
+    timed_out: dict[str, Any] = {
+        "done": False,
+        "timed_out": True,
+        "found": last is not None,
+        "trace_id": trace_id,
+        "saga": last,
+        "status": last.get("status") if isinstance(last, dict) else None,
+    }
+    if steps is not None:
+        timed_out["steps"] = steps
+    return timed_out
 
 
 def register(mcp: FastMCP) -> None:
@@ -134,31 +211,33 @@ def register(mcp: FastMCP) -> None:
         trace_id: str,
         namespace: str | None = None,
     ) -> dict[str, Any]:
-        """Poll one saga instance status (GET /v1/sagas?trace_id=...)."""
+        """Poll one saga instance (GET /v1/sagas/{trace_id}).
+
+        Soft-missing: returns found=false on engine 404. Other errors are hard payloads.
+        """
         if err := validate_trace_id(trace_id):
             return err
 
         client = get_engine_client()
-        params = query_params(trace_id=trace_id, namespace=namespace)
         try:
-            data = await client.get_json("/v1/sagas", params=params)
+            saga = await _fetch_saga(client, trace_id=trace_id, namespace=namespace)
         except (EngineAPIError, EngineTransportError) as exc:
             return engine_error_result(exc)
 
-        items = data.get("items", [])
-        if not items:
+        if saga is None:
             return {"found": False, "trace_id": trace_id, "saga": None}
-        return {"found": True, "trace_id": trace_id, "saga": items[0]}
+        return {"found": True, "trace_id": trace_id, "saga": saga}
 
     @mcp.tool
     async def warden_list_saga_steps(
         trace_id: str,
         namespace: str | None = None,
         status: list[str] | None = None,
+        include_total: bool = False,
         limit: int | None = None,
         offset: int | None = None,
     ) -> dict[str, Any]:
-        """List runtime step instances for one saga (GET /v1/sagas/steps).
+        """List runtime step instances for one saga (GET /v1/sagas/{trace_id}/steps).
 
         Not catalog steps — use warden_list_step_definitions for kind: step manifests.
         """
@@ -166,12 +245,20 @@ def register(mcp: FastMCP) -> None:
             return err
 
         client = get_engine_client()
-        params = query_params(trace_id=trace_id, namespace=namespace, limit=limit, offset=offset)
+        params = query_params(
+            namespace=namespace,
+            include_total=include_total,
+            limit=limit,
+            offset=offset,
+        )
         if status:
             for value in status:
                 params.append(("status", value))
         try:
-            return await client.get_json("/v1/sagas/steps", params=params)
+            return await client.get_json(
+                saga_steps_path(trace_id),
+                params=params or None,
+            )
         except (EngineAPIError, EngineTransportError) as exc:
             return engine_error_result(exc)
 
@@ -208,7 +295,7 @@ def register(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """Poll saga status until terminal, AWAITING_HUMAN, or timeout.
 
-        Convenience wrapper around GET /v1/sagas — not a native engine endpoint.
+        Convenience wrapper around GET /v1/sagas/{trace_id} — not a native engine endpoint.
         Returns immediately with found=false when no saga matches trace_id.
         On done or timeout, includes a slim ``steps`` summary (step_id/status/…);
         use warden_get_step_detail for full payloads.
@@ -217,55 +304,170 @@ def register(mcp: FastMCP) -> None:
             return err
 
         client = get_engine_client()
-        params = query_params(trace_id=trace_id, namespace=namespace)
+        return await _wait_for_saga_impl(
+            client,
+            trace_id=trace_id,
+            namespace=namespace,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
+    @mcp.tool
+    async def warden_wait_for_review(
+        trace_id: str | None = None,
+        namespace: str | None = None,
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 2.0,
+    ) -> dict[str, Any]:
+        """Poll until a HITL review is pending, or timeout.
+
+        With ``trace_id``: wait until that saga reaches AWAITING_HUMAN (or terminal —
+        then done=false with status). Without ``trace_id``: poll GET /v1/sagas/pending-review
+        until items is non-empty. Same timeout contract as warden_wait_for_saga.
+        """
+        if trace_id is not None:
+            if err := validate_trace_id(trace_id):
+                return err
+
+        client = get_engine_client()
         deadline = time.monotonic() + timeout_s
 
-        last: dict[str, Any] | None = None
+        if trace_id is not None:
+            last_saga: dict[str, Any] | None = None
+            while time.monotonic() < deadline:
+                try:
+                    last_saga = await _fetch_saga(client, trace_id=trace_id, namespace=namespace)
+                except (EngineAPIError, EngineTransportError) as exc:
+                    return engine_error_result(exc)
+
+                if last_saga is None:
+                    return {
+                        "done": False,
+                        "found": False,
+                        "trace_id": trace_id,
+                        "error": "No saga found for trace_id",
+                    }
+
+                status = str(last_saga.get("status", ""))
+                if status == "AWAITING_HUMAN":
+                    steps = await _fetch_step_summary(
+                        client, trace_id=trace_id, namespace=namespace
+                    )
+                    out: dict[str, Any] = {
+                        "done": True,
+                        "found": True,
+                        "status": status,
+                        "saga": last_saga,
+                        "trace_id": trace_id,
+                    }
+                    if steps is not None:
+                        out["steps"] = steps
+                    return out
+                if status in _TERMINAL_SAGA_STATUSES:
+                    steps = await _fetch_step_summary(
+                        client, trace_id=trace_id, namespace=namespace
+                    )
+                    terminal: dict[str, Any] = {
+                        "done": False,
+                        "found": True,
+                        "status": status,
+                        "saga": last_saga,
+                        "trace_id": trace_id,
+                        "error": "Saga reached terminal status without AWAITING_HUMAN",
+                    }
+                    if steps is not None:
+                        terminal["steps"] = steps
+                    return terminal
+                await asyncio.sleep(poll_interval_s)
+
+            timed: dict[str, Any] = {
+                "done": False,
+                "timed_out": True,
+                "found": last_saga is not None,
+                "trace_id": trace_id,
+                "saga": last_saga,
+                "status": last_saga.get("status") if isinstance(last_saga, dict) else None,
+            }
+            return timed
+
+        last_review: dict[str, Any] | None = None
         while time.monotonic() < deadline:
+            params = query_params(namespace=namespace, limit=50, offset=0)
             try:
-                last = await client.get_json("/v1/sagas", params=params)
+                last_review = await client.get_json(
+                    "/v1/sagas/pending-review",
+                    params=params or None,
+                )
             except (EngineAPIError, EngineTransportError) as exc:
                 return engine_error_result(exc)
 
-            items = last.get("items", [])
-            if not items:
+            items = last_review.get("items") if isinstance(last_review, dict) else None
+            if isinstance(items, list) and items:
                 return {
-                    "done": False,
-                    "found": False,
-                    "trace_id": trace_id,
-                    "error": "No saga found for trace_id",
-                }
-
-            saga = items[0]
-            status = str(saga.get("status", ""))
-            if status == "AWAITING_HUMAN" or status in _TERMINAL_SAGA_STATUSES:
-                steps = await _fetch_step_summary(client, trace_id=trace_id, namespace=namespace)
-                result: dict[str, Any] = {
                     "done": True,
                     "found": True,
-                    "status": status,
-                    "saga": saga,
-                    "trace_id": trace_id,
+                    "pending_review": last_review,
+                    "count": len(items),
                 }
-                if steps is not None:
-                    result["steps"] = steps
-                return result
             await asyncio.sleep(poll_interval_s)
 
-        saga = None
-        if last is not None:
-            last_items = last.get("items") or []
-            if last_items:
-                saga = last_items[0]
-        steps = await _fetch_step_summary(client, trace_id=trace_id, namespace=namespace)
-        timed_out: dict[str, Any] = {
+        items = last_review.get("items") if isinstance(last_review, dict) else None
+        return {
             "done": False,
             "timed_out": True,
-            "found": True,
-            "trace_id": trace_id,
-            "saga": saga,
-            "status": saga.get("status") if isinstance(saga, dict) else None,
+            "found": False,
+            "pending_review": last_review,
+            "count": len(items) if isinstance(items, list) else 0,
         }
-        if steps is not None:
-            timed_out["steps"] = steps
-        return timed_out
+
+    @mcp.tool
+    async def warden_start_and_wait(
+        name: str,
+        version: str,
+        namespace: str = "default",
+        saga_input: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 2.0,
+    ) -> dict[str, Any]:
+        """Start a saga then wait until terminal, AWAITING_HUMAN, or timeout.
+
+        Composes warden_start_saga + warden_wait_for_saga with the same bounds.
+        """
+        body: dict[str, Any] = {
+            "namespace": namespace,
+            "name": name,
+            "version": version,
+            "input": saga_input or {},
+        }
+        if idempotency_key is not None:
+            body["idempotency_key"] = idempotency_key
+
+        client = get_engine_client()
+        try:
+            started = await client.post_json("/v1/sagas/start", json_body=body)
+        except (EngineAPIError, EngineTransportError) as exc:
+            return engine_error_result(exc)
+
+        trace_id = started.get("trace_id")
+        if not isinstance(trace_id, str):
+            return {
+                "error": True,
+                "kind": "validation",
+                "detail": "Start response missing trace_id.",
+                "start": started,
+            }
+
+        waited = await _wait_for_saga_impl(
+            client,
+            trace_id=trace_id,
+            namespace=namespace,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+        return {
+            "accepted": True,
+            "created": started.get("created"),
+            "trace_id": trace_id,
+            **waited,
+        }

@@ -91,6 +91,14 @@ def saga_step_path(trace_id: str, step_span_id: str) -> str:
     return f"/v1/sagas/{quote(trace_id, safe='')}/steps/{quote(step_span_id, safe='')}"
 
 
+def saga_instance_path(trace_id: str) -> str:
+    return f"/v1/sagas/{quote(trace_id, safe='')}"
+
+
+def saga_steps_path(trace_id: str) -> str:
+    return f"/v1/sagas/{quote(trace_id, safe='')}/steps"
+
+
 def saga_definition_path(definition_id: str) -> str:
     return f"/v1/definitions/sagas/{quote(definition_id.strip(), safe='')}"
 

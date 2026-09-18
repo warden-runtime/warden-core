@@ -11,11 +11,7 @@ from warden_mcp.errors import EngineAPIError, EngineTransportError, engine_error
 from warden_mcp.ids import (
     definitions_collection_path,
     resolve_definition_identity_params,
-    saga_definition_path,
-    step_definition_path,
-    validate_definition_id,
     validate_definition_kind,
-    worker_definition_path,
 )
 from warden_mcp.tools._params import query_params
 
@@ -105,65 +101,90 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool
     async def warden_get_saga_definition(
-        definition_id: str,
+        definition_id: str | None = None,
+        namespace: str | None = None,
+        name: str | None = None,
+        version: str | None = None,
         include_body: bool = False,
     ) -> dict[str, Any]:
-        """Fetch one saga definition by UUID (GET /v1/definitions/sagas/{id}).
+        """Fetch one saga definition by UUID or namespace+name+version.
 
+        Prefer collection GET /v1/definitions/sagas?id=… or triple query.
         With include_body=true, body is the authoring AST (use:/version/with/when),
         not an expanded reason/commit photocopy.
         """
-        if err := validate_definition_id(definition_id):
-            return err
+        identity = resolve_definition_identity_params(
+            definition_id=definition_id,
+            namespace=namespace,
+            name=name,
+            version=version,
+        )
+        if isinstance(identity, dict):
+            return identity
 
         client = get_engine_client()
-        params = query_params(include_body=include_body)
+        params = list(identity)
+        if include_body:
+            params.append(("include_body", "true"))
         try:
-            return await client.get_json(
-                saga_definition_path(definition_id),
-                params=params or None,
-            )
+            return await client.get_json("/v1/definitions/sagas", params=params)
         except (EngineAPIError, EngineTransportError) as exc:
             return engine_error_result(exc)
 
     @mcp.tool
     async def warden_get_worker_definition(
-        definition_id: str,
+        definition_id: str | None = None,
+        namespace: str | None = None,
+        name: str | None = None,
+        version: str | None = None,
         include_body: bool = False,
     ) -> dict[str, Any]:
-        """Fetch one worker definition by UUID (GET /v1/definitions/workers/{id})."""
-        if err := validate_definition_id(definition_id):
-            return err
+        """Fetch one worker definition by UUID or namespace+name+version."""
+        identity = resolve_definition_identity_params(
+            definition_id=definition_id,
+            namespace=namespace,
+            name=name,
+            version=version,
+        )
+        if isinstance(identity, dict):
+            return identity
 
         client = get_engine_client()
-        params = query_params(include_body=include_body)
+        params = list(identity)
+        if include_body:
+            params.append(("include_body", "true"))
         try:
-            return await client.get_json(
-                worker_definition_path(definition_id),
-                params=params or None,
-            )
+            return await client.get_json("/v1/definitions/workers", params=params)
         except (EngineAPIError, EngineTransportError) as exc:
             return engine_error_result(exc)
 
     @mcp.tool
     async def warden_get_step_definition(
-        definition_id: str,
+        definition_id: str | None = None,
+        namespace: str | None = None,
+        name: str | None = None,
+        version: str | None = None,
         include_body: bool = False,
     ) -> dict[str, Any]:
-        """Fetch one catalog step definition by UUID (GET /v1/definitions/steps/{id}).
+        """Fetch one catalog step definition by UUID or namespace+name+version.
 
         Catalog steps (kind: step), not runtime saga step instances.
         """
-        if err := validate_definition_id(definition_id):
-            return err
+        identity = resolve_definition_identity_params(
+            definition_id=definition_id,
+            namespace=namespace,
+            name=name,
+            version=version,
+        )
+        if isinstance(identity, dict):
+            return identity
 
         client = get_engine_client()
-        params = query_params(include_body=include_body)
+        params = list(identity)
+        if include_body:
+            params.append(("include_body", "true"))
         try:
-            return await client.get_json(
-                step_definition_path(definition_id),
-                params=params or None,
-            )
+            return await client.get_json("/v1/definitions/steps", params=params)
         except (EngineAPIError, EngineTransportError) as exc:
             return engine_error_result(exc)
 

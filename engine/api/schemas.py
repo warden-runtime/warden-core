@@ -325,6 +325,10 @@ class SagaStepInstanceListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")
+    total: int | None = Field(
+        default=None,
+        description="Total matching rows when include_total=true was requested.",
+    )
 
 
 class SagaStepInstanceDetail(SagaStepInstanceItem):
@@ -368,3 +372,7 @@ class PendingReviewStepListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool = Field(..., description="True when len(items) == limit (more pages may exist).")
+    total: int | None = Field(
+        default=None,
+        description="Total matching rows when include_total=true was requested.",
+    )
