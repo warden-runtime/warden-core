@@ -22,7 +22,7 @@ The primary tables:
 | `saga_step_instances` | One row per step execution — status, outputs, errors |
 | `outbox_events` | Transactional outbox — dispatched work and HITL decisions |
 
-The `trace_id` is the correlation key. It's the 32-character hex ID returned by `warden start saga`. Use `warden list sagas --trace-id …` for saga status and `warden list steps --trace-id … --json` for per-step rows (includes `error_details` on failures). HTTP equivalents: `GET /v1/sagas?trace_id=…` and `GET /v1/sagas/steps?trace_id=…` — see [Start and monitor](api/start-and-monitor.md). In SQL, join `saga_step_instances` on `saga_trace_id`.
+The `trace_id` is the correlation key. It's the 32-character hex ID returned by `warden start saga`. Use `warden list sagas --trace-id …` for saga status and `warden list steps --trace-id … --json` for per-step rows (includes `error_details` on failures). HTTP equivalents: `GET /v1/sagas/{trace_id}` and `GET /v1/sagas/{trace_id}/steps` — see [Start and monitor](api/start-and-monitor.md). In SQL, join `saga_step_instances` on `saga_trace_id`.
 
 For ad-hoc SQL or Adminer on the dev stack, query the tables directly. See [Start and monitor](cli/start-and-monitor.md).
 
@@ -153,7 +153,7 @@ Monotonic `time.perf_counter()` segments only; no cross-process wall-clock math 
 
 ### Inspect timing
 
-HTTP: `GET /v1/sagas/steps?trace_id=…` returns `timing` on each row (forward and undo via `compensates_span_id`).
+HTTP: `GET /v1/sagas/{trace_id}/steps` returns `timing` on each row (forward and undo via `compensates_span_id`).
 
 ```sql
 -- Forward steps
@@ -220,7 +220,7 @@ Missing metadata (mock / local without usage) leaves `usage` null — zeros are 
 
 ### Inspect usage
 
-HTTP: `GET /v1/sagas/steps?trace_id=…` returns `usage` next to `timing`. CLI `show step` prints a `usage` block when present.
+HTTP: `GET /v1/sagas/{trace_id}/steps` returns `usage` next to `timing`. CLI `show step` prints a `usage` block when present.
 
 ```sql
 SELECT span_id, step_id, status, execution_usage

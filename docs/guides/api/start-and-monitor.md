@@ -6,7 +6,7 @@ pagination_next: guides/api/hitl
 
 # Start and monitor
 
-Starting a saga returns a `trace_id` immediately; workers execute steps asynchronously via the outbox. Integrators **poll** collection endpoints by `trace_id` until the saga reaches a terminal status or pauses at `AWAITING_HUMAN`.
+Starting a saga returns a `trace_id` immediately; workers execute steps asynchronously via the outbox. Integrators **poll** path GETs by `trace_id` until the saga reaches a terminal status or pauses at `AWAITING_HUMAN`.
 
 After start, **`trace_id`** is your handle for everything — a 32-character hex token, not the manifest name or version. Copy it from the start response and use it for poll, HITL, and recovery calls.
 
@@ -17,8 +17,8 @@ After start, **`trace_id`** is your handle for everything — a 32-character hex
 | Start | `POST` | `/v1/sagas/start` | Response body |
 | Get one saga | `GET` | `/v1/sagas/{trace_id}` | Path segment (**404** if missing) |
 | List sagas | `GET` | `/v1/sagas` | Optional query filters (`?trace_id=` still works) |
-| List steps | `GET` | `/v1/sagas/{trace_id}/steps` | Path segment (preferred) |
-| List steps (legacy) | `GET` | `/v1/sagas/steps` | Query: `?trace_id=<hex>` (required) |
+| List steps | `GET` | `/v1/sagas/{trace_id}/steps` | Path segment |
+| List steps (compat) | `GET` | `/v1/sagas/steps` | Query: `?trace_id=<hex>` (required); prefer path form |
 
 `trace_id` must match `^[a-f0-9]{32}$` (32-character lowercase hex); invalid values → **422**.
 
@@ -105,7 +105,7 @@ CLI equivalent: `warden list sagas --trace-id $TRACE_ID` (table shows `name@vers
 curl -sS "$ENGINE_URL/v1/sagas/$TRACE_ID/steps"
 ```
 
-Equivalent legacy form: `GET /v1/sagas/steps?trace_id=$TRACE_ID`.
+Equivalent query form (compat): `GET /v1/sagas/steps?trace_id=$TRACE_ID`.
 
 Optional query filters: `namespace=default` (must match instance row if set), repeatable `status=IN_PROGRESS` (etc.), `limit` / `offset` (same defaults as other list endpoints). Returns **404** if no saga row exists for that `trace_id`.
 

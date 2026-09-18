@@ -8,7 +8,12 @@ from common.models import SagaStatus
 from fastapi import APIRouter, HTTPException, Query
 
 from engine.api import read_queries
-from engine.api.http_errors import http_exception_for_catalog, structured_detail
+from engine.api.http_errors import (
+    http_exception_for_catalog,
+    saga_instance_not_found_http,
+    saga_step_not_found_http,
+    structured_detail,
+)
 from engine.api.ids import validate_namespace, validate_step_span_id, validate_trace_id
 from engine.api.pagination import validated_limit_offset
 from engine.api.saga_errors import StartIdempotencyConflictError
@@ -174,7 +179,7 @@ async def _list_steps_for_saga(
 
     saga = await read_queries.get_saga_instance(namespace=namespace, trace_id=trace_id)
     if saga is None:
-        raise HTTPException(status_code=404, detail="Saga instance not found.")
+        raise saga_instance_not_found_http()
 
     rows = await read_queries.list_saga_step_instances(
         saga_trace_id=trace_id,
@@ -221,7 +226,11 @@ async def get_saga_steps(
     limit: Annotated[int | None, Query()] = None,
     offset: Annotated[int | None, Query()] = None,
 ) -> SagaStepInstanceListResponse:
-    """List step instances for one saga, ordered by forward_seq."""
+    """List step instances for one saga, ordered by forward_seq.
+
+    Prefer ``GET /v1/sagas/{trace_id}/steps``. This query form remains for
+    back-compat with older clients.
+    """
     return await _list_steps_for_saga(
         trace_id=trace_id,
         namespace=namespace,
@@ -246,7 +255,7 @@ async def get_saga(
         validate_namespace(namespace)
     saga = await read_queries.get_saga_instance(namespace=namespace, trace_id=trace_id)
     if saga is None:
-        raise HTTPException(status_code=404, detail="Saga instance not found.")
+        raise saga_instance_not_found_http()
     return _saga_instance_item(saga)
 
 
@@ -296,7 +305,7 @@ async def get_saga_step_detail(
 
     saga = await read_queries.get_saga_instance(namespace=namespace, trace_id=trace_id)
     if saga is None:
-        raise HTTPException(status_code=404, detail="Saga instance not found.")
+        raise saga_instance_not_found_http()
 
     row = await read_queries.get_saga_step_instance(
         saga_trace_id=trace_id,
@@ -304,7 +313,7 @@ async def get_saga_step_detail(
         namespace=namespace,
     )
     if row is None:
-        raise HTTPException(status_code=404, detail="Saga step instance not found.")
+        raise saga_step_not_found_http()
     return saga_step_instance_detail_from_row(row)
 
 

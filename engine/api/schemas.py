@@ -286,7 +286,7 @@ class SagaInstanceListResponse(BaseModel):
 
 
 class SagaStepInstanceItem(BaseModel):
-    """One row in GET /v1/sagas/steps."""
+    """One row in GET /v1/sagas/{trace_id}/steps (and legacy GET /v1/sagas/steps)."""
 
     step_span_id: str
     saga_trace_id: str
@@ -319,7 +319,7 @@ class SagaStepInstanceItem(BaseModel):
 
 
 class SagaStepInstanceListResponse(BaseModel):
-    """Response for GET /v1/sagas/steps."""
+    """Response for GET /v1/sagas/{trace_id}/steps (and legacy query form)."""
 
     items: list[SagaStepInstanceItem]
     limit: int

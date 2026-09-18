@@ -387,6 +387,8 @@ async def test_get_saga_by_path_404(read_app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/v1/sagas/{'b' * 32}")
     assert resp.status_code == 404
+    detail = resp.json()["detail"]
+    assert detail["code"] == "SAGA_INSTANCE_NOT_FOUND"
 
 
 @pytest.mark.asyncio

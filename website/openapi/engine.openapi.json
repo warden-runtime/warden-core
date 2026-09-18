@@ -904,7 +904,7 @@
         "type": "object"
       },
       "SagaStepInstanceItem": {
-        "description": "One row in GET /v1/sagas/steps.",
+        "description": "One row in GET /v1/sagas/{trace_id}/steps (and legacy GET /v1/sagas/steps).",
         "properties": {
           "compensates_span_id": {
             "anyOf": [
@@ -1058,7 +1058,7 @@
         "type": "object"
       },
       "SagaStepInstanceListResponse": {
-        "description": "Response for GET /v1/sagas/steps.",
+        "description": "Response for GET /v1/sagas/{trace_id}/steps (and legacy query form).",
         "properties": {
           "has_more": {
             "description": "True when len(items) == limit (more pages may exist).",
@@ -2964,7 +2964,7 @@
     },
     "/v1/sagas/steps": {
       "get": {
-        "description": "List step instances for one saga, ordered by forward_seq.",
+        "description": "List step instances for one saga, ordered by forward_seq.\n\nPrefer ``GET /v1/sagas/{trace_id}/steps``. This query form remains for\nback-compat with older clients.",
         "operationId": "get_saga_steps_v1_sagas_steps_get",
         "parameters": [
           {

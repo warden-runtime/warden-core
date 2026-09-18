@@ -18,6 +18,26 @@ def structured_detail(*, code: str, message: str, **extra: Any) -> dict[str, Any
     return {"code": code, "message": message, **extra}
 
 
+def saga_instance_not_found_http() -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail=structured_detail(
+            code="SAGA_INSTANCE_NOT_FOUND",
+            message="Saga instance not found.",
+        ),
+    )
+
+
+def saga_step_not_found_http() -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail=structured_detail(
+            code="SAGA_STEP_NOT_FOUND",
+            message="Saga step instance not found.",
+        ),
+    )
+
+
 def http_exception_for_catalog(exc: CatalogError) -> HTTPException:
     """Map catalog identity errors to 404 (missing) or 409 (inactive)."""
     if isinstance(exc, CatalogDefinitionNotFoundError):

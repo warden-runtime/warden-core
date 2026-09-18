@@ -122,7 +122,7 @@ Do not schedule a second compensation child row for the same forward span. The e
 
 Compensation undo rows use the same `execution_timing` column as forward steps. Timing is stored on the **child** row (`compensates_span_id` set), not the forward row.
 
-Worker buckets: `worker_init_ms`, `setup_ms`, `tool_ms`; `llm_ms` is `0`. Engine buckets: `schedule_ms` (child create + `EXECUTE_COMPENSATION` emit) and `dispatch_to_ingest_ms`. Inspect via `GET /v1/sagas/steps` or SQL filtered on `compensates_span_id IS NOT NULL` — see [Observability](../observability.md).
+Worker buckets: `worker_init_ms`, `setup_ms`, `tool_ms`; `llm_ms` is `0`. Engine buckets: `schedule_ms` (child create + `EXECUTE_COMPENSATION` emit) and `dispatch_to_ingest_ms`. Inspect via `GET /v1/sagas/{trace_id}/steps` or SQL filtered on `compensates_span_id IS NOT NULL` — see [Observability](../observability.md).
 
 ## What's next
 
