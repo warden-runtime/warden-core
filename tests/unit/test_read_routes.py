@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import pytest
 from common.models import SagaDefinition, SagaInstance, SagaStatus, SagaStepInstance, StepStatus
 from engine.api.routes.definitions import router as definitions_router
+from engine.api.routes.human_gate import router as human_gate_router
 from engine.api.routes.sagas import router as sagas_router
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -12,15 +13,19 @@ from httpx import ASGITransport, AsyncClient
 
 @pytest.fixture
 def read_app():
-    """FastAPI app with read routers; Tortoise from tests/conftest autouse."""
+    """FastAPI app with read routers; Tortoise from tests/conftest autouse.
+
+    Mount order matches production: HITL literals before parameterized saga paths.
+    """
 
     @asynccontextmanager
     async def noop_lifespan(_: FastAPI):
         yield
 
     app = FastAPI(lifespan=noop_lifespan)
-    app.include_router(definitions_router, prefix="/v1")
+    app.include_router(human_gate_router, prefix="/v1")
     app.include_router(sagas_router, prefix="/v1")
+    app.include_router(definitions_router, prefix="/v1")
     return app
 
 
@@ -351,6 +356,93 @@ async def test_get_sagas_trace_id_invalid(read_app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/v1/sagas", params={"trace_id": "not-hex"})
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_saga_by_path_200(read_app):
+    trace_id = "a" * 32
+    await SagaInstance.create(
+        trace_id=trace_id,
+        namespace="default",
+        definition_id="def-1",
+        definition_name="demo",
+        definition_version="1.0.0",
+        status=SagaStatus.RUNNING,
+        context={},
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/v1/sagas/{trace_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trace_id"] == trace_id
+    assert body["status"] == "RUNNING"
+    assert body["definition_name"] == "demo"
+    assert "items" not in body
+
+
+@pytest.mark.asyncio
+async def test_get_saga_by_path_404(read_app):
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/v1/sagas/{'b' * 32}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_saga_by_path_invalid_trace_id(read_app):
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/v1/sagas/not-a-trace-id")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_pending_review_not_shadowed_by_trace_id_path(read_app):
+    """GET /pending-review must not be captured as GET /{trace_id}."""
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/v1/sagas/pending-review")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "items" in body
+    assert "limit" in body
+
+
+@pytest.mark.asyncio
+async def test_get_saga_steps_by_path_matches_query_form(read_app):
+    trace_id = "c" * 32
+    saga = await SagaInstance.create(
+        trace_id=trace_id,
+        namespace="default",
+        definition_id="def-1",
+        status=SagaStatus.RUNNING,
+        context={},
+    )
+    await SagaStepInstance.create(
+        span_id="1111111111111111",
+        saga=saga,
+        saga_trace_id=trace_id,
+        namespace="default",
+        step_id="only",
+        step_name="only",
+        order_index=0,
+        forward_seq=0,
+        idempotency_key="k1",
+        status=StepStatus.COMPLETED,
+        worker="w",
+        worker_version="1.0.0",
+        step_kind="reason",
+        timeout_seconds=60,
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        query_resp = await client.get("/v1/sagas/steps", params={"trace_id": trace_id})
+        path_resp = await client.get(f"/v1/sagas/{trace_id}/steps")
+    assert query_resp.status_code == 200
+    assert path_resp.status_code == 200
+    assert path_resp.json()["items"] == query_resp.json()["items"]
+    assert path_resp.json()["limit"] == query_resp.json()["limit"]
 
 
 @pytest.mark.asyncio
@@ -818,3 +910,148 @@ async def test_list_saga_step_instances_by_step_id_tiebreaks_started_at(read_app
         assert rows[0].span_id == "bbbbbbbbbbbbbbbb"
     else:
         assert rows[0].started_at >= rows[1].started_at
+
+
+@pytest.mark.asyncio
+async def test_list_definitions_omits_null_body(read_app):
+    await SagaDefinition.create(
+        namespace="default",
+        name="no-body",
+        version="1.0.0",
+        is_active=True,
+        body={"steps": []},
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/v1/definitions/sagas", params={"namespace": "default"})
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert "body" not in item
+
+
+@pytest.mark.asyncio
+async def test_get_definition_by_triple_query(read_app):
+    row = await SagaDefinition.create(
+        namespace="default",
+        name="triple-get",
+        version="3.0.0",
+        is_active=True,
+        body={"steps": [{"id": "a"}]},
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v1/definitions/sagas",
+            params={
+                "namespace": "default",
+                "name": "triple-get",
+                "version": "3.0.0",
+                "include_body": "true",
+            },
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == str(row.id)
+    assert data["name"] == "triple-get"
+    assert data["body"]["steps"] == [{"id": "a"}]
+    assert "items" not in data
+
+
+@pytest.mark.asyncio
+async def test_get_definition_by_id_query(read_app):
+    row = await SagaDefinition.create(
+        namespace="default",
+        name="id-query",
+        version="1.0.0",
+        is_active=True,
+        body={"steps": []},
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/v1/definitions/sagas", params={"id": str(row.id)})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "id-query"
+    assert "body" not in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_get_definition_partial_triple_400(read_app):
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v1/definitions/sagas",
+            params={"namespace": "default", "version": "1.0.0"},
+        )
+    assert resp.status_code == 400
+    assert "triple" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_get_definition_by_triple_404_structured(read_app):
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v1/definitions/sagas",
+            params={"namespace": "default", "name": "missing", "version": "9.9.9"},
+        )
+    assert resp.status_code == 404
+    detail = resp.json()["detail"]
+    assert detail["code"] == "CATALOG_DEFINITION_NOT_FOUND"
+    assert detail["kind"] == "saga"
+    assert detail["name"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_get_definition_by_path_404_structured(read_app):
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v1/definitions/sagas/00000000-0000-4000-8000-000000000001",
+        )
+    assert resp.status_code == 404
+    detail = resp.json()["detail"]
+    assert detail["code"] == "CATALOG_DEFINITION_NOT_FOUND"
+    assert detail["id"] == "00000000-0000-4000-8000-000000000001"
+
+
+@pytest.mark.asyncio
+async def test_steps_and_pending_review_include_total(read_app):
+    trace_id = "d" * 32
+    saga = await SagaInstance.create(
+        trace_id=trace_id,
+        namespace="default",
+        definition_id="def-1",
+        status=SagaStatus.AWAITING_HUMAN,
+        context={},
+    )
+    await SagaStepInstance.create(
+        span_id="1111111111111111",
+        saga=saga,
+        saga_trace_id=trace_id,
+        namespace="default",
+        step_id="review-me",
+        step_name="review-me",
+        order_index=0,
+        forward_seq=0,
+        idempotency_key="k1",
+        status=StepStatus.AWAITING_HUMAN,
+        worker="w",
+        worker_version="1.0.0",
+        step_kind="reason",
+        timeout_seconds=60,
+        pending_review_payload={"x": 1},
+    )
+    transport = ASGITransport(app=read_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        steps = await client.get(
+            f"/v1/sagas/{trace_id}/steps",
+            params={"include_total": "true"},
+        )
+        pending = await client.get(
+            "/v1/sagas/pending-review",
+            params={"include_total": "true", "trace_id": trace_id},
+        )
+    assert steps.status_code == 200
+    assert steps.json()["total"] == 1
+    assert pending.status_code == 200
+    assert pending.json()["total"] == 1

@@ -86,10 +86,12 @@ def create_app() -> FastAPI:
         )
 
     application.include_router(health_router, prefix="/v1")
-    application.include_router(sagas_router, prefix="/v1")
-    application.include_router(definitions_router, prefix="/v1")
+    # HITL/recovery literals (e.g. /sagas/pending-review) must register before
+    # parameterized GET /sagas/{trace_id} on the sagas router.
     application.include_router(human_gate_router, prefix="/v1")
     application.include_router(recovery_router, prefix="/v1")
+    application.include_router(sagas_router, prefix="/v1")
+    application.include_router(definitions_router, prefix="/v1")
     application.include_router(manifests_router, prefix="/v1")
     instrument_fastapi_app(application)
     return application

@@ -104,7 +104,11 @@ async def test_post_sagas_start_409_on_idempotency_conflict(mocker, app_no_db):
             },
         )
     assert resp.status_code == 409
-    assert "idempotency key" in resp.json().get("detail", "").lower()
+    detail = resp.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail["code"] == "START_IDEMPOTENCY_CONFLICT"
+    assert "idempotency key" in detail["message"].lower()
+    assert detail["idempotency_key"] == "dup"
 
 
 @pytest.mark.asyncio

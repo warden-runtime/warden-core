@@ -204,6 +204,33 @@ async def list_saga_instances(
     return await q.offset(offset).limit(limit)
 
 
+def _saga_step_instances_query(
+    *,
+    saga_trace_id: str,
+    namespace: str | None,
+    statuses: list[StepStatus] | None,
+) -> Any:
+    q: Any = SagaStepInstance.filter(saga_trace_id=saga_trace_id)
+    if namespace is not None:
+        q = q.filter(namespace=namespace)
+    if statuses is not None:
+        q = q.filter(status__in=statuses)
+    return q
+
+
+async def count_saga_step_instances(
+    *,
+    saga_trace_id: str,
+    namespace: str | None,
+    statuses: list[StepStatus] | None,
+) -> int:
+    return await _saga_step_instances_query(
+        saga_trace_id=saga_trace_id,
+        namespace=namespace,
+        statuses=statuses,
+    ).count()
+
+
 async def list_saga_step_instances(
     *,
     saga_trace_id: str,
@@ -212,13 +239,42 @@ async def list_saga_step_instances(
     limit: int,
     offset: int,
 ) -> list[SagaStepInstance]:
-    q: Any = SagaStepInstance.filter(saga_trace_id=saga_trace_id)
-    if namespace is not None:
-        q = q.filter(namespace=namespace)
-    if statuses is not None:
-        q = q.filter(status__in=statuses)
+    q = _saga_step_instances_query(
+        saga_trace_id=saga_trace_id,
+        namespace=namespace,
+        statuses=statuses,
+    )
     q = q.order_by("forward_seq", "span_id")
     return await q.offset(offset).limit(limit)
+
+
+def _pending_review_steps_query(
+    *,
+    namespace: str | None,
+    saga_trace_id: str | None,
+    step_kind: str | None,
+) -> Any:
+    q: Any = SagaStepInstance.filter(status=StepStatus.AWAITING_HUMAN)
+    if namespace is not None:
+        q = q.filter(namespace=namespace)
+    if saga_trace_id is not None:
+        q = q.filter(saga_trace_id=saga_trace_id)
+    if step_kind is not None:
+        q = q.filter(step_kind=step_kind)
+    return q
+
+
+async def count_pending_review_steps(
+    *,
+    namespace: str | None,
+    saga_trace_id: str | None,
+    step_kind: str | None,
+) -> int:
+    return await _pending_review_steps_query(
+        namespace=namespace,
+        saga_trace_id=saga_trace_id,
+        step_kind=step_kind,
+    ).count()
 
 
 async def list_pending_review_steps(
@@ -229,13 +285,11 @@ async def list_pending_review_steps(
     limit: int,
     offset: int,
 ) -> list[SagaStepInstance]:
-    q: Any = SagaStepInstance.filter(status=StepStatus.AWAITING_HUMAN)
-    if namespace is not None:
-        q = q.filter(namespace=namespace)
-    if saga_trace_id is not None:
-        q = q.filter(saga_trace_id=saga_trace_id)
-    if step_kind is not None:
-        q = q.filter(step_kind=step_kind)
+    q = _pending_review_steps_query(
+        namespace=namespace,
+        saga_trace_id=saga_trace_id,
+        step_kind=step_kind,
+    )
     q = q.order_by("-started_at", "saga_trace_id", "order_index")
     return await q.offset(offset).limit(limit)
 

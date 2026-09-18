@@ -21,9 +21,21 @@ _MUTATION_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 def _http_error_from_recovery(exc: Exception) -> HTTPException:
     if isinstance(exc, RecoveryNotFoundError):
-        return HTTPException(status_code=404, detail=str(exc))
+        return HTTPException(
+            status_code=404,
+            detail={
+                "code": "RECOVERY_NOT_FOUND",
+                "message": str(exc),
+            },
+        )
     if isinstance(exc, RecoveryConflictError):
-        return HTTPException(status_code=409, detail=str(exc))
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "RECOVERY_CONFLICT",
+                "message": str(exc),
+            },
+        )
     raise exc
 
 

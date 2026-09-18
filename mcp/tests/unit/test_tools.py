@@ -83,14 +83,8 @@ async def _reset_shared_http_client() -> None:
 @pytest.mark.asyncio
 async def test_warden_get_saga_status_found_shape(httpx_mock, settings: Settings) -> None:
     httpx_mock.add_response(
-        url=f"{settings.engine_url}/v1/sagas",
-        match_params={"trace_id": "a" * 32},
-        json={
-            "items": [{"trace_id": "a" * 32, "status": "RUNNING"}],
-            "limit": 50,
-            "offset": 0,
-            "has_more": False,
-        },
+        url=f"{settings.engine_url}/v1/sagas/{'a' * 32}",
+        json={"trace_id": "a" * 32, "status": "RUNNING"},
     )
     result = await mcp.call_tool(
         "warden_get_saga_status",
@@ -105,9 +99,9 @@ async def test_warden_get_saga_status_found_shape(httpx_mock, settings: Settings
 @pytest.mark.asyncio
 async def test_warden_wait_for_saga_not_found_fail_fast(httpx_mock, settings: Settings) -> None:
     httpx_mock.add_response(
-        url=f"{settings.engine_url}/v1/sagas",
-        match_params={"trace_id": "a" * 32},
-        json={"items": [], "limit": 50, "offset": 0, "has_more": False},
+        url=f"{settings.engine_url}/v1/sagas/{'a' * 32}",
+        status_code=404,
+        json={"detail": "Saga instance not found."},
     )
     result = await mcp.call_tool(
         "warden_wait_for_saga",
@@ -146,18 +140,11 @@ async def test_warden_wait_for_saga_done_includes_slim_steps(
     settings: Settings,
 ) -> None:
     httpx_mock.add_response(
-        url=f"{settings.engine_url}/v1/sagas",
-        match_params={"trace_id": "a" * 32},
-        json={
-            "items": [{"trace_id": "a" * 32, "status": "COMPLETED"}],
-            "limit": 50,
-            "offset": 0,
-            "has_more": False,
-        },
+        url=f"{settings.engine_url}/v1/sagas/{'a' * 32}",
+        json={"trace_id": "a" * 32, "status": "COMPLETED"},
     )
     httpx_mock.add_response(
-        url=f"{settings.engine_url}/v1/sagas/steps",
-        match_params={"trace_id": "a" * 32},
+        url=f"{settings.engine_url}/v1/sagas/{'a' * 32}/steps",
         json={
             "items": [
                 {
@@ -192,19 +179,12 @@ async def test_warden_wait_for_saga_timeout_includes_steps(
     settings: Settings,
 ) -> None:
     httpx_mock.add_response(
-        url=f"{settings.engine_url}/v1/sagas",
-        match_params={"trace_id": "a" * 32},
+        url=f"{settings.engine_url}/v1/sagas/{'a' * 32}",
         is_reusable=True,
-        json={
-            "items": [{"trace_id": "a" * 32, "status": "RUNNING"}],
-            "limit": 50,
-            "offset": 0,
-            "has_more": False,
-        },
+        json={"trace_id": "a" * 32, "status": "RUNNING"},
     )
     httpx_mock.add_response(
-        url=f"{settings.engine_url}/v1/sagas/steps",
-        match_params={"trace_id": "a" * 32},
+        url=f"{settings.engine_url}/v1/sagas/{'a' * 32}/steps",
         json={
             "items": [
                 {
@@ -306,6 +286,8 @@ async def test_list_tools_includes_core_operations() -> None:
     assert "warden_set_definition_active" in names
     assert "warden_list_pending_reviews" in names
     assert "warden_retry_stuck_step" in names
+    assert "warden_wait_for_review" in names
+    assert "warden_start_and_wait" in names
 
 
 @pytest.mark.asyncio
@@ -359,8 +341,8 @@ async def test_warden_list_step_definitions(httpx_mock, settings: Settings) -> N
 async def test_warden_get_step_definition(httpx_mock, settings: Settings) -> None:
     def_id = "00000000-0000-4000-8000-000000000001"
     httpx_mock.add_response(
-        url=f"{settings.engine_url}/v1/definitions/steps/{def_id}",
-        match_params={"include_body": "true"},
+        url=f"{settings.engine_url}/v1/definitions/steps",
+        match_params={"id": def_id, "include_body": "true"},
         json={"id": def_id, "name": "greet", "body": {"kind": "step"}},
     )
     result = await mcp.call_tool(
@@ -370,6 +352,37 @@ async def test_warden_get_step_definition(httpx_mock, settings: Settings) -> Non
     text = result.content[0].text
     assert "greet" in text
     assert "kind" in text
+
+
+@pytest.mark.asyncio
+async def test_warden_get_saga_definition_by_triple(httpx_mock, settings: Settings) -> None:
+    httpx_mock.add_response(
+        url=f"{settings.engine_url}/v1/definitions/sagas",
+        match_params={
+            "namespace": "default",
+            "name": "demo",
+            "version": "1.0.0",
+        },
+        json={"id": "00000000-0000-4000-8000-000000000002", "name": "demo", "version": "1.0.0"},
+    )
+    result = await mcp.call_tool(
+        "warden_get_saga_definition",
+        {"namespace": "default", "name": "demo", "version": "1.0.0"},
+    )
+    text = result.content[0].text
+    assert "demo" in text
+    assert "items" not in text
+
+
+@pytest.mark.asyncio
+async def test_warden_get_definition_partial_triple_validation() -> None:
+    result = await mcp.call_tool(
+        "warden_get_saga_definition",
+        {"namespace": "default", "name": "demo"},
+    )
+    text = result.content[0].text.lower()
+    assert "version" in text or "triple" in text
+    assert "error" in text
 
 
 @pytest.mark.asyncio

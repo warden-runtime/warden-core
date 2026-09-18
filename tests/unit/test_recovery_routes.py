@@ -51,7 +51,9 @@ async def test_retry_step_route_maps_not_found_to_404(mocker, recovery_app: Fast
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post(f"/v1/sagas/{'a' * 32}/steps/{'b' * 16}/retry-step")
     assert resp.status_code == 404
-    assert "step missing" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "RECOVERY_NOT_FOUND"
+    assert "step missing" in detail["message"]
 
 
 @pytest.mark.asyncio
@@ -65,7 +67,9 @@ async def test_retry_step_route_maps_conflict_to_409(mocker, recovery_app: FastA
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post(f"/v1/sagas/{'a' * 32}/steps/{'b' * 16}/retry-step")
     assert resp.status_code == 409
-    assert "claim active" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "RECOVERY_CONFLICT"
+    assert "claim active" in detail["message"]
 
 
 @pytest.mark.asyncio
@@ -96,3 +100,6 @@ async def test_retry_compensation_route_maps_not_found_to_404(mocker, recovery_a
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post(f"/v1/sagas/{'a' * 32}/steps/{'b' * 16}/retry-compensation")
     assert resp.status_code == 404
+    detail = resp.json()["detail"]
+    assert detail["code"] == "RECOVERY_NOT_FOUND"
+    assert "compensation missing" in detail["message"]

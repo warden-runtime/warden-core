@@ -93,16 +93,18 @@ For Streamable HTTP instead:
 | `warden_list_saga_definitions` | `GET /v1/definitions/sagas` |
 | `warden_list_worker_definitions` | `GET /v1/definitions/workers` |
 | `warden_list_step_definitions` | `GET /v1/definitions/steps` (catalog) |
-| `warden_get_saga_definition` | `GET /v1/definitions/sagas/{id}` |
-| `warden_get_worker_definition` | `GET /v1/definitions/workers/{id}` |
-| `warden_get_step_definition` | `GET /v1/definitions/steps/{id}` (catalog) |
+| `warden_get_saga_definition` | `GET /v1/definitions/sagas?id=` XOR `namespace+name+version` |
+| `warden_get_worker_definition` | `GET /v1/definitions/workers?…` (same identity) |
+| `warden_get_step_definition` | `GET /v1/definitions/steps?…` (catalog) |
 | `warden_set_definition_active` | `PATCH /v1/definitions/{workers\|steps\|sagas}?…` |
 | `warden_start_saga` | `POST /v1/sagas/start` |
+| `warden_start_and_wait` | Start + poll until terminal/HITL/timeout |
 | `warden_list_sagas` | `GET /v1/sagas` (filters: `in_flight`, `failed`, `status`, …) |
-| `warden_get_saga_status` | `GET /v1/sagas?trace_id=...` (single-instance shape) |
-| `warden_list_saga_steps` | `GET /v1/sagas/steps` (**runtime** instances) |
+| `warden_get_saga_status` | `GET /v1/sagas/{trace_id}` (`found` soft-404) |
+| `warden_list_saga_steps` | `GET /v1/sagas/{trace_id}/steps` (**runtime** instances) |
 | `warden_get_step_detail` | `GET /v1/sagas/{trace_id}/steps/{step_span_id}` (**runtime**) |
 | `warden_wait_for_saga` | Polls until terminal/HITL/timeout; includes slim `steps` summary |
+| `warden_wait_for_review` | Polls until `AWAITING_HUMAN` / pending-review non-empty |
 | `warden_list_pending_reviews` | `GET /v1/sagas/pending-review` |
 | `warden_decide_step` | `POST .../decision` |
 | `warden_approve_step` | `POST .../approve` |
@@ -120,8 +122,10 @@ Prefer `warden_ready` before deploy/start. Saga mutations return **202 Accepted*
 ## Breaking changes (recent)
 
 - **`warden_start_saga`**: parameter `input` renamed to **`saga_input`**; response includes engine `created` when present.
-- **`warden_get_saga_status`**: returns `{found, trace_id, saga}` only (no duplicated list pagination fields).
+- **`warden_get_saga_status`**: returns `{found, trace_id, saga}` only (no duplicated list pagination fields); uses path `GET /v1/sagas/{trace_id}`.
 - **`warden_wait_for_saga`**: default timeout reduced to **60s**; returns immediately when `trace_id` is unknown.
+- **`warden_wait_for_review` / `warden_start_and_wait`**: bounded helpers (same `timeout_s` / `timed_out` contract).
+- **Definition get tools**: `definition_id` XOR `namespace+name+version` (collection query).
 - **`ENGINE_URL`**: also accepted as **`WARDEN_MCP_ENGINE_URL`**.
 - **First-class steps:** deploy `kind: step`; list/get via `warden_*_step_definitions`; soft-disable via `warden_set_definition_active` (query `id` XOR `namespace+name+version`, not path UUID).
 - **Saga `include_body`:** authoring AST only; hydration runs at start.

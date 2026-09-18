@@ -385,6 +385,18 @@
           "offset": {
             "title": "Offset",
             "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching rows when include_total=true was requested.",
+            "title": "Total"
           }
         },
         "required": [
@@ -1067,6 +1079,18 @@
           "offset": {
             "title": "Offset",
             "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total matching rows when include_total=true was requested.",
+            "title": "Total"
           }
         },
         "required": [
@@ -1405,11 +1429,29 @@
   "paths": {
     "/v1/definitions/sagas": {
       "get": {
-        "description": "List registered saga definitions, newest updates first.",
+        "description": "List saga definitions, or fetch one by ``id`` XOR ``namespace+name+version``.",
         "operationId": "get_definitions_sagas_v1_definitions_sagas_get",
         "parameters": [
           {
-            "description": "Filter by namespace; omit for all.",
+            "description": "Definition UUID for single-item fetch (XOR with triple).",
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Definition UUID for single-item fetch (XOR with triple).",
+              "title": "Id"
+            }
+          },
+          {
+            "description": "Filter or triple identity.",
             "in": "query",
             "name": "namespace",
             "required": false,
@@ -1422,12 +1464,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by namespace; omit for all.",
+              "description": "Filter or triple identity.",
               "title": "Namespace"
             }
           },
           {
-            "description": "Exact saga definition name.",
+            "description": "Exact name filter or triple identity.",
             "in": "query",
             "name": "name",
             "required": false,
@@ -1440,12 +1482,30 @@
                   "type": "null"
                 }
               ],
-              "description": "Exact saga definition name.",
+              "description": "Exact name filter or triple identity.",
               "title": "Name"
             }
           },
           {
-            "description": "Filter by active flag.",
+            "description": "With namespace+name: single-item fetch by triple.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+name: single-item fetch by triple.",
+              "title": "Version"
+            }
+          },
+          {
+            "description": "Filter by active flag (list mode).",
             "in": "query",
             "name": "is_active",
             "required": false,
@@ -1458,8 +1518,20 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by active flag.",
+              "description": "Filter by active flag (list mode).",
               "title": "Is Active"
+            }
+          },
+          {
+            "description": "When fetching one definition, include full manifest body.",
+            "in": "query",
+            "name": "include_body",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When fetching one definition, include full manifest body.",
+              "title": "Include Body",
+              "type": "boolean"
             }
           },
           {
@@ -1512,7 +1584,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SagaDefinitionListResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SagaDefinitionItem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SagaDefinitionListResponse"
+                    }
+                  ],
+                  "title": "Response Get Definitions Sagas V1 Definitions Sagas Get"
                 }
               }
             },
@@ -1706,11 +1786,29 @@
     },
     "/v1/definitions/steps": {
       "get": {
-        "description": "List registered step definitions, newest updates first.",
+        "description": "List step definitions, or fetch one by ``id`` XOR ``namespace+name+version``.",
         "operationId": "get_definitions_steps_v1_definitions_steps_get",
         "parameters": [
           {
-            "description": "Filter by namespace; omit for all.",
+            "description": "Definition UUID for single-item fetch (XOR with triple).",
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Definition UUID for single-item fetch (XOR with triple).",
+              "title": "Id"
+            }
+          },
+          {
+            "description": "Filter or triple identity.",
             "in": "query",
             "name": "namespace",
             "required": false,
@@ -1723,12 +1821,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by namespace; omit for all.",
+              "description": "Filter or triple identity.",
               "title": "Namespace"
             }
           },
           {
-            "description": "Exact step definition name.",
+            "description": "Exact name filter or triple identity.",
             "in": "query",
             "name": "name",
             "required": false,
@@ -1741,12 +1839,30 @@
                   "type": "null"
                 }
               ],
-              "description": "Exact step definition name.",
+              "description": "Exact name filter or triple identity.",
               "title": "Name"
             }
           },
           {
-            "description": "Filter by active flag.",
+            "description": "With namespace+name: single-item fetch by triple.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+name: single-item fetch by triple.",
+              "title": "Version"
+            }
+          },
+          {
+            "description": "Filter by active flag (list mode).",
             "in": "query",
             "name": "is_active",
             "required": false,
@@ -1759,8 +1875,20 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by active flag.",
+              "description": "Filter by active flag (list mode).",
               "title": "Is Active"
+            }
+          },
+          {
+            "description": "When fetching one definition, include full manifest body.",
+            "in": "query",
+            "name": "include_body",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When fetching one definition, include full manifest body.",
+              "title": "Include Body",
+              "type": "boolean"
             }
           },
           {
@@ -1813,7 +1941,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StepDefinitionListResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StepDefinitionItem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StepDefinitionListResponse"
+                    }
+                  ],
+                  "title": "Response Get Definitions Steps V1 Definitions Steps Get"
                 }
               }
             },
@@ -2007,11 +2143,29 @@
     },
     "/v1/definitions/workers": {
       "get": {
-        "description": "List registered worker definitions, newest updates first.",
+        "description": "List worker definitions, or fetch one by ``id`` XOR ``namespace+name+version``.",
         "operationId": "get_definitions_workers_v1_definitions_workers_get",
         "parameters": [
           {
-            "description": "Filter by namespace; omit for all.",
+            "description": "Definition UUID for single-item fetch (XOR with triple).",
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Definition UUID for single-item fetch (XOR with triple).",
+              "title": "Id"
+            }
+          },
+          {
+            "description": "Filter or triple identity.",
             "in": "query",
             "name": "namespace",
             "required": false,
@@ -2024,12 +2178,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by namespace; omit for all.",
+              "description": "Filter or triple identity.",
               "title": "Namespace"
             }
           },
           {
-            "description": "Exact worker definition name.",
+            "description": "Exact name filter or triple identity.",
             "in": "query",
             "name": "name",
             "required": false,
@@ -2042,12 +2196,30 @@
                   "type": "null"
                 }
               ],
-              "description": "Exact worker definition name.",
+              "description": "Exact name filter or triple identity.",
               "title": "Name"
             }
           },
           {
-            "description": "Filter by active flag.",
+            "description": "With namespace+name: single-item fetch by triple.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With namespace+name: single-item fetch by triple.",
+              "title": "Version"
+            }
+          },
+          {
+            "description": "Filter by active flag (list mode).",
             "in": "query",
             "name": "is_active",
             "required": false,
@@ -2060,8 +2232,20 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by active flag.",
+              "description": "Filter by active flag (list mode).",
               "title": "Is Active"
+            }
+          },
+          {
+            "description": "When fetching one definition, include full manifest body.",
+            "in": "query",
+            "name": "include_body",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When fetching one definition, include full manifest body.",
+              "title": "Include Body",
+              "type": "boolean"
             }
           },
           {
@@ -2114,7 +2298,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkerDefinitionListResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkerDefinitionItem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WorkerDefinitionListResponse"
+                    }
+                  ],
+                  "title": "Response Get Definitions Workers V1 Definitions Workers Get"
                 }
               }
             },
@@ -2656,6 +2848,18 @@
             }
           },
           {
+            "description": "Include total matching row count.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include total matching row count.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -2814,6 +3018,18 @@
             }
           },
           {
+            "description": "Include total matching row count.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include total matching row count.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -2869,6 +3085,193 @@
           }
         },
         "summary": "Get Saga Steps",
+        "tags": [
+          "sagas"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}": {
+      "get": {
+        "description": "Return one saga instance by trace_id (404 if missing).",
+        "operationId": "get_saga_v1_sagas__trace_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional namespace guard; must match the saga row.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional namespace guard; must match the saga row.",
+              "title": "Namespace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaInstanceItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Saga",
+        "tags": [
+          "sagas"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps": {
+      "get": {
+        "description": "List step instances for one saga (path form of GET /v1/sagas/steps).",
+        "operationId": "get_saga_steps_by_path_v1_sagas__trace_id__steps_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional namespace guard; must match the saga row.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional namespace guard; must match the saga row.",
+              "title": "Namespace"
+            }
+          },
+          {
+            "description": "Repeat for multiple step statuses.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Repeat for multiple step statuses.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Include total matching row count.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include total matching row count.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaStepInstanceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Saga Steps By Path",
         "tags": [
           "sagas"
         ]

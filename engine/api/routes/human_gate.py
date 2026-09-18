@@ -42,11 +42,30 @@ _MUTATION_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 def _http_error_from_decision(exc: Exception) -> HTTPException:
     if isinstance(exc, HumanDecisionNotFoundError):
-        return HTTPException(status_code=404, detail="Step not found.")
+        return HTTPException(
+            status_code=404,
+            detail={
+                "code": "HUMAN_DECISION_NOT_FOUND",
+                "message": "Step not found.",
+            },
+        )
     if isinstance(exc, HumanDecisionConflictError):
-        return HTTPException(status_code=409, detail=str(exc))
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "HUMAN_DECISION_CONFLICT",
+                "message": str(exc),
+                "status": exc.status,
+            },
+        )
     if isinstance(exc, InvalidHumanDecisionError):
-        return HTTPException(status_code=422, detail=str(exc))
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "INVALID_HUMAN_DECISION",
+                "message": str(exc),
+            },
+        )
     raise exc
 
 
@@ -55,6 +74,7 @@ async def pending_review_steps(
     namespace: str | None = Query(default=None),
     trace_id: str | None = Query(default=None),
     kind: str | None = Query(default=None, description="Optional step kind: reason or commit."),
+    include_total: bool = Query(default=False, description="Include total matching row count."),
     limit: int | None = Query(default=None),
     offset: int | None = Query(default=None),
 ) -> PendingReviewStepListResponse:
@@ -100,11 +120,19 @@ async def pending_review_steps(
                 started_at=row.started_at,
             )
         )
+    total = None
+    if include_total:
+        total = await read_queries.count_pending_review_steps(
+            namespace=namespace,
+            saga_trace_id=trace_id,
+            step_kind=step_kind,
+        )
     return PendingReviewStepListResponse(
         items=items,
         limit=lim,
         offset=off,
         has_more=len(items) == lim,
+        total=total,
     )
 
 
@@ -119,7 +147,13 @@ async def _enqueue_hitl_retry(**kwargs) -> dict[str, str]:
     try:
         return await enqueue_hitl_retry(**kwargs)
     except HitlRetryLimitError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "HITL_RETRY_LIMIT",
+                "message": str(e),
+            },
+        ) from e
     except (HumanDecisionNotFoundError, HumanDecisionConflictError) as e:
         raise _http_error_from_decision(e) from e
 
