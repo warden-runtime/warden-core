@@ -184,4 +184,4 @@ If the response is **202** with `"status": "claim_active"`, a worker still holds
 
 ## What's next
 
-If the saga pauses at `AWAITING_HUMAN`, submit a decision via [HITL](hitl.md). If a step is stuck in `IN_PROGRESS`, see [Recovery](recovery.md). CLI equivalent: [Start and monitor](../cli/start-and-monitor.md). Schema details: [API Reference](/docs/api/api-reference) — [Post Sagas Start](/docs/api/post-sagas-start-v-1-sagas-start-post), [Get Sagas](/docs/api/get-sagas-v-1-sagas-get), [Get Saga Steps](/docs/api/get-saga-steps-v-1-sagas-steps-get).
+If the saga pauses at `AWAITING_HUMAN`, submit a decision via [HITL](hitl.md). If a step is stuck in `IN_PROGRESS`, see [Recovery](recovery.md). CLI equivalent: [Start and monitor](../cli/start-and-monitor.md). Schema details: [API Reference](/docs/api/api-reference) — [Post Sagas Start](/docs/api/post-sagas-start-v-1-sagas-start-post), [Get Saga](/docs/api/get-saga-v-1-sagas-trace-id-get), [Get Sagas](/docs/api/get-sagas-v-1-sagas-get), [Get Saga Steps](/docs/api/get-saga-steps-v-1-sagas-trace-id-steps-get).
