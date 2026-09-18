@@ -41,26 +41,6 @@
         "title": "HealthResponse",
         "type": "object"
       },
-      "HumanApproveRequest": {
-        "description": "Optional body for human approval.",
-        "properties": {
-          "output": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional output override for reason-step approve-with-edit.",
-            "title": "Output"
-          }
-        },
-        "title": "HumanApproveRequest",
-        "type": "object"
-      },
       "HumanDecisionRequest": {
         "description": "Body for a HITL decision.",
         "properties": {
@@ -128,26 +108,6 @@
           "idempotency_key"
         ],
         "title": "HumanDecisionResponse",
-        "type": "object"
-      },
-      "HumanRejectRequest": {
-        "description": "Optional body for human rejection.",
-        "properties": {
-          "error_details": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional structured rejection reason.",
-            "title": "Error Details"
-          }
-        },
-        "title": "HumanRejectRequest",
         "type": "object"
       },
       "HumanRetryRequest": {
@@ -904,7 +864,7 @@
         "type": "object"
       },
       "SagaStepInstanceItem": {
-        "description": "One row in GET /v1/sagas/steps.",
+        "description": "One row in GET /v1/sagas/{trace_id}/steps.",
         "properties": {
           "compensates_span_id": {
             "anyOf": [
@@ -1058,7 +1018,7 @@
         "type": "object"
       },
       "SagaStepInstanceListResponse": {
-        "description": "Response for GET /v1/sagas/steps.",
+        "description": "Response for GET /v1/sagas/{trace_id}/steps.",
         "properties": {
           "has_more": {
             "description": "True when len(items) == limit (more pages may exist).",
@@ -1729,61 +1689,6 @@
         ]
       }
     },
-    "/v1/definitions/sagas/{definition_id}": {
-      "get": {
-        "description": "Return one saga definition by primary key UUID (for start-saga resolution).",
-        "operationId": "get_definitions_saga_by_id_v1_definitions_sagas__definition_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "definition_id",
-            "required": true,
-            "schema": {
-              "title": "Definition Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "When true, include the full manifest blueprint in body.",
-            "in": "query",
-            "name": "include_body",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "When true, include the full manifest blueprint in body.",
-              "title": "Include Body",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SagaDefinitionItem"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Definitions Saga By Id",
-        "tags": [
-          "definitions"
-        ]
-      }
-    },
     "/v1/definitions/steps": {
       "get": {
         "description": "List step definitions, or fetch one by ``id`` XOR ``namespace+name+version``.",
@@ -2086,61 +1991,6 @@
         ]
       }
     },
-    "/v1/definitions/steps/{definition_id}": {
-      "get": {
-        "description": "Return one step definition by primary key UUID.",
-        "operationId": "get_definitions_step_by_id_v1_definitions_steps__definition_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "definition_id",
-            "required": true,
-            "schema": {
-              "title": "Definition Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "When true, include the full step manifest blueprint in body.",
-            "in": "query",
-            "name": "include_body",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "When true, include the full step manifest blueprint in body.",
-              "title": "Include Body",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StepDefinitionItem"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Definitions Step By Id",
-        "tags": [
-          "definitions"
-        ]
-      }
-    },
     "/v1/definitions/workers": {
       "get": {
         "description": "List worker definitions, or fetch one by ``id`` XOR ``namespace+name+version``.",
@@ -2438,61 +2288,6 @@
           }
         },
         "summary": "Patch Definitions Worker Active",
-        "tags": [
-          "definitions"
-        ]
-      }
-    },
-    "/v1/definitions/workers/{definition_id}": {
-      "get": {
-        "description": "Return one worker definition by primary key UUID.",
-        "operationId": "get_definitions_worker_by_id_v1_definitions_workers__definition_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "definition_id",
-            "required": true,
-            "schema": {
-              "title": "Definition Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "When true, include the full manifest body.",
-            "in": "query",
-            "name": "include_body",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "When true, include the full manifest body.",
-              "title": "Include Body",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerDefinitionItem"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Definitions Worker By Id",
         "tags": [
           "definitions"
         ]
@@ -2962,18 +2757,77 @@
         ]
       }
     },
-    "/v1/sagas/steps": {
+    "/v1/sagas/{trace_id}": {
       "get": {
-        "description": "List step instances for one saga, ordered by forward_seq.",
-        "operationId": "get_saga_steps_v1_sagas_steps_get",
+        "description": "Return one saga instance by trace_id (404 if missing).",
+        "operationId": "get_saga_v1_sagas__trace_id__get",
         "parameters": [
           {
-            "description": "Saga instance trace_id (32-char hex).",
-            "in": "query",
+            "in": "path",
             "name": "trace_id",
             "required": true,
             "schema": {
-              "description": "Saga instance trace_id (32-char hex).",
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional namespace guard; must match the saga row.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional namespace guard; must match the saga row.",
+              "title": "Namespace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaInstanceItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Saga",
+        "tags": [
+          "sagas"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps": {
+      "get": {
+        "description": "List step instances for one saga, ordered by forward_seq.",
+        "operationId": "get_saga_steps_v1_sagas__trace_id__steps_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
               "title": "Trace Id",
               "type": "string"
             }
@@ -3090,193 +2944,6 @@
         ]
       }
     },
-    "/v1/sagas/{trace_id}": {
-      "get": {
-        "description": "Return one saga instance by trace_id (404 if missing).",
-        "operationId": "get_saga_v1_sagas__trace_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "trace_id",
-            "required": true,
-            "schema": {
-              "title": "Trace Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional namespace guard; must match the saga row.",
-            "in": "query",
-            "name": "namespace",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional namespace guard; must match the saga row.",
-              "title": "Namespace"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SagaInstanceItem"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Saga",
-        "tags": [
-          "sagas"
-        ]
-      }
-    },
-    "/v1/sagas/{trace_id}/steps": {
-      "get": {
-        "description": "List step instances for one saga (path form of GET /v1/sagas/steps).",
-        "operationId": "get_saga_steps_by_path_v1_sagas__trace_id__steps_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "trace_id",
-            "required": true,
-            "schema": {
-              "title": "Trace Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional namespace guard; must match the saga row.",
-            "in": "query",
-            "name": "namespace",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional namespace guard; must match the saga row.",
-              "title": "Namespace"
-            }
-          },
-          {
-            "description": "Repeat for multiple step statuses.",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Repeat for multiple step statuses.",
-              "title": "Status"
-            }
-          },
-          {
-            "description": "Include total matching row count.",
-            "in": "query",
-            "name": "include_total",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "Include total matching row count.",
-              "title": "Include Total",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Limit"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Offset"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SagaStepInstanceListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Saga Steps By Path",
-        "tags": [
-          "sagas"
-        ]
-      }
-    },
     "/v1/sagas/{trace_id}/steps/{step_span_id}": {
       "get": {
         "description": "Return one step instance with resolved inputs and output payloads.",
@@ -3347,84 +3014,6 @@
         ]
       }
     },
-    "/v1/sagas/{trace_id}/steps/{step_span_id}/approve": {
-      "post": {
-        "description": "Approve a HITL-held step and enqueue HUMAN_APPROVED for the engine.",
-        "operationId": "approve_step_v1_sagas__trace_id__steps__step_span_id__approve_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "trace_id",
-            "required": true,
-            "schema": {
-              "title": "Trace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "step_span_id",
-            "required": true,
-            "schema": {
-              "title": "Step Span Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "namespace",
-            "required": false,
-            "schema": {
-              "default": "default",
-              "title": "Namespace",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/HumanApproveRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HumanDecisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "description": "Step not found."
-          },
-          "409": {
-            "description": "Conflict (e.g. step not awaiting human review)."
-          },
-          "422": {
-            "description": "Invalid request."
-          }
-        },
-        "summary": "Approve Step",
-        "tags": [
-          "hitl"
-        ]
-      }
-    },
     "/v1/sagas/{trace_id}/steps/{step_span_id}/decision": {
       "post": {
         "description": "Submit one idempotent human decision for a HITL-held step.",
@@ -3491,84 +3080,6 @@
           }
         },
         "summary": "Decide Step",
-        "tags": [
-          "hitl"
-        ]
-      }
-    },
-    "/v1/sagas/{trace_id}/steps/{step_span_id}/reject": {
-      "post": {
-        "description": "Reject a HITL-held step and enqueue HUMAN_REJECTED for the engine.",
-        "operationId": "reject_step_v1_sagas__trace_id__steps__step_span_id__reject_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "trace_id",
-            "required": true,
-            "schema": {
-              "title": "Trace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "step_span_id",
-            "required": true,
-            "schema": {
-              "title": "Step Span Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "namespace",
-            "required": false,
-            "schema": {
-              "default": "default",
-              "title": "Namespace",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/HumanRejectRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HumanDecisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "description": "Step not found."
-          },
-          "409": {
-            "description": "Conflict (e.g. step not awaiting human review)."
-          },
-          "422": {
-            "description": "Invalid request."
-          }
-        },
-        "summary": "Reject Step",
         "tags": [
           "hitl"
         ]

@@ -122,7 +122,7 @@ Also distinct from **LLM automated backoff** (`WARDEN_LLM_RETRY_*` in [Configura
 Poll steps while diagnosing — compensation rows include `compensates_span_id`:
 
 ```bash
-curl -sS "$ENGINE_URL/v1/sagas/steps?trace_id=$TRACE_ID"
+curl -sS "$ENGINE_URL/v1/sagas/$TRACE_ID/steps"
 ```
 
 Read `step_span_id`, `step_id`, `status`, and `compensates_span_id` from each item in the JSON response.

@@ -91,7 +91,7 @@ def test_show_step_by_step_id_resolves_span(monkeypatch):
 
     def _fake_fetch(path: str, *, params=None):
         calls.append(path)
-        if path == "/v1/sagas/steps":
+        if path == f"/v1/sagas/{_TRACE}/steps":
             return {
                 "items": [
                     {
@@ -118,7 +118,7 @@ def test_show_step_by_step_id_resolves_span(monkeypatch):
 
 def test_show_step_by_step_id_disambiguates(monkeypatch):
     def _fake_fetch(path: str, *, params=None):
-        if path == "/v1/sagas/steps":
+        if path == f"/v1/sagas/{_TRACE}/steps":
             return {
                 "items": [
                     {
@@ -225,7 +225,7 @@ def test_show_step_by_step_id_tiebreaks_on_span_id(monkeypatch):
     same_ts = "2026-01-01T00:00:00+00:00"
 
     def _fake_fetch(path: str, *, params=None):
-        if path == "/v1/sagas/steps":
+        if path == f"/v1/sagas/{_TRACE}/steps":
             return {
                 "items": [
                     {

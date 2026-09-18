@@ -45,7 +45,7 @@ Warden is a **database-backed coordinator**, not a blocking RPC proxy.
 
 - Most mutating routes that **enqueue work** return **`202 Accepted`** when the request is accepted (start saga, HITL decisions, operator recovery).
 - **`POST /v1/manifests`** is the exception: deploy validates and registers the definition **synchronously** and returns **`200`** with a success message.
-- **Poll** saga and step status with collection endpoints — see [Start and monitor](start-and-monitor.md).
+- **Poll** saga and step status with path GETs (`/v1/sagas/{trace_id}`, `…/steps`) — see [Start and monitor](start-and-monitor.md). Collection `GET /v1/sagas` remains for fleet filters.
 - There are **no OSS webhooks**; integrators poll (or use OpenTelemetry/Jaeger in parallel — [Observability](../observability.md)).
 
 ## Operator retry matrix

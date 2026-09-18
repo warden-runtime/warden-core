@@ -80,24 +80,6 @@ class ManifestDeployResponse(BaseModel):
     )
 
 
-class HumanApproveRequest(BaseModel):
-    """Optional body for human approval."""
-
-    output: dict[str, Any] | None = Field(
-        default=None,
-        description="Optional output override for reason-step approve-with-edit.",
-    )
-
-
-class HumanRejectRequest(BaseModel):
-    """Optional body for human rejection."""
-
-    error_details: dict[str, Any] | None = Field(
-        default=None,
-        description="Optional structured rejection reason.",
-    )
-
-
 class HumanRetryRequest(BaseModel):
     """Optional body for manual HITL retry."""
 
@@ -286,7 +268,7 @@ class SagaInstanceListResponse(BaseModel):
 
 
 class SagaStepInstanceItem(BaseModel):
-    """One row in GET /v1/sagas/steps."""
+    """One row in GET /v1/sagas/{trace_id}/steps."""
 
     step_span_id: str
     saga_trace_id: str
@@ -319,7 +301,7 @@ class SagaStepInstanceItem(BaseModel):
 
 
 class SagaStepInstanceListResponse(BaseModel):
-    """Response for GET /v1/sagas/steps."""
+    """Response for GET /v1/sagas/{trace_id}/steps."""
 
     items: list[SagaStepInstanceItem]
     limit: int

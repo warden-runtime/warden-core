@@ -99,17 +99,5 @@ def saga_steps_path(trace_id: str) -> str:
     return f"/v1/sagas/{quote(trace_id, safe='')}/steps"
 
 
-def saga_definition_path(definition_id: str) -> str:
-    return f"/v1/definitions/sagas/{quote(definition_id.strip(), safe='')}"
-
-
-def worker_definition_path(definition_id: str) -> str:
-    return f"/v1/definitions/workers/{quote(definition_id.strip(), safe='')}"
-
-
-def step_definition_path(definition_id: str) -> str:
-    return f"/v1/definitions/steps/{quote(definition_id.strip(), safe='')}"
-
-
 def definitions_collection_path(kind: DefinitionKind) -> str:
     return f"/v1/definitions/{kind}"

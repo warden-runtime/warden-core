@@ -344,13 +344,13 @@ def _build_saga_list_params(
 
 def _build_step_list_params(
     *,
-    trace_id: str,
     namespace: str | None,
     status_vals: list[str],
     limit: int | None,
     offset: int | None,
 ) -> list[tuple[str, str]]:
-    params: list[tuple[str, str]] = [("trace_id", trace_id)]
+    """Query params for GET /v1/sagas/{trace_id}/steps (trace_id is in the path)."""
+    params: list[tuple[str, str]] = []
     if namespace is not None:
         params.append(("namespace", namespace))
     for s in status_vals:
@@ -360,6 +360,10 @@ def _build_step_list_params(
     if offset is not None:
         params.append(("offset", str(offset)))
     return params
+
+
+def _saga_steps_path(trace_id: str) -> str:
+    return f"/v1/sagas/{trace_id}/steps"
 
 
 def _normalize_definition_list_kind(type_: str) -> str:
@@ -630,10 +634,9 @@ def _pick_step_span_id_for_step_id(
 
 def _build_step_list_params_for_show(
     *,
-    trace_id: str,
     namespace: str | None,
 ) -> list[tuple[str, str]]:
-    params: list[tuple[str, str]] = [("trace_id", trace_id), ("limit", "100")]
+    params: list[tuple[str, str]] = [("limit", "100")]
     if namespace is not None:
         params.append(("namespace", namespace))
     return params
@@ -1048,7 +1051,8 @@ def list_definitions(
         "`--watch` polls until the saga is terminal (with `--trace-id`), until no in-flight rows "
         "for two consecutive polls (with `--in-flight`), until Ctrl+C, or until a 10-minute cap "
         "when neither filter is set. Requires an interactive terminal (not a pipe or CI log). "
-        "Maps to GET /v1/sagas."
+        "With only `--trace-id` (optional `--namespace`), uses GET /v1/sagas/{trace_id}; "
+        "otherwise GET /v1/sagas."
     ),
 )
 def list_sagas(
@@ -1114,18 +1118,41 @@ def list_sagas(
 ) -> None:
     """List saga instances stored by the engine."""
     status_vals = _validate_saga_list_filters(in_flight=in_flight, failed=failed, status=status)
-    params = _build_saga_list_params(
-        namespace=namespace,
-        trace_id=trace_id,
-        parent_trace_id=parent_trace_id,
-        in_flight=in_flight,
-        failed=failed,
-        status_vals=status_vals,
-        limit=limit,
-        offset=offset,
+    use_path = (
+        trace_id is not None
+        and parent_trace_id is None
+        and not in_flight
+        and not failed
+        and not status_vals
+        and limit is None
+        and offset is None
     )
 
     def _fetch() -> dict[str, Any]:
+        if use_path and trace_id is not None:
+            params: list[tuple[str, str]] = []
+            if namespace is not None:
+                params.append(("namespace", namespace))
+            saga = _fetch_engine_get_json(
+                f"/v1/sagas/{trace_id}",
+                params=params or None,
+            )
+            return {
+                "items": [saga],
+                "limit": 1,
+                "offset": 0,
+                "has_more": False,
+            }
+        params = _build_saga_list_params(
+            namespace=namespace,
+            trace_id=trace_id,
+            parent_trace_id=parent_trace_id,
+            in_flight=in_flight,
+            failed=failed,
+            status_vals=status_vals,
+            limit=limit,
+            offset=offset,
+        )
         return _fetch_engine_get_json("/v1/sagas", params=params or None)
 
     _run_list_command(
@@ -1154,7 +1181,7 @@ def list_sagas(
         "Repeat `--status` to filter step rows. "
         "`--watch` polls until every returned step row is terminal or you press Ctrl+C. "
         "Requires an interactive terminal (not a pipe or CI log). "
-        "Maps to GET /v1/sagas/steps."
+        "Maps to GET /v1/sagas/{trace_id}/steps."
     ),
 )
 def list_steps(
@@ -1210,15 +1237,15 @@ def list_steps(
     """List saga step rows for a single trace_id."""
     status_vals = list(status) if status else []
     params = _build_step_list_params(
-        trace_id=trace_id,
         namespace=namespace,
         status_vals=status_vals,
         limit=limit,
         offset=offset,
     )
+    path = _saga_steps_path(trace_id)
 
     def _fetch() -> dict[str, Any]:
-        return _fetch_engine_get_json("/v1/sagas/steps", params=params)
+        return _fetch_engine_get_json(path, params=params or None)
 
     def _print_table(items: list[dict[str, Any]]) -> None:
         _print_saga_step_list(items, show_errors=show_errors, trace_id=trace_id)
@@ -1256,8 +1283,8 @@ def _resolve_show_step_span_id(
     if step_span_id is not None:
         return step_span_id
     list_data = _fetch_engine_get_json(
-        "/v1/sagas/steps",
-        params=_build_step_list_params_for_show(trace_id=trace_id, namespace=namespace),
+        _saga_steps_path(trace_id),
+        params=_build_step_list_params_for_show(namespace=namespace),
     )
     items = list_data.get("items") or []
     matches = [it for it in items if it.get("step_id") == step_id]
