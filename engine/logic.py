@@ -42,6 +42,7 @@ from common.hitl_retry import (
 )
 from common.models import (
     EventType,
+    OutboxEvent,
     ProcessedIngestEvent,
     SagaInstance,
     SagaStatus,
@@ -665,6 +666,7 @@ async def _reset_step_for_worker_retry(
     await _clear_worker_result_ingest_dedup(
         saga_trace_id,
         step.span_id,
+        namespace=saga.namespace,
         db_conn=db_conn,
     )
     await step.save(using_db=db_conn)
@@ -695,14 +697,30 @@ async def _clear_worker_result_ingest_dedup(
     saga_trace_id: str,
     step_span_id: str,
     *,
+    namespace: str,
     db_conn: BaseDBAsyncClient,
 ) -> None:
-    """Drop prior worker-result dedup keys so HITL retry can ingest a new completion."""
+    """Drop prior worker-result ingest and outbox dedup so a retry can emit/ingest again.
+
+    Orchestrator result events use a stable ``{trace}:{event_type}:{span}`` outbox
+    idempotency key. Leaving the prior OutboxEvent row in place makes the worker's
+    re-emit a unique-constraint no-op (and on Postgres aborts the claim-release
+    transaction), so the engine never sees the retry outcome.
+    """
     keys = [
         f"{saga_trace_id}:{EventType.STEP_COMPLETED.value}:{step_span_id}",
         f"{saga_trace_id}:{EventType.STEP_FAILED.value}:{step_span_id}",
     ]
     await ProcessedIngestEvent.filter(event_dedup_key__in=keys).using_db(db_conn).delete()
+    await (
+        OutboxEvent.filter(
+            namespace=namespace,
+            destination_topic=TOPIC_ORCHESTRATOR_EVENTS,
+            idempotency_key__in=keys,
+        )
+        .using_db(db_conn)
+        .delete()
+    )
 
 
 # --- STATE HANDLERS
@@ -896,6 +914,109 @@ async def _maybe_stop_reason_on_policy(
     return False
 
 
+async def _ignore_stale_step_completed(
+    *,
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    event: StepCompletedIngestEvent,
+    db_conn: BaseDBAsyncClient,
+) -> bool:
+    """Return True when STEP_COMPLETED must be ignored (hold or non-IN_PROGRESS)."""
+    if saga.status == SagaStatus.AWAITING_RECOVERY:
+        logger.info(
+            "Ignored late STEP_COMPLETED for step %s while saga AWAITING_RECOVERY",
+            event.step_span_id,
+        )
+        await _notify_skipped_ingest(
+            event,
+            dedup_reason="awaiting_recovery",
+            conn=db_conn,
+        )
+        return True
+    if step.status != StepStatus.IN_PROGRESS:
+        logger.warning(
+            "Ignored late STEP_COMPLETED for Step %s. Current status: %s.",
+            event.step_span_id,
+            step.status,
+        )
+        await _notify_skipped_ingest(
+            event,
+            dedup_reason="late_step_state",
+            conn=db_conn,
+        )
+        return True
+    return False
+
+
+async def _fail_step_completed_on_output_schema(
+    *,
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    event: StepCompletedIngestEvent,
+    db_conn: BaseDBAsyncClient,
+) -> bool:
+    """Validate output_schema when present; on failure run lifecycle and return True."""
+    if not step.output_schema:
+        return False
+    try:
+        validate_business_data_schema(
+            event.output,
+            step.output_schema,
+            f"Step {step.step_id} output",
+        )
+    except Exception as e:
+        logger.exception(
+            "Step %s output failed schema validation: %s",
+            event.step_span_id,
+            e,
+        )
+        synthetic = StepFailedEvent(
+            saga_trace_id=event.saga_trace_id,
+            namespace=event.namespace,
+            event_type=EventType.STEP_FAILED.value,
+            step_span_id=event.step_span_id,
+            error_details={"code": "OUTPUT_SCHEMA_VALIDATION_FAILED", "message": str(e)},
+            output=event.output,
+            timing=event.timing,
+            usage=event.usage,
+        )
+        await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
+        return True
+    return False
+
+
+async def _maybe_hold_reason_hitl_on_completed(
+    *,
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    event: StepCompletedIngestEvent,
+    db_conn: BaseDBAsyncClient,
+    trace_ctx: dict[str, Any],
+) -> bool:
+    """Enter HITL hold for reason steps; return True when held."""
+    if not (step.hitl_required and step.step_kind == "reason"):
+        return False
+    output_for_review = event.output if isinstance(event.output, dict) else {}
+    await step.save(
+        using_db=db_conn,
+        update_fields=["execution_timing", "execution_usage"],
+    )
+    await _enter_hitl_hold(
+        saga,
+        step,
+        db_conn=db_conn,
+        trace_context=trace_ctx,
+        review_subject="output",
+        pending_payload=output_for_review,
+    )
+    logger.info(
+        "Reason step %s held for HITL review (trace_id=%s)",
+        event.step_span_id,
+        saga.trace_id,
+    )
+    return True
+
+
 @trace_step()
 async def handle_step_completed(
     saga: SagaInstance,
@@ -930,47 +1051,16 @@ async def handle_step_completed(
         logger.error("Step %s not found in DB.", event.step_span_id)
         return
 
-    if step.status != StepStatus.IN_PROGRESS:
-        logger.warning(
-            "Ignored late STEP_COMPLETED for Step %s. Current status: %s.",
-            event.step_span_id,
-            step.status,
-        )
-        await _notify_skipped_ingest(
-            event,
-            dedup_reason="late_step_state",
-            conn=db_conn,
-        )
+    if await _ignore_stale_step_completed(saga=saga, step=step, event=event, db_conn=db_conn):
         return
 
     await merge_step_timing_if_needed(step, worker_timing=event.timing, conn=db_conn)
     await merge_step_usage_if_needed(step, worker_usage=event.usage, conn=db_conn)
 
-    if step.output_schema:
-        try:
-            validate_business_data_schema(
-                event.output,
-                step.output_schema,
-                f"Step {step.step_id} output",
-            )
-        except Exception as e:
-            logger.exception(
-                "Step %s output failed schema validation: %s",
-                event.step_span_id,
-                e,
-            )
-            synthetic = StepFailedEvent(
-                saga_trace_id=event.saga_trace_id,
-                namespace=event.namespace,
-                event_type=EventType.STEP_FAILED.value,
-                step_span_id=event.step_span_id,
-                error_details={"code": "OUTPUT_SCHEMA_VALIDATION_FAILED", "message": str(e)},
-                output=event.output,
-                timing=event.timing,
-                usage=event.usage,
-            )
-            await _apply_step_failure_lifecycle(saga, step, synthetic, db_conn)
-            return
+    if await _fail_step_completed_on_output_schema(
+        saga=saga, step=step, event=event, db_conn=db_conn
+    ):
+        return
 
     trace_ctx = _ingest_trace_context(event)
     if await _maybe_stop_reason_on_policy(
@@ -982,25 +1072,13 @@ async def handle_step_completed(
     ):
         return
 
-    if step.hitl_required and step.step_kind == "reason":
-        output_for_review = event.output if isinstance(event.output, dict) else {}
-        await step.save(
-            using_db=db_conn,
-            update_fields=["execution_timing", "execution_usage"],
-        )
-        await _enter_hitl_hold(
-            saga,
-            step,
-            db_conn=db_conn,
-            trace_context=trace_ctx,
-            review_subject="output",
-            pending_payload=output_for_review,
-        )
-        logger.info(
-            "Reason step %s held for HITL review (trace_id=%s)",
-            event.step_span_id,
-            saga.trace_id,
-        )
+    if await _maybe_hold_reason_hitl_on_completed(
+        saga=saga,
+        step=step,
+        event=event,
+        db_conn=db_conn,
+        trace_ctx=trace_ctx,
+    ):
         return
 
     await _finalize_step_output_and_advance(
@@ -1311,6 +1389,7 @@ async def handle_human_retry(
     await _clear_worker_result_ingest_dedup(
         saga.trace_id,
         step.span_id,
+        namespace=saga.namespace,
         db_conn=db_conn,
     )
 
@@ -1366,6 +1445,60 @@ def _step_failure_payload(event: StepFailedEvent) -> dict[str, Any]:
     if isinstance(event.output, dict):
         return event.output
     return {}
+
+
+async def _fail_saga_no_compensation_window(
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    event: StepFailedEvent,
+    db_conn: BaseDBAsyncClient,
+    *,
+    trace_ctx: dict[str, Any],
+    raw_payload: dict[str, Any],
+) -> None:
+    """Mark saga FAILED when there is nothing in the undo window to compensate."""
+    logger.info("Saga %s failed cleanly at start. No compensation needed.", saga.trace_id)
+    prior_saga_status = saga.status
+    saga.status = SagaStatus.FAILED
+    await saga.save(using_db=db_conn)
+    await get_registry().engine.on_saga_transition(
+        saga=saga,
+        from_status=status_value(prior_saga_status),
+        to_status=status_value(SagaStatus.FAILED),
+        conn=db_conn,
+        trace_context=trace_ctx,
+        event_type=AuditEngineEventType.SAGA_FAILED,
+        reason="step_failed_at_start",
+    )
+    await _notify_unreachable_steps_skipped(
+        saga,
+        reason="step_failed_at_start",
+        db_conn=db_conn,
+        trace_context=trace_ctx,
+    )
+    failed_payload = SagaEventPayload(
+        namespace=saga.namespace,
+        saga_trace_id=saga.trace_id,
+        step_span_id=None,
+        status="SAGA_FAILED",
+        output={
+            "reason": "step_failed_at_start",
+            "step_span_id": event.step_span_id,
+            "step_order": step.order_index,
+            "forward_seq": step.forward_seq,
+            "error_details": raw_payload,
+            "failed_at": str(datetime.now(UTC)),
+        },
+    )
+    await emit_saga_event(
+        topic=TOPIC_ORCHESTRATOR_EVENTS,
+        event_type=EventType.SAGA_FAILED.value,
+        payload_schema=failed_payload,
+        conn=db_conn,
+    )
+    from engine.child_sagas import on_child_saga_terminal
+
+    await on_child_saga_terminal(saga, db_conn, trace_context=trace_ctx)
 
 
 async def _apply_step_failure_lifecycle(
@@ -1428,52 +1561,38 @@ async def _apply_step_failure_lifecycle(
         error_code=str(code) if code is not None else None,
     )
 
-    is_dirty_failure = step.status == StepStatus.TIMED_OUT or code == "SYSTEM_CRASH"
-    start_compensation_seq = step.forward_seq if is_dirty_failure else step.forward_seq - 1
-
-    if start_compensation_seq < 0:
-        logger.info("Saga %s failed cleanly at start. No compensation needed.", saga.trace_id)
+    if step.on_failure_strategy == "await_operator":
         prior_saga_status = saga.status
-        saga.status = SagaStatus.FAILED
+        saga.status = SagaStatus.AWAITING_RECOVERY
         await saga.save(using_db=db_conn)
         await get_registry().engine.on_saga_transition(
             saga=saga,
             from_status=status_value(prior_saga_status),
-            to_status=status_value(SagaStatus.FAILED),
+            to_status=status_value(SagaStatus.AWAITING_RECOVERY),
             conn=db_conn,
             trace_context=trace_ctx,
-            event_type=AuditEngineEventType.SAGA_FAILED,
-            reason="step_failed_at_start",
+            event_type=AuditEngineEventType.SAGA_AWAITING_RECOVERY,
+            reason="await_operator",
         )
-        await _notify_unreachable_steps_skipped(
-            saga,
-            reason="step_failed_at_start",
-            db_conn=db_conn,
-            trace_context=trace_ctx,
+        logger.info(
+            "Saga %s held at AWAITING_RECOVERY after step forward_seq=%s (await_operator).",
+            saga.trace_id,
+            step.forward_seq,
         )
-        failed_payload = SagaEventPayload(
-            namespace=saga.namespace,
-            saga_trace_id=saga.trace_id,
-            step_span_id=None,
-            status="SAGA_FAILED",
-            output={
-                "reason": "step_failed_at_start",
-                "step_span_id": event.step_span_id,
-                "step_order": step.order_index,
-                "forward_seq": step.forward_seq,
-                "error_details": raw_payload,
-                "failed_at": str(datetime.now(UTC)),
-            },
-        )
-        await emit_saga_event(
-            topic=TOPIC_ORCHESTRATOR_EVENTS,
-            event_type=EventType.SAGA_FAILED.value,
-            payload_schema=failed_payload,
-            conn=db_conn,
-        )
-        from engine.child_sagas import on_child_saga_terminal
+        return
 
-        await on_child_saga_terminal(saga, db_conn, trace_context=trace_ctx)
+    is_dirty_failure = step.status == StepStatus.TIMED_OUT or code == "SYSTEM_CRASH"
+    start_compensation_seq = step.forward_seq if is_dirty_failure else step.forward_seq - 1
+
+    if start_compensation_seq < 0:
+        await _fail_saga_no_compensation_window(
+            saga,
+            step,
+            event,
+            db_conn,
+            trace_ctx=trace_ctx,
+            raw_payload=raw_payload,
+        )
         return
 
     logger.info("Triggering compensation starting at forward_seq %s", start_compensation_seq)
@@ -1529,6 +1648,18 @@ async def handle_step_failed(
         logger.error("Step %s not found in DB.", event.step_span_id)
         return
 
+    if saga.status == SagaStatus.AWAITING_RECOVERY:
+        logger.info(
+            "Ignored late STEP_FAILED for step %s while saga AWAITING_RECOVERY",
+            event.step_span_id,
+        )
+        await _notify_skipped_ingest(
+            event,
+            dedup_reason="awaiting_recovery",
+            conn=db_conn,
+        )
+        return
+
     if step.status in (StepStatus.COMPENSATING, StepStatus.COMPENSATED, StepStatus.FAILED):
         logger.info("Duplicate event ignored for step %s (terminal)", step.span_id)
         await _notify_skipped_ingest(
@@ -1542,6 +1673,7 @@ async def handle_step_failed(
         SagaStatus.COMPENSATING,
         SagaStatus.COMPENSATED,
         SagaStatus.FAILED,
+        SagaStatus.AWAITING_RECOVERY,
     ):
         logger.info("Duplicate timeout ingest ignored for step %s", step.span_id)
         await _notify_skipped_ingest(

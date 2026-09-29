@@ -25,6 +25,8 @@ class AuditEngineEventType(StrEnum):
     SAGA_STEPS_SKIPPED = "saga.steps_skipped"
     STEP_AWAITING_HUMAN = "step.awaiting_human"
     SAGA_AWAITING_HUMAN = "saga.awaiting_human"
+    SAGA_AWAITING_RECOVERY = "saga.awaiting_recovery"
     STEP_RESUMED_FROM_HITL = "step.resumed_from_hitl"
     SAGA_RESUMED_FROM_HITL = "saga.resumed_from_hitl"
+    SAGA_RESUMED_FROM_RECOVERY = "saga.resumed_from_recovery"
     INGEST_DEDUPLICATED = "engine.ingest_deduplicated"

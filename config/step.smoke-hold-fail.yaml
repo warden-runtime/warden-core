@@ -1,0 +1,19 @@
+# Smoke: reason step that fails policy with await_operator hold.
+kind: step
+name: smoke-hold-fail
+namespace: default
+version: "0.1.0"
+title: hold-fail
+description: Completes structured output then fails after_reason policy; holds for operator.
+inputs: {}
+step_kind: reason
+agent-adapter: simple
+worker: mock-mcp-worker
+worker_version: "0.1.0"
+prompt: noop.j2
+tools:
+  allow: []
+policy: always-deny.yaml
+on_failure:
+  strategy: await_operator
+timeout_seconds: 300

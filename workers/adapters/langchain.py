@@ -18,7 +18,8 @@ from common.agent_adapter import (
     StepResult,
 )
 from common.compensation_context import (
-    fence_compensation_tool_arguments,
+    fence_tool_arguments,
+    forward_tool_idempotency_key,
 )
 from common.config import get_settings
 from common.error_details import build_step_error_details
@@ -766,6 +767,16 @@ class LangChainAdapter(AgentAdapterPort):
             if timing_acc is not None:
                 timing_acc.stop("commit_setup", bucket="setup_ms")
             scope = execution_scope_from_injection(ctx)
+            if scope is not None and scope.trace_id and scope.step_span_id:
+                # Stable tool key (ledger span). Compensation already fences its own
+                # key before calling run_commit; fence_tool_arguments will not overwrite.
+                clean_args = fence_tool_arguments(
+                    clean_args,
+                    idempotency_key=forward_tool_idempotency_key(
+                        trace_id=scope.trace_id,
+                        span_id=scope.step_span_id,
+                    ),
+                )
             if scope is not None:
                 logger.info(
                     "run_commit invoking %s (namespace=%s trace=%s step=%s idempotency_key=%s)",
@@ -876,7 +887,7 @@ class LangChainAdapter(AgentAdapterPort):
                     "got": len(tool_specs),
                 },
             )
-        fenced_input = fence_compensation_tool_arguments(
+        fenced_input = fence_tool_arguments(
             original_input,
             idempotency_key=idempotency_key,
         )

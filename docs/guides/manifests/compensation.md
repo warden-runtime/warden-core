@@ -90,6 +90,8 @@ Your cleanup workers talk to external APIs over the network, so your undo logic 
 
 Warden injects `warden_idempotency_key` into every compensation tool call's MCP arguments. Pass it through to your undo API as a deduplication token so reruns are safe.
 
+Forward **commit** steps get the same argument key with a **stable** value `fwd-{trace_id}-{span_id}` (ledger step `span_id`, not the rotating command/outbox `idempotency_key`). Retries keep that tool key so remotes can dedupe; tools must honor it.
+
 ## Worker snapshot
 
 Warden freezes the worker **version** on the compensation command when it schedules the undo. The worker checks that version at execute time so a redeployed worker definition cannot silently change undo identity mid-rollback.

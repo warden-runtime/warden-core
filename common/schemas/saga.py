@@ -4,6 +4,8 @@ from jsonpath_ng import parse as parse_jsonpath
 from jsonpath_ng.exceptions import JsonPathParserError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from common.schemas.failure import OnFailureSpec
+
 SagaStepKind: TypeAlias = Literal["reason", "commit", "spawn_sagas", "join_sagas"]
 SAGA_STEP_KINDS: frozenset[str] = frozenset({"reason", "commit", "spawn_sagas", "join_sagas"})
 WORKER_STEP_KINDS: frozenset[str] = frozenset({"reason", "commit"})
@@ -307,6 +309,13 @@ class _SagaStepBase(BaseModel):
             "Optional schedule gate. When set, the engine evaluates ``when.cel`` against "
             "``input``, ``steps``, ``saga``, and ``step`` before scheduling. False marks "
             "the step SKIPPED and continues; omitted means always eligible."
+        ),
+    )
+    on_failure: OnFailureSpec | None = Field(
+        default=None,
+        description=(
+            "Post-failure strategy for this forward step. Default (omit) is auto_compensate. "
+            "Catalog-only in v1 — saga refs cannot override."
         ),
     )
 

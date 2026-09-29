@@ -46,7 +46,7 @@ warden list sagas
 | Flag | Description |
 |------|-------------|
 | `--trace-id` | Single saga instance (32-char hex) |
-| `--in-flight` | Non-terminal sagas: `PENDING`, `RUNNING`, `AWAITING_HUMAN`, `COMPENSATING` |
+| `--in-flight` | Non-terminal sagas: `PENDING`, `RUNNING`, `AWAITING_HUMAN`, `AWAITING_RECOVERY`, `COMPENSATING` |
 | `--failed` | Show only `FAILED` sagas |
 | `--status <status>` | Filter by a specific status (repeatable) |
 | `--namespace` | Filter by namespace |
@@ -80,6 +80,7 @@ Add `--json` for machine-readable output — use it to inspect `error_details` o
 | `PENDING` | Instance created; scheduling not yet complete |
 | `RUNNING` | Actively executing steps |
 | `AWAITING_HUMAN` | Paused at a step pending human review |
+| `AWAITING_RECOVERY` | Forward step failed with `on_failure: await_operator`; waiting for operator retry or compensation |
 | `COMPENSATING` | A failure triggered compensation; unwinding completed steps |
 | `COMPLETED` | All steps finished successfully |
 | `FAILED` | The saga failed and could not compensate |

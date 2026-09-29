@@ -69,6 +69,8 @@ The table below is the operator map. Most day-to-day work uses `deploy`, `start 
 | `warden review` | Approve, reject, or HITL-retry steps in `AWAITING_HUMAN` |
 | `warden saga retry-step` | Re-queue a stuck forward step (`IN_PROGRESS` on a `RUNNING` saga) |
 | `warden saga retry-compensation` | Re-run a failed or stalled compensation step |
+| `warden saga retry-forward` | Retry a failed forward step held at `AWAITING_RECOVERY` |
+| `warden saga start-compensation` | Start compensation from `AWAITING_RECOVERY` |
 | `warden ping` | Health-check the engine |
 | `warden --version` | Print the CLI version |
 
@@ -84,6 +86,8 @@ During an incident, pick the row that matches the step and saga status — do no
 | HITL approve/reject | `POST .../decision` | `warden review approve` / `reject` | `AWAITING_HUMAN` | `AWAITING_HUMAN` | Human decision to continue or reject |
 | Forward recovery | `POST .../retry-step` | `warden saga retry-step` | `IN_PROGRESS` (stuck) | `RUNNING` | Worker/claim/outbox stall after automatic reap window; use `--force` if a non-stale claim still blocks redelivery |
 | Compensation recovery | `POST .../retry-compensation` | `warden saga retry-compensation` | failed/stuck comp | `COMPENSATING` | Undo step failed or stalled |
+| Post-failure retry | `POST .../retry-forward` | `warden saga retry-forward` | `FAILED` / `TIMED_OUT` | `AWAITING_RECOVERY` | Re-run the failed forward step after `on_failure: await_operator`; dirty failures need `--allow-destructive` |
+| Post-failure compensate | `POST .../start-compensation` | `warden saga start-compensation` | `FAILED` / `TIMED_OUT` | `AWAITING_RECOVERY` | Begin LIFO undo from the held failure instead of retrying forward |
 
 **Not in this matrix:** LLM transient backoff (`WARDEN_LLM_RETRY_*` in [Configuration](../../getting-started/configuration.md)) and saga restart (`warden start saga`). A bare `retry-step` returns **`claim_active`** when a worker still holds a non-stale claim — wait for automatic reap or pass `--force` (`--allow-destructive` on commit steps). Full recovery ladder: [Saga recovery](saga-recovery.md).
 

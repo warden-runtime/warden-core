@@ -1,0 +1,17 @@
+# Two-step smoke: greet succeeds, then hold-fail pauses for operator.
+kind: saga
+name: smoke-hold-two-saga
+namespace: default
+version: "0.1.0"
+description: Prior completed work + await_operator hold on second step.
+steps:
+  - id: greet
+    use: mock-greet
+    version: "0.1.0"
+    with:
+      name:
+        value: Ada
+  - id: hold-fail
+    use: smoke-hold-fail
+    version: "0.1.0"
+    with: {}

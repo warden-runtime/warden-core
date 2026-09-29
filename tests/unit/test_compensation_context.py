@@ -9,7 +9,8 @@ from common.compensation_context import (
     COMPENSATION_METADATA_KEY,
     build_compensation_metadata,
     compensation_parameter_context,
-    fence_compensation_tool_arguments,
+    fence_tool_arguments,
+    forward_tool_idempotency_key,
     is_dirty_forward_step,
 )
 from common.models import StepStatus
@@ -99,8 +100,15 @@ def test_compensation_parameter_context_empty_output_layer_on_dirty_step():
         ({"a": 1}, None, {"a": 1}),
     ],
 )
-def test_fence_compensation_tool_arguments(original, key, expected):
-    assert fence_compensation_tool_arguments(original, idempotency_key=key) == expected
+def test_fence_tool_arguments(original, key, expected):
+    assert fence_tool_arguments(original, idempotency_key=key) == expected
+
+
+def test_forward_tool_idempotency_key_stable():
+    assert (
+        forward_tool_idempotency_key(trace_id="a" * 32, span_id="b" * 16)
+        == f"fwd-{'a' * 32}-{'b' * 16}"
+    )
 
 
 def test_compensation_parameter_context_isolates_live_steps():

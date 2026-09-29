@@ -419,7 +419,8 @@
               "ok",
               "scheduled",
               "claim_active",
-              "requeued"
+              "requeued",
+              "failed"
             ],
             "title": "Status",
             "type": "string"
@@ -3248,6 +3249,91 @@
         ]
       }
     },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}/retry-forward": {
+      "post": {
+        "description": "Retry a failed forward step while the saga is held at AWAITING_RECOVERY.",
+        "operationId": "operator_retry_forward_v1_sagas__trace_id__steps__step_span_id__retry_forward_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OperatorRecoveryRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Step or saga not found."
+          },
+          "409": {
+            "description": "Recovery conflict (wrong status, stale claim, etc.)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operator Retry Forward",
+        "tags": [
+          "recovery"
+        ]
+      }
+    },
     "/v1/sagas/{trace_id}/steps/{step_span_id}/retry-step": {
       "post": {
         "description": "Retry a stuck forward step (IN_PROGRESS) after automatic recovery is exhausted.",
@@ -3328,6 +3414,91 @@
           }
         },
         "summary": "Operator Retry Step",
+        "tags": [
+          "recovery"
+        ]
+      }
+    },
+    "/v1/sagas/{trace_id}/steps/{step_span_id}/start-compensation": {
+      "post": {
+        "description": "Start compensation from a hold at AWAITING_RECOVERY.",
+        "operationId": "operator_start_compensation_v1_sagas__trace_id__steps__step_span_id__start_compensation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_span_id",
+            "required": true,
+            "schema": {
+              "title": "Step Span Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OperatorRecoveryRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Step or saga not found."
+          },
+          "409": {
+            "description": "Recovery conflict (wrong status, stale claim, etc.)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operator Start Compensation",
         "tags": [
           "recovery"
         ]

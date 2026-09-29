@@ -286,6 +286,8 @@ async def test_list_tools_includes_core_operations() -> None:
     assert "warden_set_definition_active" in names
     assert "warden_list_pending_reviews" in names
     assert "warden_retry_stuck_step" in names
+    assert "warden_retry_forward_step" in names
+    assert "warden_start_compensation" in names
     assert "warden_wait_for_review" in names
     assert "warden_start_and_wait" in names
 

@@ -119,7 +119,7 @@ warden list steps --trace-id <TRACE_ID> --namespace default
 
 | Enum | Values |
 |------|--------|
-| `SagaStatus` | `PENDING`, `RUNNING`, `AWAITING_HUMAN`, `COMPENSATING`, `COMPLETED`, `FAILED`, `COMPENSATED` |
+| `SagaStatus` | `PENDING`, `RUNNING`, `AWAITING_HUMAN`, `AWAITING_RECOVERY`, `COMPENSATING`, `COMPLETED`, `FAILED`, `COMPENSATED` |
 | `StepStatus` | `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`, `COMPENSATING`, `COMPENSATED`, `SKIPPED`, `TIMED_OUT`, `AWAITING_HUMAN` |
 
 These values appear in API responses, CLI output, and Postgres directly. [Lifecycle](lifecycle.md) maps how instances move through them.

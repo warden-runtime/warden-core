@@ -40,6 +40,7 @@ class SagaStatus(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     AWAITING_HUMAN = "AWAITING_HUMAN"
+    AWAITING_RECOVERY = "AWAITING_RECOVERY"
     COMPENSATING = "COMPENSATING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
@@ -256,6 +257,13 @@ class SagaStepInstance(models.Model):
     pending_review_payload = fields.JSONField(
         null=True,
         description="HITL review envelope shown to operators (output or arguments snapshot).",
+    )
+    on_failure_strategy = fields.CharField(
+        max_length=32,
+        default="auto_compensate",
+        description=(
+            "Post-failure strategy frozen at materialize: auto_compensate or await_operator."
+        ),
     )
     when_cel = fields.TextField(
         null=True,

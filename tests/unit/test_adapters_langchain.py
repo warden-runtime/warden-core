@@ -9,7 +9,7 @@ import pytest
 from common.agent_adapter import ExecutionStepError
 from common.compensation_context import (
     WARDEN_TOOL_IDEMPOTENCY_KEY,
-    fence_compensation_tool_arguments,
+    fence_tool_arguments,
 )
 from common.llm import ChatResponse, ToolCall
 from common.tool_arg_bind import overlay_bound_tool_arguments
@@ -66,8 +66,8 @@ def _make_worker_def(
     return w
 
 
-def test_fence_compensation_tool_arguments_copies_resolved_input():
-    fenced = fence_compensation_tool_arguments(
+def test_fence_tool_arguments_copies_resolved_input():
+    fenced = fence_tool_arguments(
         {
             "payment_id": "pay-000001",
             "reservation_id": "res-000001",
@@ -81,8 +81,8 @@ def test_fence_compensation_tool_arguments_copies_resolved_input():
     }
 
 
-def test_fence_compensation_tool_arguments_injects_idempotency_key():
-    fenced = fence_compensation_tool_arguments(
+def test_fence_tool_arguments_injects_idempotency_key():
+    fenced = fence_tool_arguments(
         {"payment_id": "pay-1"},
         idempotency_key="comp-trace-span",
     )
@@ -743,6 +743,47 @@ async def test_run_commit_invokes_single_tool_and_returns_parsed_json(mocker):
     mock_tool.ainvoke.assert_called_once()
     call_kw = mock_tool.ainvoke.call_args[0][0]
     assert call_kw == {"id": "x"}
+
+
+@pytest.mark.asyncio
+async def test_run_commit_fences_stable_forward_tool_idempotency_key(mocker):
+    from common.plugins.context import ExecutionScope
+
+    mock_tool = MagicMock()
+    mock_tool.name = "write_row"
+    mock_tool.ainvoke = AsyncMock(return_value='{"inserted": 1}')
+
+    mocker.patch(
+        "workers.adapters.langchain.build_tools_for_worker",
+        new_callable=AsyncMock,
+        return_value=[mock_tool],
+    )
+
+    adapter = LangChainAdapter(
+        worker_definition=_make_worker_def(),
+        secret=_make_secret(),
+    )
+    trace = "a" * 32
+    span = "b" * 16
+    result = await adapter.run_commit(
+        arguments={"id": "x"},
+        tool_specs=[{"name": "write_row"}],
+        context={
+            "execution_scope": ExecutionScope(
+                namespace="default",
+                trace_id=trace,
+                step_span_id=span,
+                idempotency_key=f"{trace}-rotated-cmd",
+                command_type="DO_COMMIT",
+                worker_name="w",
+            )
+        },
+        output_schema=None,
+    )
+    assert result.output == {"data": {"inserted": 1}}
+    call_kw = mock_tool.ainvoke.call_args[0][0]
+    assert call_kw["id"] == "x"
+    assert call_kw[WARDEN_TOOL_IDEMPOTENCY_KEY] == f"fwd-{trace}-{span}"
 
 
 @pytest.mark.asyncio

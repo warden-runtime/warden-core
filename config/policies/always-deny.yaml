@@ -1,0 +1,4 @@
+name: always-deny
+version: "1"
+# Smoke policy: always fails after_reason / before_commit so we can exercise on_failure holds.
+cel: "false"

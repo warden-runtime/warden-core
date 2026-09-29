@@ -28,8 +28,12 @@ graph TD
     Human --> |rejected| Compensating[COMPENSATING]
 
     Running --> |all forward steps finish| Completed[COMPLETED]
-    Running --> |forward step fails| Compensating
-    Running --> |first step fails, nothing to unwind| Failed[FAILED]:::alertState
+    Running --> |forward step fails \(auto_compensate\)| Compensating
+    Running --> |forward step fails \(await_operator\)| Recovery[AWAITING_RECOVERY]:::pause
+    Recovery --> |retry-forward| Running
+    Recovery --> |start-compensation| Compensating
+    Recovery --> |start-compensation, nothing to unwind| Failed[FAILED]:::alertState
+    Running --> |first step fails auto_compensate, nothing to unwind| Failed
 
     Compensating --> |all compensations succeed| Compensated[COMPENSATED]
     Compensating --> |compensation fails| Failed
@@ -72,11 +76,11 @@ Before a commit step executes its tool call, the engine evaluates `before_commit
 
 Steps with a human-in-the-loop gate pause the saga at `AWAITING_HUMAN` before proceeding. The engine will not schedule the next step until a reviewer approves or rejects. On rejection, the saga transitions to compensation.
 
-`AWAITING_HUMAN` is one of four in-flight saga states you will see with `warden list sagas --in-flight`, alongside `PENDING`, `RUNNING`, and `COMPENSATING`.
+`AWAITING_HUMAN` and `AWAITING_RECOVERY` are two of five in-flight saga states you will see with `warden list sagas --in-flight`, alongside `PENDING`, `RUNNING`, and `COMPENSATING`.
 
 ## Compensation
 
-When a forward step fails and prior work may need undoing, the engine transitions the saga to `COMPENSATING` and dispatches `EXECUTE_COMPENSATION` commands in LIFO order for each step in the undo window. The saga settles at `COMPENSATED` when every scheduled undo succeeds, or `FAILED` when any undo fails. If nothing is in scope to unwind—for example, the first step fails with no completed work behind it—the saga goes straight to `FAILED` without entering `COMPENSATING`.
+When a forward step fails and prior work may need undoing, the default strategy (`on_failure.strategy: auto_compensate`) transitions the saga to `COMPENSATING` and dispatches `EXECUTE_COMPENSATION` commands in LIFO order for each step in the undo window. With `await_operator`, the saga holds at `AWAITING_RECOVERY` until an operator runs `warden saga retry-forward` or `warden saga start-compensation` (including when the first step fails with nothing behind it — so retry is still possible). From hold, `start-compensation` with an empty undo window marks the saga `FAILED` without entering `COMPENSATING`. Under `auto_compensate`, an empty undo window goes straight to `FAILED`. The saga settles at `COMPENSATED` when every scheduled undo succeeds, or `FAILED` when any undo fails.
 
 For undo-window rules, uncertain output on timeout or worker crash, and authoring `compensation:` blocks, see [Durable execution boundaries → Failure and LIFO compensation](durable-execution.md#failure-and-lifo-compensation) and [Compensation](../guides/manifests/compensation.md).
 

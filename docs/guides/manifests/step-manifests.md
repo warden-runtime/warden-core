@@ -116,6 +116,7 @@ Same shapes as the hydrated saga step once an instance starts. Common ones:
 | `tools` / `resources` / `skills` | Allowlists — see [MCP and tools](mcp-and-tools.md) |
 | `output_schema` | JSON Schema path under `SCHEMAS_ROOT` |
 | `policy` / `hitl` | Guardrails — see [Policies](policies.md) |
+| `on_failure` | Post-failure strategy (`auto_compensate` default, or `await_operator` to hold at `AWAITING_RECOVERY`) |
 | `facts` | Reason-only tool extractors |
 | `compensation` | Undo YAML under `COMPENSATIONS_ROOT` |
 | `timeout_seconds` / `max_turns` / token caps | Budgets (tighten-only at saga compose) |

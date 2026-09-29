@@ -35,6 +35,7 @@ REQUIRED_CORE_COLUMNS: dict[str, tuple[str, ...]] = {
         "policy_definition",
         "prompt_definition",
         "skills_definition",
+        "on_failure_strategy",
     ),
     "saga_instances": (
         "frozen_steps",
