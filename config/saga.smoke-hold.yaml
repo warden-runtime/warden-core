@@ -1,0 +1,11 @@
+# Smoke saga for post-failure AWAITING_RECOVERY.
+kind: saga
+name: smoke-hold-saga
+namespace: default
+version: "0.1.0"
+description: Single step that holds on failure for operator recovery tests.
+steps:
+  - id: hold-fail
+    use: smoke-hold-fail
+    version: "0.1.0"
+    with: {}

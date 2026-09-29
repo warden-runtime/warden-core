@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
@@ -72,6 +73,60 @@ def _asyncpg_dsn(db_url: str) -> str:
     return db_url
 
 
+def _coerce_trace_context(raw: Any) -> dict[str, Any]:
+    """Normalize outbox header trace_context to a dict."""
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        raw = _parse_json_value(raw, on_decode_error={"raw": raw})
+    return raw if isinstance(raw, dict) else {}
+
+
+async def _insert_outbox_row(
+    *,
+    topic: str,
+    payload: dict,
+    namespace: str,
+    saga_trace_id: str,
+    step_span_id: str,
+    event_type: str,
+    idempotency_key: str | None,
+    trace_context: dict[str, Any],
+    conn: BaseDBAsyncClient | None,
+) -> None:
+    """Insert one PENDING OutboxEvent row (optional transactional conn)."""
+    fields: dict[str, Any] = {
+        "namespace": namespace,
+        "saga_trace_id": saga_trace_id,
+        "step_span_id": step_span_id,
+        "event_type": event_type,
+        "destination_topic": topic,
+        "idempotency_key": idempotency_key,
+        "trace_context": trace_context,
+        "payload": payload,
+        "status": OutboxStatus.PENDING,
+    }
+    if conn is not None:
+        fields["using_db"] = conn
+    await OutboxEvent.create(**fields)
+
+
+async def _insert_outbox_row_with_savepoint(
+    conn: BaseDBAsyncClient,
+    **kwargs: Any,
+) -> None:
+    """Insert under a savepoint so IntegrityError does not abort the outer txn."""
+    sp = f"sp_obx_{uuid.uuid4().hex}"
+    await conn.execute_query(f"SAVEPOINT {sp}")
+    try:
+        await _insert_outbox_row(conn=conn, **kwargs)
+    except IntegrityError:
+        await conn.execute_query(f"ROLLBACK TO SAVEPOINT {sp}")
+        raise
+    else:
+        await conn.execute_query(f"RELEASE SAVEPOINT {sp}")
+
+
 class PostgresQueueProducer(MessageQueueProducer):
     """Writes exactly one row to OutboxEvent with status=PENDING."""
 
@@ -91,44 +146,36 @@ class PostgresQueueProducer(MessageQueueProducer):
         duplicate writes are no-op. When conn is provided, write is in that transaction.
         """
         headers = headers or {}
-        # Routing fields: required for outbox envelope and consumers
         namespace = headers.get("namespace", "default")
         saga_trace_id = headers.get("saga_trace_id", "")
         step_span_id = headers.get("step_span_id", "")
         event_type = headers.get("event_type", "")
         idempotency_key = headers.get("idempotency_key")
-        trace_context = headers.get("trace_context")
-        if trace_context is None:
-            trace_context = {}
-        if isinstance(trace_context, str):
-            trace_context = _parse_json_value(trace_context, on_decode_error={"raw": trace_context})
-        if not isinstance(trace_context, dict):
-            trace_context = {}
-
+        insert_kwargs = {
+            "topic": topic,
+            "payload": payload,
+            "namespace": namespace,
+            "saga_trace_id": saga_trace_id,
+            "step_span_id": step_span_id,
+            "event_type": event_type,
+            "idempotency_key": idempotency_key,
+            "trace_context": _coerce_trace_context(headers.get("trace_context")),
+        }
         try:
-            await OutboxEvent.create(
-                namespace=namespace,
-                saga_trace_id=saga_trace_id,
-                step_span_id=step_span_id,
-                event_type=event_type,
-                destination_topic=topic,
-                idempotency_key=idempotency_key,
-                trace_context=trace_context,
-                payload=payload,
-                status=OutboxStatus.PENDING,
-                using_db=conn,
-            )
+            if conn is not None:
+                await _insert_outbox_row_with_savepoint(conn, **insert_kwargs)
+            else:
+                await _insert_outbox_row(conn=None, **insert_kwargs)
             logger.debug("Outbox event queued for topic %s trace %s", topic, saga_trace_id)
         except IntegrityError:
-            if idempotency_key is not None:
-                logger.debug(
-                    "Duplicate write detected for topic=%s idempotency_key=%s; "
-                    "skipping outbox insertion",
-                    topic,
-                    idempotency_key,
-                )
-            else:
+            if idempotency_key is None:
                 raise
+            logger.debug(
+                "Duplicate write detected for topic=%s idempotency_key=%s; "
+                "skipping outbox insertion",
+                topic,
+                idempotency_key,
+            )
 
 
 class PostgresQueueConsumer(MessageQueueConsumer):

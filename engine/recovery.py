@@ -10,9 +10,10 @@ from typing import TYPE_CHECKING, cast
 from common.command_specs import slim_tool_specs
 from common.compensation_context import (
     compensation_parameter_context,
+    is_dirty_forward_step,
     worker_snapshot_for_compensation,
 )
-from common.contracts import CommandType, DoCompensationCommand, EventType
+from common.contracts import CommandType, DoCompensationCommand, EventType, StepFailedEvent
 from common.models import (
     OutboxEvent,
     OutboxStatus,
@@ -31,7 +32,9 @@ from common.processed_command_reap import (
     claim_is_stale,
     release_worker_claim_for_retry,
 )
+from common.schemas.engine_events import AuditEngineEventType
 from common.topics import TOPIC_WORKER_COMMANDS
+from common.utils import status_value
 from common.worker_ref import resolve_worker_from_compensation
 from pydantic import ValidationError
 
@@ -42,7 +45,9 @@ if TYPE_CHECKING:
 from engine.execution_timing import clear_step_timing_fields
 from engine.logic import (
     _clear_worker_result_ingest_dedup,
+    _fail_saga_no_compensation_window,
     _reset_step_for_worker_retry,
+    trigger_compensation,
     trigger_step,
 )
 from engine.recovery_errors import (
@@ -376,6 +381,7 @@ async def _execute_step_retry(
         await _clear_worker_result_ingest_dedup(
             trace_id,
             step_span_id,
+            namespace=namespace,
             db_conn=conn,
         )
         worker_key = prior_key
@@ -556,6 +562,261 @@ async def enqueue_compensation_retry(
         recovery_token=recovery_token,
         namespace=namespace,
         recovery_kind="retry-compensation",
+        trace_id=trace_id,
+        step_span_id=step_span_id,
+        force=force,
+        allow_destructive=None,
+        apply=apply,
+    )
+
+
+def _assert_awaiting_recovery_forward(
+    saga: SagaInstance,
+    step: SagaStepInstance,
+    *,
+    recovery_kind: str,
+) -> None:
+    if saga.status != SagaStatus.AWAITING_RECOVERY:
+        raise RecoveryConflictError(
+            f"Saga status is {saga.status}; expected AWAITING_RECOVERY for {recovery_kind}."
+        )
+    if step.compensates_span_id is not None:
+        raise RecoveryConflictError(f"{recovery_kind} applies to forward steps only.")
+    if step.status not in (StepStatus.FAILED, StepStatus.TIMED_OUT):
+        raise RecoveryConflictError(
+            f"Step status is {step.status}; expected FAILED or TIMED_OUT for {recovery_kind}."
+        )
+
+
+async def _execute_retry_forward(
+    conn: BaseDBAsyncClient,
+    *,
+    namespace: str,
+    trace_id: str,
+    step_span_id: str,
+    token: str,
+    force: bool,
+    allow_destructive: bool,
+    reason: str | None,
+) -> dict[str, str]:
+    saga, step = await _load_saga_step_locked(
+        namespace=namespace,
+        trace_id=trace_id,
+        step_span_id=step_span_id,
+        conn=conn,
+    )
+    _assert_awaiting_recovery_forward(saga, step, recovery_kind="retry-forward")
+    if is_dirty_forward_step(step) and not allow_destructive:
+        raise RecoveryConflictError(
+            "retry-forward on a dirty failure (timeout/SYSTEM_CRASH) requires "
+            "allow_destructive=true (risk of duplicate side effects)."
+        )
+    _enforce_commit_force_gating(
+        step=step,
+        force=force,
+        allow_destructive=allow_destructive,
+    )
+    prior_key = step.idempotency_key
+    try:
+        await _handle_active_claim(idempotency_key=prior_key, force=force, conn=conn)
+    except RecoveryClaimActiveError:
+        return {
+            "status": "claim_active",
+            "idempotency_key": prior_key,
+            "worker_command_key": prior_key,
+            "recovery_token": token,
+        }
+    step_from_status = step.status
+    await _reset_step_for_worker_retry(saga, step, saga.trace_id, db_conn=conn)
+    prior_saga_status = saga.status
+    saga.status = SagaStatus.RUNNING
+    await saga.save(using_db=conn)
+    await get_registry().engine.on_saga_transition(
+        saga=saga,
+        from_status=status_value(prior_saga_status),
+        to_status=status_value(SagaStatus.RUNNING),
+        conn=conn,
+        event_type=AuditEngineEventType.SAGA_RESUMED_FROM_RECOVERY,
+        reason="retry_forward",
+    )
+    await trigger_step(
+        saga,
+        step.forward_seq,
+        conn,
+        allow_retry_in_progress=True,
+        step_start_from_status=step_from_status,
+    )
+    await get_registry().engine.on_operator_recovery_requested(
+        saga=saga,
+        step=step,
+        recovery_kind="retry-forward",
+        conn=conn,
+        force=force,
+        allow_destructive=allow_destructive,
+        recovery_token=token,
+        reason=reason,
+        prior_idempotency_key=prior_key,
+        new_idempotency_key=step.idempotency_key,
+    )
+    return {
+        "status": "scheduled",
+        "idempotency_key": step.idempotency_key,
+        "worker_command_key": step.idempotency_key,
+        "recovery_token": token,
+    }
+
+
+async def enqueue_retry_forward(
+    *,
+    namespace: str,
+    trace_id: str,
+    step_span_id: str,
+    recovery_token: str | None = None,
+    force: bool = False,
+    allow_destructive: bool = False,
+    reason: str | None = None,
+) -> dict[str, str]:
+    """Retry a failed forward step while the saga is held at AWAITING_RECOVERY."""
+    token = recovery_token or uuid.uuid4().hex
+
+    async def apply(conn: BaseDBAsyncClient) -> dict[str, str]:
+        return await _execute_retry_forward(
+            conn,
+            namespace=namespace,
+            trace_id=trace_id,
+            step_span_id=step_span_id,
+            token=token,
+            force=force,
+            allow_destructive=allow_destructive,
+            reason=reason,
+        )
+
+    return await with_operator_recovery_idempotency(
+        recovery_token=recovery_token,
+        namespace=namespace,
+        recovery_kind="retry-forward",
+        trace_id=trace_id,
+        step_span_id=step_span_id,
+        force=force,
+        allow_destructive=allow_destructive,
+        apply=apply,
+    )
+
+
+async def _execute_start_compensation(
+    conn: BaseDBAsyncClient,
+    *,
+    namespace: str,
+    trace_id: str,
+    step_span_id: str,
+    token: str,
+    force: bool,
+    reason: str | None,
+) -> dict[str, str]:
+    saga, step = await _load_saga_step_locked(
+        namespace=namespace,
+        trace_id=trace_id,
+        step_span_id=step_span_id,
+        conn=conn,
+    )
+    _assert_awaiting_recovery_forward(saga, step, recovery_kind="start-compensation")
+
+    start_compensation_seq = (
+        step.forward_seq if is_dirty_forward_step(step) else step.forward_seq - 1
+    )
+    if start_compensation_seq < 0:
+        raw_payload = step.error_details if isinstance(step.error_details, dict) else {}
+        synthetic = StepFailedEvent(
+            saga_trace_id=saga.trace_id,
+            namespace=saga.namespace,
+            event_type=EventType.STEP_FAILED.value,
+            step_span_id=step.span_id,
+            error_details=raw_payload,
+        )
+        await _fail_saga_no_compensation_window(
+            saga,
+            step,
+            synthetic,
+            conn,
+            trace_ctx={},
+            raw_payload=raw_payload,
+        )
+        await get_registry().engine.on_operator_recovery_requested(
+            saga=saga,
+            step=step,
+            recovery_kind="start-compensation",
+            conn=conn,
+            force=force,
+            recovery_token=token,
+            reason=reason,
+        )
+        return {
+            "status": "failed",
+            "idempotency_key": step.idempotency_key,
+            "worker_command_key": step.idempotency_key,
+            "recovery_token": token,
+        }
+
+    prior_saga_status = saga.status
+    saga.status = SagaStatus.COMPENSATING
+    await saga.save(using_db=conn)
+    await get_registry().engine.on_saga_transition(
+        saga=saga,
+        from_status=status_value(prior_saga_status),
+        to_status=status_value(SagaStatus.COMPENSATING),
+        conn=conn,
+        event_type=AuditEngineEventType.SAGA_COMPENSATING,
+        reason="start_compensation",
+    )
+    await trigger_compensation(
+        saga,
+        forward_seq=start_compensation_seq,
+        db_conn=conn,
+    )
+    await get_registry().engine.on_operator_recovery_requested(
+        saga=saga,
+        step=step,
+        recovery_kind="start-compensation",
+        conn=conn,
+        force=force,
+        recovery_token=token,
+        reason=reason,
+    )
+    return {
+        "status": "scheduled",
+        "idempotency_key": step.idempotency_key,
+        "worker_command_key": step.idempotency_key,
+        "recovery_token": token,
+    }
+
+
+async def enqueue_start_compensation(
+    *,
+    namespace: str,
+    trace_id: str,
+    step_span_id: str,
+    recovery_token: str | None = None,
+    force: bool = False,
+    reason: str | None = None,
+) -> dict[str, str]:
+    """Start compensation from a hold at AWAITING_RECOVERY."""
+    token = recovery_token or uuid.uuid4().hex
+
+    async def apply(conn: BaseDBAsyncClient) -> dict[str, str]:
+        return await _execute_start_compensation(
+            conn,
+            namespace=namespace,
+            trace_id=trace_id,
+            step_span_id=step_span_id,
+            token=token,
+            force=force,
+            reason=reason,
+        )
+
+    return await with_operator_recovery_idempotency(
+        recovery_token=recovery_token,
+        namespace=namespace,
+        recovery_kind="start-compensation",
         trace_id=trace_id,
         step_span_id=step_span_id,
         force=force,

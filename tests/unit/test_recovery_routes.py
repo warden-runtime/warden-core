@@ -103,3 +103,53 @@ async def test_retry_compensation_route_maps_not_found_to_404(mocker, recovery_a
     detail = resp.json()["detail"]
     assert detail["code"] == "RECOVERY_NOT_FOUND"
     assert "compensation missing" in detail["message"]
+
+
+@pytest.mark.asyncio
+async def test_retry_forward_route_returns_202(mocker, recovery_app: FastAPI):
+    mocker.patch(
+        "engine.api.routes.recovery.enqueue_retry_forward",
+        new_callable=AsyncMock,
+        return_value={"status": "scheduled"},
+    )
+    transport = ASGITransport(app=recovery_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            f"/v1/sagas/{'a' * 32}/steps/{'b' * 16}/retry-forward",
+            json={"allow_destructive": True, "reason": "held"},
+        )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "scheduled"
+
+
+@pytest.mark.asyncio
+async def test_start_compensation_route_returns_202(mocker, recovery_app: FastAPI):
+    mocker.patch(
+        "engine.api.routes.recovery.enqueue_start_compensation",
+        new_callable=AsyncMock,
+        return_value={"status": "scheduled"},
+    )
+    transport = ASGITransport(app=recovery_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            f"/v1/sagas/{'a' * 32}/steps/{'b' * 16}/start-compensation",
+            json={"reason": "held"},
+        )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "scheduled"
+
+
+@pytest.mark.asyncio
+async def test_retry_forward_route_maps_conflict_to_409(mocker, recovery_app: FastAPI):
+    mocker.patch(
+        "engine.api.routes.recovery.enqueue_retry_forward",
+        new_callable=AsyncMock,
+        side_effect=RecoveryConflictError("not on hold"),
+    )
+    transport = ASGITransport(app=recovery_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(f"/v1/sagas/{'a' * 32}/steps/{'b' * 16}/retry-forward")
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["code"] == "RECOVERY_CONFLICT"
+    assert "not on hold" in detail["message"]

@@ -9,6 +9,7 @@ import pytest
 from common.models import (
     EventType,
     OutboxEvent,
+    OutboxStatus,
     ProcessedCommand,
     ProcessedIngestEvent,
     SagaStatus,
@@ -182,6 +183,16 @@ async def test_human_retry_requeues_worker_and_preserves_context(recording_hooks
     )
     dedup_key = f"{saga.trace_id}:{EventType.STEP_COMPLETED.value}:{step0.span_id}"
     await ProcessedIngestEvent.create(event_dedup_key=dedup_key)
+    await OutboxEvent.create(
+        namespace=saga.namespace,
+        saga_trace_id=saga.trace_id,
+        step_span_id=step0.span_id,
+        event_type=EventType.STEP_COMPLETED.value,
+        destination_topic=TOPIC_ORCHESTRATOR_EVENTS,
+        idempotency_key=dedup_key,
+        payload={"draft": True},
+        status=OutboxStatus.PENDING,
+    )
     context_before = dict(saga.context or {})
 
     await process_saga_event(
@@ -203,6 +214,10 @@ async def test_human_retry_requeues_worker_and_preserves_context(recording_hooks
     assert not await ProcessedCommand.filter(idempotency_key=prior_key).exists()
     dedup_key = f"{saga.trace_id}:{EventType.STEP_COMPLETED.value}:{step0.span_id}"
     assert not await ProcessedIngestEvent.filter(event_dedup_key=dedup_key).exists()
+    assert not await OutboxEvent.filter(
+        destination_topic=TOPIC_ORCHESTRATOR_EVENTS,
+        idempotency_key=dedup_key,
+    ).exists()
     worker_events = await OutboxEvent.filter(
         destination_topic=TOPIC_WORKER_COMMANDS,
         saga_trace_id=saga.trace_id,

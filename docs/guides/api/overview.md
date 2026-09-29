@@ -58,6 +58,8 @@ Use this table during incidents — do not conflate path suffixes or step status
 | HITL approve/reject | `POST .../decision` | `warden review approve` / `reject` | `AWAITING_HUMAN` | `AWAITING_HUMAN` | Human decision to continue or reject |
 | Forward recovery | `POST .../retry-step` | `warden saga retry-step` | `IN_PROGRESS` (stuck) | `RUNNING` | Worker/claim/outbox stall after automatic reap window; JSON body `{"force": true}` if a non-stale claim still blocks redelivery |
 | Compensation recovery | `POST .../retry-compensation` | `warden saga retry-compensation` | failed/stuck comp | `COMPENSATING` | Undo step failed or stalled |
+| Post-failure retry | `POST .../retry-forward` | `warden saga retry-forward` | `FAILED` / `TIMED_OUT` | `AWAITING_RECOVERY` | Re-run the failed forward step after `on_failure: await_operator`; dirty failures need `allow_destructive` |
+| Post-failure compensate | `POST .../start-compensation` | `warden saga start-compensation` | `FAILED` / `TIMED_OUT` | `AWAITING_RECOVERY` | Begin LIFO undo from the held failure instead of retrying forward |
 
 `{trace_id}` and `{step_span_id}` are literal path segments — substitute ids from saga start and step list responses (`trace_id` is 32 lowercase hex chars; `step_span_id` is 16). Example forward recovery:
 

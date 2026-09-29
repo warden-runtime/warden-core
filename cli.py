@@ -1621,7 +1621,9 @@ saga_app = typer.Typer(
     help="Operator recovery for stuck saga steps (retry forward step or compensation).",
     epilog=(
         "Examples: `warden saga retry-step TRACE STEP` · "
-        "`warden saga retry-compensation TRACE STEP`"
+        "`warden saga retry-compensation TRACE STEP` · "
+        "`warden saga retry-forward TRACE STEP` · "
+        "`warden saga start-compensation TRACE STEP`"
     ),
     no_args_is_help=True,
 )
@@ -1721,6 +1723,81 @@ def saga_retry_compensation_cli(
     result = _post_recovery(path, namespace=namespace, body=body)
     status = result.get("status", "")
     say("OK", f"retry-compensation {status} for step {step_span_id}")
+    key = result.get("worker_command_key") or result.get("idempotency_key")
+    if key:
+        say("INFO", f"worker_command_key={key}")
+
+
+@saga_app.command("retry-forward")
+def saga_retry_forward_cli(
+    trace_id: Annotated[str, typer.Argument(help="Saga trace_id.")],
+    step_span_id: Annotated[str, typer.Argument(help="Forward step span_id.")],
+    namespace: Annotated[str, typer.Option(help="Saga namespace.")] = "default",
+    force: Annotated[
+        bool,
+        typer.Option(help="Release a non-stale worker claim (commit needs --allow-destructive)."),
+    ] = False,
+    allow_destructive: Annotated[
+        bool,
+        typer.Option(
+            "--allow-destructive",
+            help=(
+                "Required for dirty failures (timeout/SYSTEM_CRASH) and with --force on commit steps."
+            ),
+        ),
+    ] = False,
+    recovery_token: Annotated[
+        str | None,
+        typer.Option(help="Optional idempotency token for this recovery request."),
+    ] = None,
+    reason: Annotated[
+        str | None,
+        typer.Option(help="Optional operator note for audit hooks."),
+    ] = None,
+) -> None:
+    """Retry a failed forward step held at AWAITING_RECOVERY via POST .../retry-forward."""
+    path = f"/v1/sagas/{trace_id}/steps/{step_span_id}/retry-forward"
+    body: dict[str, Any] = {"force": force, "allow_destructive": allow_destructive}
+    if recovery_token is not None:
+        body["recovery_token"] = recovery_token
+    if reason is not None:
+        body["reason"] = reason
+    result = _post_recovery(path, namespace=namespace, body=body)
+    status = result.get("status", "")
+    say("OK", f"retry-forward {status} for step {step_span_id}")
+    key = result.get("worker_command_key") or result.get("idempotency_key")
+    if key:
+        say("INFO", f"worker_command_key={key}")
+
+
+@saga_app.command("start-compensation")
+def saga_start_compensation_cli(
+    trace_id: Annotated[str, typer.Argument(help="Saga trace_id.")],
+    step_span_id: Annotated[str, typer.Argument(help="Forward step span_id that failed.")],
+    namespace: Annotated[str, typer.Option(help="Saga namespace.")] = "default",
+    force: Annotated[
+        bool,
+        typer.Option(help="Accepted for recovery idempotency parity; unused for this lever."),
+    ] = False,
+    recovery_token: Annotated[
+        str | None,
+        typer.Option(help="Optional idempotency token for this recovery request."),
+    ] = None,
+    reason: Annotated[
+        str | None,
+        typer.Option(help="Optional operator note for audit hooks."),
+    ] = None,
+) -> None:
+    """Start compensation from AWAITING_RECOVERY via POST .../start-compensation."""
+    path = f"/v1/sagas/{trace_id}/steps/{step_span_id}/start-compensation"
+    body: dict[str, Any] = {"force": force}
+    if recovery_token is not None:
+        body["recovery_token"] = recovery_token
+    if reason is not None:
+        body["reason"] = reason
+    result = _post_recovery(path, namespace=namespace, body=body)
+    status = result.get("status", "")
+    say("OK", f"start-compensation {status} for step {step_span_id}")
     key = result.get("worker_command_key") or result.get("idempotency_key")
     if key:
         say("INFO", f"worker_command_key={key}")

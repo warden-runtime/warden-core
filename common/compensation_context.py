@@ -14,8 +14,13 @@ from common.utils import coerce_dict
 # JSONPath / saga context key for rollback metadata (safe defaults on dirty failures).
 COMPENSATION_METADATA_KEY = "_compensation"
 
-# Injected into MCP tool arguments so external undo APIs can dedupe redelivered commands.
+# Injected into MCP tool arguments so external APIs can dedupe redelivered side effects.
 WARDEN_TOOL_IDEMPOTENCY_KEY = "warden_idempotency_key"
+
+
+def forward_tool_idempotency_key(*, trace_id: str, span_id: str) -> str:
+    """Stable tool-layer key for a forward step instance (ledger span_id, not command key)."""
+    return f"fwd-{trace_id}-{span_id}"
 
 
 def step_output_for_saga_context(output: dict[str, Any] | None) -> dict[str, Any]:
@@ -119,16 +124,20 @@ def compensation_parameter_context(
     return ctx
 
 
-def fence_compensation_tool_arguments(
+def fence_tool_arguments(
     original_input: dict[str, Any],
     *,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Copy engine-resolved undo args and inject the rollback idempotency key."""
+    """Copy tool args and inject ``warden_idempotency_key`` when absent."""
     fenced = dict(original_input or {})
     if idempotency_key and WARDEN_TOOL_IDEMPOTENCY_KEY not in fenced:
         fenced[WARDEN_TOOL_IDEMPOTENCY_KEY] = idempotency_key
     return fenced
+
+
+# Backward-compatible alias (compensation call sites / older imports).
+fence_compensation_tool_arguments = fence_tool_arguments
 
 
 def worker_snapshot_for_compensation(worker: Any) -> dict[str, Any]:

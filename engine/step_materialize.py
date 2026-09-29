@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from common.loops import forward_idempotency_key, parse_executable_step
 from common.models import SagaInstance, SagaStepInstance, StepStatus
 from common.plugins.registry import get_registry
+from common.schemas.failure import DEFAULT_ON_FAILURE_STRATEGY
 from common.schemas.saga import (
     DEFAULT_MAX_TURNS,
     ENGINE_NATIVE_WORKER,
@@ -119,6 +120,7 @@ def _step_create_fields(
         "hitl_retry_count": 0,
         "pending_review_payload": None,
         "when_cel": step_model.when.cel if step_model.when else None,
+        "on_failure_strategy": DEFAULT_ON_FAILURE_STRATEGY,
     }
     if isinstance(step_model, (SpawnSagasStep, JoinSagasStep)):
         base.update(
@@ -150,6 +152,10 @@ def _step_create_fields(
     base["step_definition_name"] = step_model.step_definition_name
     base["step_definition_version"] = step_model.step_definition_version
     base["input_ports"] = dict(step_model.inputs or {})
+    if step_model.on_failure is not None:
+        base["on_failure_strategy"] = step_model.on_failure.strategy
+    else:
+        base["on_failure_strategy"] = DEFAULT_ON_FAILURE_STRATEGY
 
     tools_spec = step_model.tools or ToolsSpec()
     resources_spec = step_model.resources or ResourcesSpec()

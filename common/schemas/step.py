@@ -13,6 +13,7 @@ from pydantic import (
     model_validator,
 )
 
+from common.schemas.failure import DEFAULT_ON_FAILURE_STRATEGY, OnFailureSpec
 from common.schemas.saga import (
     DEFAULT_AGENT_ADAPTER,
     DEFAULT_MAX_TURNS,
@@ -74,6 +75,13 @@ class _StepBlueprintShared(BaseModel):
     hitl_max_retries: int | None = Field(default=None, ge=0)
     hitl_retry_guidance: str | None = Field(default=None, max_length=4096)
     resources: ResourcesSpec | None = None
+    on_failure: OnFailureSpec | None = Field(
+        default=None,
+        description=(
+            "Post-failure strategy. Default (omit) is auto_compensate. "
+            "await_operator holds the saga at AWAITING_RECOVERY for operator recovery."
+        ),
+    )
 
     @field_validator("name", "version", "worker", "worker_version")
     @classmethod
@@ -137,6 +145,10 @@ class _StepBlueprintShared(BaseModel):
             data["hitl_retry_guidance"] = self.hitl_retry_guidance
         if self.resources is not None:
             data["resources"] = self.resources.model_dump(by_alias=True, exclude_none=True)
+        strategy = (
+            self.on_failure.strategy if self.on_failure is not None else DEFAULT_ON_FAILURE_STRATEGY
+        )
+        data["on_failure"] = {"strategy": strategy}
         return data
 
 

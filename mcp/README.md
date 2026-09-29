@@ -110,6 +110,8 @@ For Streamable HTTP instead:
 | `warden_retry_hitl_step` | `POST .../retry` |
 | `warden_retry_stuck_step` | `POST .../retry-step` |
 | `warden_retry_compensation` | `POST .../retry-compensation` |
+| `warden_retry_forward_step` | `POST .../retry-forward` |
+| `warden_start_compensation` | `POST .../start-compensation` |
 
 **Catalog vs runtime:** `*_step_definitions` tools inspect reusable `kind: step` manifests. `warden_list_saga_steps` / `warden_get_step_detail` inspect instances on a running saga.
 

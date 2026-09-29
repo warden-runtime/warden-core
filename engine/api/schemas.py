@@ -64,7 +64,7 @@ class HumanRetryResponse(BaseModel):
 class RecoveryResponse(BaseModel):
     """Response for operator recovery enqueue (202 Accepted)."""
 
-    status: Literal["ok", "scheduled", "claim_active", "requeued"]
+    status: Literal["ok", "scheduled", "claim_active", "requeued", "failed"]
     idempotency_key: str | None = None
     worker_command_key: str | None = None
     recovery_token: str | None = None

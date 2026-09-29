@@ -24,6 +24,7 @@ _IN_FLIGHT_STATUSES: tuple[SagaStatus, ...] = (
     SagaStatus.PENDING,
     SagaStatus.RUNNING,
     SagaStatus.AWAITING_HUMAN,
+    SagaStatus.AWAITING_RECOVERY,
     SagaStatus.COMPENSATING,
 )
 

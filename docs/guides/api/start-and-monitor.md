@@ -87,7 +87,7 @@ Optional query parameters on the collection:
 | Parameter | Description |
 |-----------|-------------|
 | `trace_id` | Filter to one saga (prefer path GET when that is all you need) |
-| `in_flight` | `true` — non-terminal sagas (`PENDING`, `RUNNING`, `AWAITING_HUMAN`, `COMPENSATING`); do not combine with `status` filters |
+| `in_flight` | `true` — non-terminal sagas (`PENDING`, `RUNNING`, `AWAITING_HUMAN`, `AWAITING_RECOVERY`, `COMPENSATING`); do not combine with `status` filters |
 | `failed` | `true` — only `FAILED` sagas |
 | `status` | Filter by saga status (repeatable) |
 | `namespace` | Filter by namespace |
